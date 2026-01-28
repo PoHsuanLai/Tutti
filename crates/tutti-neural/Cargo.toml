@@ -1,10 +1,10 @@
 [package]
 name = "tutti-neural"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Neural audio synthesis and effects for Tutti - DDSP, vocoders, amp sims"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/PoHsuanLai/tutti"
+repository = "https://github.com/PoHsuanLai/Tutti"
 keywords = ["audio", "neural", "neural-synth", "synthesis", "machine-learning"]
 categories = ["multimedia::audio"]
 

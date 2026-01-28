@@ -1,9 +1,10 @@
 [package]
 name = "tutti-plugin"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Multi-process plugin hosting for Tutti - VST2, VST3, CLAP with crash isolation"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/Tutti"
 
 # Bridge server binary (separate process)
 [[bin]]

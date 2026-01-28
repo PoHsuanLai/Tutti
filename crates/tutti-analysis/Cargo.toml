@@ -1,9 +1,10 @@
 [package]
 name = "tutti-analysis"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Audio analysis tools: waveform thumbnails, transient detection, pitch detection, stereo correlation"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/Tutti"
 keywords = ["audio", "analysis", "waveform", "pitch", "dsp"]
 categories = ["multimedia::audio"]
 

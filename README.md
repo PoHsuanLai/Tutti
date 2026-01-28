@@ -116,7 +116,7 @@ system.graph(|net| {
 // Just MIDI
 use tutti_midi::MidiSystem;
 
-let midi = MidiSystem::builder().build()?;
+let midi = MidiSystem::new().build()?;
 ```
 
 ## License

@@ -1,10 +1,10 @@
 [package]
 name = "tutti-core"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Core audio graph runtime kernel - Net/Graph, Transport, Metering, CPAL output"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/PoHsuanLai/tutti"
+repository = "https://github.com/PoHsuanLai/Tutti"
 keywords = ["audio", "dsp", "real-time", "daw", "fundsp"]
 categories = ["multimedia::audio"]
 

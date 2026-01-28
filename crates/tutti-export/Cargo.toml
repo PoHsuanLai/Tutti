@@ -1,10 +1,10 @@
 [package]
 name = "tutti-export"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Offline audio export and rendering for Tutti audio engine"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/dawai/dawai"
+repository = "https://github.com/PoHsuanLai/Tutti"
 keywords = ["audio", "export", "render", "wav", "flac"]
 categories = ["multimedia::audio"]
 

@@ -1,10 +1,10 @@
 [package]
 name = "tutti-dsp"
-version = "0.1.0"
+version = "0.0.1"
 edition = "2021"
 description = "Real-time DSP building blocks for Tutti audio engine - LFO, envelope followers, dynamics, spatial audio"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/dawai/dawai"
+repository = "https://github.com/PoHsuanLai/Tutti"
 
 [dependencies]
 # AudioUnit trait and DSP primitives from tutti-core
