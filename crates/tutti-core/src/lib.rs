@@ -26,9 +26,9 @@ pub use fundsp::prelude::{
     lr_crossover, lr_crossover_hz, lr_highpass, lr_highpass_hz, lr_lowpass, lr_lowpass_hz,
 };
 pub use fundsp::prelude::{shared, AudioUnit, BufferMut, BufferRef, Shared};
-pub use fundsp::{Sample, F32, F64};
 pub use fundsp::sequencer::{EventId, Fade, ReplayMode, Sequencer};
 pub use fundsp::signal::SignalFrame;
+pub use fundsp::{Sample, F32, F64};
 
 // FunDSP file I/O and DSP utilities (for tutti-sampler)
 pub use fundsp::fft::{inverse_fft, real_fft};

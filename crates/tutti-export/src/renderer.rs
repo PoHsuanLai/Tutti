@@ -46,8 +46,11 @@ impl RenderResult {
 ///
 /// Takes MIDI note, velocity, and optional parameters.
 /// Returns a boxed AudioUnit that generates f32 audio.
-pub type SynthBuilderFn =
-    Box<dyn Fn(u8, u8, Option<&std::collections::HashMap<String, f32>>) -> Box<dyn AudioUnit> + Send + Sync>;
+pub type SynthBuilderFn = Box<
+    dyn Fn(u8, u8, Option<&std::collections::HashMap<String, f32>>) -> Box<dyn AudioUnit>
+        + Send
+        + Sync,
+>;
 
 /// Effect builder function type
 pub type EffectBuilderFn = Box<dyn Fn() -> Box<dyn AudioUnit> + Send + Sync>;
@@ -177,7 +180,11 @@ impl OfflineRenderer {
     }
 
     /// Render a single track
-    fn render_track(&self, track: &RenderTrack, total_samples: usize) -> Result<(Vec<f32>, Vec<f32>)> {
+    fn render_track(
+        &self,
+        track: &RenderTrack,
+        total_samples: usize,
+    ) -> Result<(Vec<f32>, Vec<f32>)> {
         let mut left = vec![0.0f32; total_samples];
         let mut right = vec![0.0f32; total_samples];
 
@@ -199,12 +206,7 @@ impl OfflineRenderer {
         Ok((left, right))
     }
 
-    fn render_note(
-        &self,
-        note: &RenderNote,
-        left: &mut [f32],
-        right: &mut [f32],
-    ) -> Result<()> {
+    fn render_note(&self, note: &RenderNote, left: &mut [f32], right: &mut [f32]) -> Result<()> {
         if note.synth_index >= self.synth_builders.len() {
             return Err(ExportError::Render(format!(
                 "Synth index {} not registered",
@@ -377,7 +379,12 @@ mod tests {
         let expected_l0 = 0.5 * std::f32::consts::FRAC_PI_4.cos();
         let expected_l1 = 0.3 * std::f32::consts::FRAC_PI_4.cos();
 
-        assert!((result.left[0] - expected_l0).abs() < 0.01, "left[0]: {} vs {}", result.left[0], expected_l0);
+        assert!(
+            (result.left[0] - expected_l0).abs() < 0.01,
+            "left[0]: {} vs {}",
+            result.left[0],
+            expected_l0
+        );
         assert!((result.right[0] - expected_l0).abs() < 0.01);
         assert!((result.left[1] - expected_l1).abs() < 0.01);
     }

@@ -6,15 +6,15 @@
 #![cfg_attr(not(feature = "midi-io"), allow(unused_imports, dead_code))]
 
 use super::async_port::InputProducerHandle;
-use crate::MidiEvent;
 use super::multi_port::MidiPortManager;
-use std::sync::atomic::{AtomicBool, Ordering};
+use crate::MidiEvent;
 use crossbeam_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "midi-io")]
 use midir::{MidiInput, MidiInputConnection};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use tracing::{debug, error, info};
+use tracing::debug;
 
 /// Information about an available MIDI input device
 #[derive(Debug, Clone)]
@@ -98,26 +98,18 @@ impl MidiInputManager {
                             is_connected.store(true, Ordering::SeqCst);
                             connected_device.store(Arc::new(Some(name.clone())));
                             connected_port.store(Arc::new(Some(port_index)));
-                            info!(
-                                "🎹 Connected to MIDI device: {} (port index {})",
-                                name, port_index
-                            );
                         }
-                        Err(e) => {
-                            error!("Failed to connect to MIDI device: {}", e);
+                        Err(_e) => {
+                            // Connection failed, state remains disconnected
                         }
                     }
                 }
                 Ok(MidiCommand::Disconnect) => {
                     if let Some(conn) = connection.take() {
-                        let name = connected_device.load().as_ref().clone();
                         drop(conn);
                         is_connected.store(false, Ordering::SeqCst);
                         connected_device.store(Arc::new(None));
                         connected_port.store(Arc::new(None));
-                        if let Some(name) = name {
-                            info!("🎹 Disconnected from MIDI device: {}", name);
-                        }
                     }
                 }
                 Ok(MidiCommand::Shutdown) => {
@@ -180,18 +172,13 @@ impl MidiInputManager {
 
     pub fn list_devices() -> Vec<MidiInputDevice> {
         let mut devices = Vec::new();
-        match MidiInput::new("dawai-device-list") {
-            Ok(midi_input) => {
-                let ports = midi_input.ports();
-                for (index, port) in ports.iter().enumerate() {
-                    let name = midi_input
-                        .port_name(port)
-                        .unwrap_or_else(|_| format!("Unknown Device {}", index));
-                    devices.push(MidiInputDevice { index, name });
-                }
-            }
-            Err(e) => {
-                error!("Failed to create MIDI input for device listing: {}", e);
+        if let Ok(midi_input) = MidiInput::new("dawai-device-list") {
+            let ports = midi_input.ports();
+            for (index, port) in ports.iter().enumerate() {
+                let name = midi_input
+                    .port_name(port)
+                    .unwrap_or_else(|_| format!("Unknown Device {}", index));
+                devices.push(MidiInputDevice { index, name });
             }
         }
         devices

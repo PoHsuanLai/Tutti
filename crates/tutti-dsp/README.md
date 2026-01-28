@@ -1,17 +1,12 @@
 # Tutti DSP
 
-Real-time DSP building blocks for the Tutti audio engine.
+DSP nodes: LFO, dynamics, envelope follower, spatial audio.
 
-## Overview
+## What this is
 
-`tutti-dsp` provides AudioUnit nodes for:
+Common DSP building blocks for audio processing. LFOs (multiple waveforms, tempo-sync), dynamics processors (compressor, limiter, gate, expander, with sidechain), envelope followers (peak/RMS), and spatial audio (VBAP panning, binaural via HRTF).
 
-- **LFO** - Low frequency oscillators with multiple waveforms
-- **Envelope Follower** - Peak and RMS envelope detection
-- **Dynamics** - Compressors and gates with sidechain support
-- **Spatial Audio** - VBAP and binaural panning for immersive audio
-
-All nodes are RT-safe and use lock-free atomics for parameter control.
+Built on [FunDSP](https://github.com/SamiPerttu/fundsp). Uses atomic types for parameter control from UI thread. HRTF data from MIT KEMAR measurements.
 
 ## Quick Start
 

@@ -1,8 +1,11 @@
 //! Envelope follower node.
 
-use tutti_core::AtomicFloat;
-use tutti_core::{AudioUnit, BufferRef, BufferMut, SignalFrame, dsp::{DEFAULT_SR, Signal}};
 use std::sync::Arc;
+use tutti_core::AtomicFloat;
+use tutti_core::{
+    dsp::{Signal, DEFAULT_SR},
+    AudioUnit, BufferMut, BufferRef, SignalFrame,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EnvelopeMode {
@@ -107,7 +110,6 @@ impl EnvelopeFollowerNode {
         self.mode = mode;
     }
 
-
     pub fn current_envelope(&self) -> f32 {
         self.envelope
     }
@@ -118,10 +120,12 @@ impl EnvelopeFollowerNode {
 
         if input_level > self.envelope {
             // Attack: envelope rises toward input
-            self.envelope = self.attack_coeff * self.envelope + (1.0 - self.attack_coeff) * input_level;
+            self.envelope =
+                self.attack_coeff * self.envelope + (1.0 - self.attack_coeff) * input_level;
         } else {
             // Release: envelope falls
-            self.envelope = self.release_coeff * self.envelope + (1.0 - self.release_coeff) * input_level;
+            self.envelope =
+                self.release_coeff * self.envelope + (1.0 - self.release_coeff) * input_level;
         }
 
         self.envelope
@@ -145,7 +149,8 @@ impl EnvelopeFollowerNode {
             if rms > self.envelope {
                 self.envelope = self.attack_coeff * self.envelope + (1.0 - self.attack_coeff) * rms;
             } else {
-                self.envelope = self.release_coeff * self.envelope + (1.0 - self.release_coeff) * rms;
+                self.envelope =
+                    self.release_coeff * self.envelope + (1.0 - self.release_coeff) * rms;
             }
         }
 
@@ -298,7 +303,11 @@ mod tests {
         }
 
         // Envelope should have fallen
-        assert!(output[0] < peak * 0.5, "Envelope should fall, got {}", output[0]);
+        assert!(
+            output[0] < peak * 0.5,
+            "Envelope should fall, got {}",
+            output[0]
+        );
     }
 
     #[test]
@@ -321,7 +330,10 @@ mod tests {
         }
 
         // Higher gain should result in higher envelope
-        assert!(output1[0] > output2[0], "Higher gain should give higher envelope");
+        assert!(
+            output1[0] > output2[0],
+            "Higher gain should give higher envelope"
+        );
     }
 
     #[test]

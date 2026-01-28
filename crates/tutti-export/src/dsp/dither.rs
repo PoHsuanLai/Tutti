@@ -60,7 +60,12 @@ impl DitherState {
 /// * `right` - Right channel (modified in place)
 /// * `target_bits` - Target bit depth (16 or 24)
 /// * `state` - Dither state (maintains continuity between calls)
-pub fn apply_dither(left: &mut [f32], right: &mut [f32], target_bits: u16, state: &mut DitherState) {
+pub fn apply_dither(
+    left: &mut [f32],
+    right: &mut [f32],
+    target_bits: u16,
+    state: &mut DitherState,
+) {
     if state.dither_type == DitherType::None {
         return;
     }
@@ -188,8 +193,8 @@ mod tests {
 
     #[test]
     fn test_quantize() {
-        let mut left = vec![0.123456789];
-        let mut right = vec![-0.987654321];
+        let mut left = vec![0.123_456_79];
+        let mut right = vec![-0.987_654_3];
 
         quantize(&mut left, &mut right, 16);
 

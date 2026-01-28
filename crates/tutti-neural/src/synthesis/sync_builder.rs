@@ -5,11 +5,11 @@
 //! and this wrapper communicates via lock-free channels.
 
 use crate::error::Result;
-use tutti_core::AudioUnit;
-use tutti_core::neural::BatchingStrategy;
 use crate::gpu::{NeuralInferenceEngine, NeuralModelId, VoiceId};
-use std::sync::Arc;
 use burn::tensor::backend::Backend;
+use std::sync::Arc;
+use tutti_core::neural::BatchingStrategy;
+use tutti_core::AudioUnit;
 
 /// Push inference response params to a voice's parameter queue
 ///
@@ -20,14 +20,8 @@ fn push_response_to_voice<B: Backend>(
     params: crate::gpu::ControlParams,
 ) {
     if let Some(sender) = engine.get_sender(track_id) {
-        if sender.try_send(params).is_err() {
-            tracing::warn!(
-                "Failed to push inference result to voice {} (queue full)",
-                track_id
-            );
-        }
-    } else {
-        tracing::warn!("No param sender for voice {}", track_id);
+        // Drop params if queue is full (non-blocking)
+        let _ = sender.try_send(params);
     }
 }
 
@@ -121,8 +115,6 @@ impl SyncNeuralSynthBuilder {
         std::thread::spawn(move || {
             use super::neural_synth_builder::NeuralSynthBuilder;
 
-            tracing::info!("Neural synth inference thread starting for model: {}", model_path);
-
             // Create engine ON this thread
             let engine = match engine_factory() {
                 Ok(e) => e,
@@ -136,15 +128,19 @@ impl SyncNeuralSynthBuilder {
             let engine_for_loop = Arc::clone(&engine);
 
             // Create builder ON this thread (Burn models can't be moved between threads)
-            let builder = match NeuralSynthBuilder::new(engine, &model_path, sample_rate, buffer_size, midi_tx_for_thread.clone()) {
+            let builder = match NeuralSynthBuilder::new(
+                engine,
+                &model_path,
+                sample_rate,
+                buffer_size,
+                midi_tx_for_thread.clone(),
+            ) {
                 Ok(b) => {
                     let model_name = b.name().to_string();
                     let model_id = b.model_id();
 
                     // Send initialization success
                     let _ = init_tx.send(Ok((model_name.clone(), model_id)));
-
-                    tracing::info!("Neural synth builder initialized: {}", model_name);
                     b
                 }
                 Err(e) => {
@@ -165,17 +161,13 @@ impl SyncNeuralSynthBuilder {
                     strategy_rx_for_thread.unwrap(),
                 );
             } else {
-                Self::inference_loop_timing_based(
-                    engine_for_loop,
-                    builder,
-                    build_rx,
-                    midi_rx,
-                );
+                Self::inference_loop_timing_based(engine_for_loop, builder, build_rx, midi_rx);
             }
         });
 
         // Wait for initialization to complete
-        let (model_name, model_id) = init_rx.recv()
+        let (model_name, model_id) = init_rx
+            .recv()
             .map_err(|_| crate::error::Error::InferenceThreadInit)??;
 
         Ok(Self {
@@ -208,9 +200,8 @@ impl SyncNeuralSynthBuilder {
         loop {
             // 1. Check for build requests (non-blocking)
             if let Ok(request) = build_rx.try_recv() {
-                match builder.build_synth() {
-                    Ok(unit) => { let _ = request.response_tx.send(unit); }
-                    Err(e) => { tracing::error!("Failed to build neural synth voice: {:?}", e); }
+                if let Ok(unit) = builder.build_synth() {
+                    let _ = request.response_tx.send(unit);
                 }
             }
 
@@ -257,9 +248,8 @@ impl SyncNeuralSynthBuilder {
         loop {
             // 1. Check for build requests (non-blocking)
             if let Ok(request) = build_rx.try_recv() {
-                match builder.build_synth() {
-                    Ok(unit) => { let _ = request.response_tx.send(unit); }
-                    Err(e) => { tracing::error!("Failed to build neural synth voice: {:?}", e); }
+                if let Ok(unit) = builder.build_synth() {
+                    let _ = request.response_tx.send(unit);
                 }
             }
 
@@ -270,12 +260,6 @@ impl SyncNeuralSynthBuilder {
                 latest_strategy = Some(strategy);
             }
             if let Some(strategy) = latest_strategy {
-                tracing::info!(
-                    "Batching strategy updated: {} models, {} neural nodes, efficiency {:.1}x",
-                    strategy.model_count(),
-                    strategy.total_neural_nodes,
-                    strategy.batch_efficiency(),
-                );
                 batcher.set_strategy(strategy);
             }
 
@@ -286,24 +270,12 @@ impl SyncNeuralSynthBuilder {
 
             // 4. Process all pending batches
             if batcher.has_pending() {
-                let pending = batcher.pending_count();
-                match batcher.process_batches() {
-                    Ok(responses) => {
-                        for response in responses {
-                            push_response_to_voice(
-                                &engine,
-                                response.track_id,
-                                response.params,
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "Graph-aware batched inference failed ({} pending): {:?}",
-                            pending, e,
-                        );
+                if let Ok(responses) = batcher.process_batches() {
+                    for response in responses {
+                        push_response_to_voice(&engine, response.track_id, response.params);
                     }
                 }
+            }
             }
 
             // 5. Periodic stats logging (every 10 seconds)
@@ -338,21 +310,14 @@ impl SyncNeuralSynthBuilder {
         if batch_size == 1 {
             let request = batch.into_iter().next().unwrap();
             let track_id = request.track_id;
-            match engine.infer(request) {
-                Ok(response) => {
-                    push_response_to_voice(engine, track_id, response.params);
-                }
-                Err(e) => { tracing::error!("Inference failed: {:?}", e); }
+            if let Ok(response) = engine.infer(request) {
+                push_response_to_voice(engine, track_id, response.params);
             }
         } else {
-            match engine.infer_batch(batch) {
-                Ok(responses) => {
-                    for response in responses {
-                        push_response_to_voice(engine, response.track_id, response.params);
-                    }
-                    tracing::debug!("Batched inference: {} voices processed together", batch_size);
+            if let Ok(responses) = engine.infer_batch(batch) {
+                for response in responses {
+                    push_response_to_voice(engine, response.track_id, response.params);
                 }
-                Err(e) => { tracing::error!("Batched inference failed: {:?}", e); }
             }
         }
     }
@@ -374,11 +339,13 @@ impl SyncNeuralSynthBuilder {
 
         // Send build request
         let request = BuildRequest { response_tx };
-        self.build_tx.send(request)
+        self.build_tx
+            .send(request)
             .map_err(|_| crate::error::Error::InferenceThreadSend)?;
 
         // Wait for response
-        response_rx.recv()
+        response_rx
+            .recv()
             .map_err(|_| crate::error::Error::InferenceThreadRecv)
     }
 
@@ -410,8 +377,9 @@ unsafe impl Sync for SyncNeuralSynthBuilder {}
 // Implement NeuralSynthBuilder for the sync wrapper
 impl tutti_core::neural::NeuralSynthBuilder for SyncNeuralSynthBuilder {
     fn build_voice(&self) -> tutti_core::Result<Box<dyn AudioUnit>> {
-        self.build_voice_sync()
-            .map_err(|e| tutti_core::Error::InvalidConfig(format!("Failed to build neural synth voice: {}", e)))
+        self.build_voice_sync().map_err(|e| {
+            tutti_core::Error::InvalidConfig(format!("Failed to build neural synth voice: {}", e))
+        })
     }
 
     fn name(&self) -> &str {

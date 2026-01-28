@@ -1,14 +1,14 @@
 //! Neural audio system with synthesis and effects.
 
 use crate::backend::BackendPool;
+use crate::effects::SyncEffectBuilder;
 use crate::error::{Error, Result};
 use crate::gpu::{InferenceConfig, ModelType, NeuralModelId, VoiceId};
 use crate::synthesis::SyncNeuralSynthBuilder;
-use crate::effects::SyncEffectBuilder;
 use burn::backend::NdArray;
 use std::sync::Arc;
-use tutti_core::AudioUnit;
 use tutti_core::neural::{BatchingStrategy, NeuralNodeManager};
+use tutti_core::AudioUnit;
 
 /// GPU device information.
 #[derive(Debug, Clone)]
@@ -95,9 +95,8 @@ impl NeuralSystem {
             move || {
                 let pool = BackendPool::new()?;
                 let device = pool.cpu_device().clone();
-                let engine = crate::gpu::NeuralInferenceEngine::<NdArray>::new(
-                    device, inference_config,
-                )?;
+                let engine =
+                    crate::gpu::NeuralInferenceEngine::<NdArray>::new(device, inference_config)?;
                 Ok(Arc::new(engine))
             },
             path,
@@ -112,7 +111,9 @@ impl NeuralSystem {
             model_type: ModelType::NeuralSynth,
         };
 
-        self.inner.synth_builders.insert(model.id, Arc::new(builder));
+        self.inner
+            .synth_builders
+            .insert(model.id, Arc::new(builder));
 
         Ok(model)
     }
@@ -127,9 +128,8 @@ impl NeuralSystem {
             move || {
                 let pool = BackendPool::new()?;
                 let device = pool.cpu_device().clone();
-                let engine = crate::gpu::NeuralInferenceEngine::<NdArray>::new(
-                    device, inference_config,
-                )?;
+                let engine =
+                    crate::gpu::NeuralInferenceEngine::<NdArray>::new(device, inference_config)?;
                 Ok(Arc::new(engine))
             },
             path,
@@ -143,7 +143,9 @@ impl NeuralSystem {
             model_type: ModelType::Effect,
         };
 
-        self.inner.effect_builders.insert(model.id, Arc::new(builder));
+        self.inner
+            .effect_builders
+            .insert(model.id, Arc::new(builder));
 
         Ok(model)
     }
@@ -298,10 +300,9 @@ impl SynthHandle {
     /// Returns a `Box<dyn AudioUnit>` that can be added to the audio graph.
     /// Each call creates a new independent voice instance.
     pub fn build_voice(&self, model: &NeuralModel) -> Result<Box<dyn AudioUnit>> {
-        let builder = self.inner.synth_builders.get(&model.id)
-            .ok_or_else(|| Error::ModelNotFound(
-                format!("Synth model '{}' not loaded", model.name)
-            ))?;
+        let builder = self.inner.synth_builders.get(&model.id).ok_or_else(|| {
+            Error::ModelNotFound(format!("Synth model '{}' not loaded", model.name))
+        })?;
         builder.build_voice_sync()
     }
 
@@ -313,7 +314,12 @@ impl SynthHandle {
     /// Non-blocking — drops the request if the queue is full.
     ///
     /// Returns `true` if queued successfully.
-    pub fn send_features(&self, model: &NeuralModel, voice_id: VoiceId, features: Vec<f32>) -> bool {
+    pub fn send_features(
+        &self,
+        model: &NeuralModel,
+        voice_id: VoiceId,
+        features: Vec<f32>,
+    ) -> bool {
         if let Some(builder) = self.inner.synth_builders.get(&model.id) {
             builder.send_features_rt(voice_id, features)
         } else {
@@ -336,16 +342,18 @@ impl EffectHandle {
     /// Returns a `Box<dyn AudioUnit>` that can be added to the audio graph.
     /// Each call creates a new independent effect instance.
     pub fn build_effect(&self, model: &NeuralModel) -> Result<Box<dyn AudioUnit>> {
-        let builder = self.inner.effect_builders.get(&model.id)
-            .ok_or_else(|| Error::ModelNotFound(
-                format!("Effect model '{}' not loaded", model.name)
-            ))?;
+        let builder = self.inner.effect_builders.get(&model.id).ok_or_else(|| {
+            Error::ModelNotFound(format!("Effect model '{}' not loaded", model.name))
+        })?;
         builder.build_effect_sync()
     }
 
     /// Get the processing latency in samples for a loaded model.
     pub fn latency(&self, model: &NeuralModel) -> Option<usize> {
-        self.inner.effect_builders.get(&model.id).map(|b| b.latency())
+        self.inner
+            .effect_builders
+            .get(&model.id)
+            .map(|b| b.latency())
     }
 }
 
@@ -365,9 +373,7 @@ mod tests {
 
     #[test]
     fn test_builder_defaults() {
-        let neural = NeuralSystem::new()
-            .build()
-            .unwrap();
+        let neural = NeuralSystem::new().build().unwrap();
 
         assert_eq!(neural.sample_rate(), 44100.0);
         assert_eq!(neural.buffer_size(), 512);

@@ -225,7 +225,6 @@ mod tests {
         assert!(batcher.strategy().is_none());
     }
 
-
     #[test]
     fn test_stats() {
         let stats = BatcherStats {

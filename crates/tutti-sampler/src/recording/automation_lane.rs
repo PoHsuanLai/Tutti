@@ -477,9 +477,11 @@ mod tests {
     fn test_minimum_interval() {
         let mut lane = AutomationLane::new(AutomationTarget::MasterVolume);
 
-        let mut config = AutomationRecordingConfig::default();
-        config.min_point_interval = 0.5; // Large interval for testing
-        config.auto_simplify = false;
+        let config = AutomationRecordingConfig {
+            min_point_interval: 0.5, // Large interval for testing
+            auto_simplify: false,
+            ..Default::default()
+        };
         lane.set_config(config);
 
         lane.set_state(AutomationState::Write);

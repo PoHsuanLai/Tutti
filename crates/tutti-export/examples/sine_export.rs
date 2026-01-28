@@ -1,7 +1,9 @@
 //! Export a simple sine wave to WAV
 
 use fundsp::prelude::*;
-use tutti_export::{export_wav, ExportOptions, OfflineRenderer, RenderJob, RenderNote, RenderTrack};
+use tutti_export::{
+    export_wav, ExportOptions, OfflineRenderer, RenderJob, RenderNote, RenderTrack,
+};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sample_rate = 44100;
@@ -14,17 +16,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }));
 
     // Create a 1-second render job
-    let job = RenderJob::new(sample_rate, sample_rate as usize)
-        .with_track(
-            RenderTrack::new(0).with_note(RenderNote {
-                synth_index: synth_idx,
-                midi_note: 60, // C4
-                velocity: 100,
-                start_sample: 0,
-                duration_samples: sample_rate as usize,
-                params: None,
-            }),
-        );
+    let job = RenderJob::new(sample_rate, sample_rate as usize).with_track(
+        RenderTrack::new(0).with_note(RenderNote {
+            synth_index: synth_idx,
+            midi_note: 60, // C4
+            velocity: 100,
+            start_sample: 0,
+            duration_samples: sample_rate as usize,
+            params: None,
+        }),
+    );
 
     // Render
     let result = renderer.render(job, None)?;

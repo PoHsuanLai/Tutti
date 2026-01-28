@@ -16,7 +16,10 @@ pub struct AudioIO {
 impl AudioIO {
     /// Stereo in, stereo out
     pub fn stereo() -> Self {
-        Self { inputs: 2, outputs: 2 }
+        Self {
+            inputs: 2,
+            outputs: 2,
+        }
     }
 }
 
@@ -123,8 +126,7 @@ mod tests {
 
     #[test]
     fn test_metadata_f64_support() {
-        let meta = PluginMetadata::new("test.plugin", "Test Plugin")
-            .f64_support(true);
+        let meta = PluginMetadata::new("test.plugin", "Test Plugin").f64_support(true);
         assert!(meta.supports_f64);
 
         let meta_no_f64 = PluginMetadata::new("test.plugin2", "Test Plugin 2");

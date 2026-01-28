@@ -50,19 +50,21 @@
 //! let analysis = meter.process(left, right);
 //! ```
 
-pub mod waveform;
-pub mod transient;
-pub mod pitch;
 pub mod correlation;
+pub mod pitch;
+pub mod transient;
+pub mod waveform;
 
 #[cfg(feature = "cache")]
 pub mod cache;
 
 // Re-export main types at crate root for convenience
-pub use waveform::{WaveformBlock, WaveformSummary, StereoWaveformSummary, MultiResolutionSummary};
-pub use transient::{Transient, TransientDetector, DetectionMethod};
-pub use pitch::{PitchResult, PitchDetector, freq_to_midi, midi_to_freq, median_filter, viterbi_smooth};
-pub use correlation::{StereoAnalysis, CorrelationMeter};
+pub use correlation::{CorrelationMeter, StereoAnalysis};
+pub use pitch::{
+    freq_to_midi, median_filter, midi_to_freq, viterbi_smooth, PitchDetector, PitchResult,
+};
+pub use transient::{DetectionMethod, Transient, TransientDetector};
+pub use waveform::{MultiResolutionSummary, StereoWaveformSummary, WaveformBlock, WaveformSummary};
 
 #[cfg(feature = "cache")]
 pub use cache::ThumbnailCache;

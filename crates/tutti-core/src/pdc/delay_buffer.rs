@@ -246,8 +246,8 @@ mod tests {
         buffer_batch.process_batch(&left_in, &right_in, &mut left_batch, &mut right_batch);
 
         // Process with scalar method
-        let mut left_scalar = vec![0.0; 8];
-        let mut right_scalar = vec![0.0; 8];
+        let mut left_scalar = [0.0; 8];
+        let mut right_scalar = [0.0; 8];
         for i in 0..8 {
             let (l, r) = buffer_scalar.process(left_in[i], right_in[i]);
             left_scalar[i] = l;

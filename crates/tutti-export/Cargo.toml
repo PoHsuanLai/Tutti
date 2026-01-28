@@ -30,6 +30,9 @@ fundsp = { git = "https://github.com/PoHsuanLai/fundsp.git", default-features = 
 # Resampling (always included - pure Rust with SIMD)
 rubato = "0.16"
 
+# Loudness metering (EBU R128)
+ebur128 = "0.1"
+
 # WAV encoding (pure Rust)
 hound = { version = "3.5", optional = true }
 

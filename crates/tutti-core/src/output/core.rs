@@ -3,7 +3,6 @@
 use crate::callback::AudioCallbackState;
 use crate::{Error, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use tracing::error;
 
 #[derive(Clone, Default)]
 pub struct AudioEngineConfig {
@@ -91,38 +90,39 @@ impl AudioEngine {
     {
         let channels = config.channels as usize;
 
-        let stream = device
-            .build_output_stream(
-                config,
-                move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        let frames = data.len() / channels;
-                        let mut output_f32 = vec![0.0f32; frames * 2];
+        let stream = device.build_output_stream(
+            config,
+            move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    let frames = data.len() / channels;
+                    let mut output_f32 = vec![0.0f32; frames * 2];
 
-                        crate::callback::process_audio(&state, &mut output_f32);
+                    crate::callback::process_audio(&state, &mut output_f32);
 
-                        for (i, sample) in data.iter_mut().enumerate() {
-                            let channel = i % channels;
-                            let frame = i / channels;
-                            let value = if channel < 2 {
-                                output_f32.get(frame * 2 + channel).copied().unwrap_or(0.0)
-                            } else {
-                                0.0
-                            };
-                            *sample = T::from_sample(value);
-                        }
-                    }));
-
-                    if let Err(panic_info) = result {
-                        for sample in data.iter_mut() {
-                            *sample = T::from_sample(0.0);
-                        }
-                        error!("Audio callback panicked: {:?}", panic_info);
+                    for (i, sample) in data.iter_mut().enumerate() {
+                        let channel = i % channels;
+                        let frame = i / channels;
+                        let value = if channel < 2 {
+                            output_f32.get(frame * 2 + channel).copied().unwrap_or(0.0)
+                        } else {
+                            0.0
+                        };
+                        *sample = T::from_sample(value);
                     }
-                },
-                |err| error!("Audio stream error: {}", err),
-                None,
-            )?;
+                }));
+
+                if result.is_err() {
+                    // Panic in callback - output silence
+                    for sample in data.iter_mut() {
+                        *sample = T::from_sample(0.0);
+                    }
+                }
+            },
+            |_err| {
+                // Audio stream error - cannot log from callback
+            },
+            None,
+        )?;
 
         Ok(stream)
     }
@@ -149,9 +149,7 @@ impl AudioEngine {
         let devices: Result<Vec<String>> = host
             .output_devices()?
             .enumerate()
-            .map(|(idx, device)| {
-                Ok(format!("{}: {}", idx, device.name()?))
-            })
+            .map(|(idx, device)| Ok(format!("{}: {}", idx, device.name()?)))
             .collect();
         devices
     }

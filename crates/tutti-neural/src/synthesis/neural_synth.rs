@@ -1,6 +1,8 @@
 //! Neural synthesizer with lock-free parameter passing.
 
-use crate::gpu::{NeuralModelId, NeuralParamQueue, ControlParams, VoiceId, InferenceRequest, MidiState};
+use crate::gpu::{
+    ControlParams, InferenceRequest, MidiState, NeuralModelId, NeuralParamQueue, VoiceId,
+};
 use std::sync::Arc;
 
 /// Neural synthesizer.
@@ -56,7 +58,6 @@ impl NeuralSynth {
             );
         }
     }
-
 }
 
 unsafe impl Sync for NeuralSynth {}
@@ -75,12 +76,8 @@ impl tutti_core::MidiAudioUnit for NeuralSynth {
                     buffer_size: self.buffer_size,
                 };
 
-                if self.midi_tx.try_send(request).is_err() {
-                    tracing::warn!(
-                        "Voice {}: MIDI queue full, dropping event",
-                        self.track_id
-                    );
-                }
+                // Drop MIDI event if queue is full (non-blocking)
+                let _ = self.midi_tx.try_send(request);
             }
         }
     }

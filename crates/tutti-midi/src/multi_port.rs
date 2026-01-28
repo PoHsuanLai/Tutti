@@ -4,9 +4,9 @@
 //! Index-based for RT-safe direct Vec access, with arc-swap for lock-free updates.
 
 use super::async_port::{AsyncMidiPort, MidiEvent};
-use std::sync::atomic::{AtomicBool, Ordering};
 use arc_swap::ArcSwap;
 use parking_lot::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

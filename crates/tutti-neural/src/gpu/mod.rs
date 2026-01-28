@@ -17,18 +17,20 @@
 //! net.push(Box::new(node));
 //! ```
 
-mod engine;
 pub mod batch;
-mod queue;
+mod engine;
 mod fusion;
-mod midi_state;
-mod tutti_adapter;
 mod graph_batcher;
+mod midi_state;
+mod queue;
+mod tutti_adapter;
 
-pub use engine::{NeuralInferenceEngine, NeuralModelId, InferenceConfig, InferenceRequest, ModelType, VoiceId};
-pub use queue::{NeuralParamQueue, ControlParams};
+pub use engine::{
+    InferenceConfig, InferenceRequest, ModelType, NeuralInferenceEngine, NeuralModelId, VoiceId,
+};
+pub(crate) use graph_batcher::GraphAwareBatcher;
 pub use midi_state::MidiState;
 #[cfg(test)]
 pub(crate) use midi_state::MIDI_FEATURE_COUNT;
+pub use queue::{ControlParams, NeuralParamQueue};
 pub(crate) use tutti_adapter::NeuralEffectNode;
-pub(crate) use graph_batcher::GraphAwareBatcher;

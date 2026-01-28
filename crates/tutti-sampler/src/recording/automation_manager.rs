@@ -1,6 +1,6 @@
 //! Automation manager for parameter automation lanes.
 
-use super::{AutomationLane, AutomationTarget, AutomationRecordingConfig};
+use super::{AutomationLane, AutomationRecordingConfig, AutomationTarget};
 use audio_automation::{AutomationEnvelope, AutomationPoint, AutomationState};
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -58,7 +58,10 @@ impl AutomationManager {
     /// Get or create a lane for the given target
     ///
     /// If the lane doesn't exist, creates a new one with default settings.
-    pub fn get_or_create_lane(&self, target: AutomationTarget) -> dashmap::mapref::one::RefMut<'_, AutomationTarget, AutomationLane> {
+    pub fn get_or_create_lane(
+        &self,
+        target: AutomationTarget,
+    ) -> dashmap::mapref::one::RefMut<'_, AutomationTarget, AutomationLane> {
         self.lanes.entry(target.clone()).or_insert_with(|| {
             let mut lane = AutomationLane::new(target);
             lane.set_config(self.default_config);
@@ -67,17 +70,27 @@ impl AutomationManager {
     }
 
     /// Get an existing lane (returns None if not found)
-    pub fn get_lane(&self, target: &AutomationTarget) -> Option<dashmap::mapref::one::Ref<'_, AutomationTarget, AutomationLane>> {
+    pub fn get_lane(
+        &self,
+        target: &AutomationTarget,
+    ) -> Option<dashmap::mapref::one::Ref<'_, AutomationTarget, AutomationLane>> {
         self.lanes.get(target)
     }
 
     /// Get a mutable reference to an existing lane
-    pub fn get_lane_mut(&self, target: &AutomationTarget) -> Option<dashmap::mapref::one::RefMut<'_, AutomationTarget, AutomationLane>> {
+    pub fn get_lane_mut(
+        &self,
+        target: &AutomationTarget,
+    ) -> Option<dashmap::mapref::one::RefMut<'_, AutomationTarget, AutomationLane>> {
         self.lanes.get_mut(target)
     }
 
     /// Create a new lane with custom configuration
-    pub fn create_lane(&self, target: AutomationTarget, config: AutomationRecordingConfig) -> dashmap::mapref::one::RefMut<'_, AutomationTarget, AutomationLane> {
+    pub fn create_lane(
+        &self,
+        target: AutomationTarget,
+        config: AutomationRecordingConfig,
+    ) -> dashmap::mapref::one::RefMut<'_, AutomationTarget, AutomationLane> {
         self.lanes.entry(target.clone()).or_insert_with(|| {
             let mut lane = AutomationLane::new(target);
             lane.set_config(config);
@@ -93,7 +106,10 @@ impl AutomationManager {
     }
 
     /// Remove a lane
-    pub fn remove_lane(&self, target: &AutomationTarget) -> Option<(AutomationTarget, AutomationLane)> {
+    pub fn remove_lane(
+        &self,
+        target: &AutomationTarget,
+    ) -> Option<(AutomationTarget, AutomationLane)> {
         self.lanes.remove(target)
     }
 
@@ -142,9 +158,7 @@ impl AutomationManager {
 
         targets
             .iter()
-            .map(|target| {
-                self.lanes.get(target).map(|lane| lane.get_value_at(beat))
-            })
+            .map(|target| self.lanes.get(target).map(|lane| lane.get_value_at(beat)))
             .collect()
     }
 
@@ -228,7 +242,9 @@ impl AutomationManager {
 
     /// Remove a point from a specific lane
     pub fn remove_point_at(&self, target: &AutomationTarget, beat: f64) -> Option<AutomationPoint> {
-        self.lanes.get(target).and_then(|lane| lane.remove_point_at(beat))
+        self.lanes
+            .get(target)
+            .and_then(|lane| lane.remove_point_at(beat))
     }
 
     /// Clear all points from a specific lane
@@ -298,7 +314,8 @@ impl AutomationManager {
 
     /// Create a snapshot of all lanes (for undo/redo)
     pub fn snapshot(&self) -> AutomationSnapshot {
-        let lanes: Vec<_> = self.lanes
+        let lanes: Vec<_> = self
+            .lanes
             .iter()
             .map(|r| (r.key().clone(), r.value().clone()))
             .collect();
@@ -329,7 +346,9 @@ impl Clone for AutomationManager {
     fn clone(&self) -> Self {
         let new_manager = Self::new();
         for lane_ref in self.lanes.iter() {
-            new_manager.lanes.insert(lane_ref.key().clone(), lane_ref.value().clone());
+            new_manager
+                .lanes
+                .insert(lane_ref.key().clone(), lane_ref.value().clone());
         }
         new_manager.set_enabled(self.is_enabled());
         new_manager
@@ -527,6 +546,6 @@ mod tests {
 
         // Should have recorded points without panicking
         let lane = manager.get_lane(&target).unwrap();
-        assert!(lane.len() > 0);
+        assert!(!lane.is_empty());
     }
 }

@@ -27,10 +27,12 @@
 //! Then difference function: d(τ) = r(0) + r'(0) - 2*r(τ)
 //! Requires careful normalization to avoid octave errors.
 
-
 /// Result of pitch detection for a single frame
 #[derive(Debug, Clone, Copy, Default)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct PitchResult {
     /// Detected frequency in Hz (0.0 if unvoiced/uncertain)
     pub frequency: f32,
@@ -51,7 +53,9 @@ impl PitchResult {
     /// Get note name with sharp notation (e.g., "A4", "C#5")
     pub fn note_name(&self) -> Option<String> {
         self.midi_note.map(|note| {
-            const NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const NAMES: [&str; 12] = [
+                "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+            ];
             let name = NAMES[(note % 12) as usize];
             let octave = (note / 12) as i32 - 1;
             format!("{}{}", name, octave)
@@ -61,7 +65,9 @@ impl PitchResult {
     /// Get note name with flat notation (e.g., "A4", "Db5")
     pub fn note_name_flat(&self) -> Option<String> {
         self.midi_note.map(|note| {
-            const NAMES: [&str; 12] = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"];
+            const NAMES: [&str; 12] = [
+                "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B",
+            ];
             let name = NAMES[(note % 12) as usize];
             let octave = (note / 12) as i32 - 1;
             format!("{}{}", name, octave)
@@ -138,7 +144,9 @@ impl PitchDetector {
     pub fn detect(&mut self, samples: &[f32]) -> PitchResult {
         let min_period = (self.sample_rate / self.max_freq as f64) as usize;
         let max_period = (self.sample_rate / self.min_freq as f64) as usize;
-        let max_period = max_period.min(samples.len() / 2).min(self.difference.len() - 1);
+        let max_period = max_period
+            .min(samples.len() / 2)
+            .min(self.difference.len() - 1);
 
         if samples.len() < max_period * 2 || max_period <= min_period {
             return PitchResult::default();
@@ -283,8 +291,9 @@ impl PitchDetector {
             if self.cumulative_mean[tau] < self.threshold {
                 // Found a candidate below threshold
                 // Walk to the local minimum
-                while tau + 1 < max_period &&
-                      self.cumulative_mean[tau + 1] < self.cumulative_mean[tau] {
+                while tau + 1 < max_period
+                    && self.cumulative_mean[tau + 1] < self.cumulative_mean[tau]
+                {
                     tau += 1;
                 }
                 // Return the FIRST good candidate (prevents octave errors)
@@ -419,7 +428,7 @@ pub fn viterbi_smooth(pitches: &[PitchResult], jump_penalty: f32) -> Vec<PitchRe
             let ratio = result[i].frequency / result[i - 1].frequency;
 
             // If jump is more than a major third (ratio > 1.26 or < 0.79), reduce confidence
-            if ratio > 1.26 || ratio < 0.79 {
+            if !(0.79..=1.26).contains(&ratio) {
                 let jump_cost = ((ratio.ln().abs() / 0.23) - 1.0).max(0.0); // 0.23 ≈ ln(1.26)
                 result[i].confidence *= (-jump_penalty * jump_cost).exp();
             }
@@ -452,11 +461,17 @@ mod tests {
         let result = detector.detect(&samples);
 
         assert!(result.is_voiced(), "Should detect voiced signal");
-        assert!((result.frequency - 440.0).abs() < 5.0,
-            "Expected ~440 Hz, got {} Hz", result.frequency);
+        assert!(
+            (result.frequency - 440.0).abs() < 5.0,
+            "Expected ~440 Hz, got {} Hz",
+            result.frequency
+        );
         assert_eq!(result.midi_note, Some(69), "A4 should be MIDI note 69");
-        assert!(result.cents_offset.abs() < 10.0,
-            "Cents offset should be small, got {}", result.cents_offset);
+        assert!(
+            result.cents_offset.abs() < 10.0,
+            "Cents offset should be small, got {}",
+            result.cents_offset
+        );
     }
 
     #[test]
@@ -472,9 +487,13 @@ mod tests {
 
             assert!(result.is_voiced(), "Should detect {}Hz", freq);
             let error_percent = ((result.frequency - freq) / freq).abs() * 100.0;
-            assert!(error_percent < 2.0,
+            assert!(
+                error_percent < 2.0,
                 "Expected {}Hz, got {}Hz ({}% error)",
-                freq, result.frequency, error_percent);
+                freq,
+                result.frequency,
+                error_percent
+            );
         }
     }
 
@@ -502,7 +521,10 @@ mod tests {
 
         // Most frames should detect ~440 Hz
         let voiced_count = track.iter().filter(|r| r.is_voiced()).count();
-        assert!(voiced_count > track.len() / 2, "Most frames should be voiced");
+        assert!(
+            voiced_count > track.len() / 2,
+            "Most frames should be voiced"
+        );
     }
 
     #[test]
@@ -538,10 +560,30 @@ mod tests {
     #[test]
     fn test_median_filter() {
         let pitches = vec![
-            PitchResult { frequency: 440.0, confidence: 1.0, midi_note: Some(69), cents_offset: 0.0 },
-            PitchResult { frequency: 880.0, confidence: 1.0, midi_note: Some(81), cents_offset: 0.0 }, // Octave jump (outlier)
-            PitchResult { frequency: 442.0, confidence: 1.0, midi_note: Some(69), cents_offset: 0.0 },
-            PitchResult { frequency: 438.0, confidence: 1.0, midi_note: Some(69), cents_offset: 0.0 },
+            PitchResult {
+                frequency: 440.0,
+                confidence: 1.0,
+                midi_note: Some(69),
+                cents_offset: 0.0,
+            },
+            PitchResult {
+                frequency: 880.0,
+                confidence: 1.0,
+                midi_note: Some(81),
+                cents_offset: 0.0,
+            }, // Octave jump (outlier)
+            PitchResult {
+                frequency: 442.0,
+                confidence: 1.0,
+                midi_note: Some(69),
+                cents_offset: 0.0,
+            },
+            PitchResult {
+                frequency: 438.0,
+                confidence: 1.0,
+                midi_note: Some(69),
+                cents_offset: 0.0,
+            },
         ];
 
         let filtered = median_filter(&pitches, 3);
@@ -581,9 +623,12 @@ mod tests {
 
         assert!(result.is_voiced(), "Should detect low E2");
         let error_percent = ((result.frequency - 82.41) / 82.41).abs() * 100.0;
-        assert!(error_percent < 3.0,
+        assert!(
+            error_percent < 3.0,
             "Expected ~82.41 Hz, got {} Hz ({}% error)",
-            result.frequency, error_percent);
+            result.frequency,
+            error_percent
+        );
     }
 
     #[test]
@@ -596,8 +641,11 @@ mod tests {
 
         assert!(result.is_voiced(), "Should detect high A6");
         let error_percent = ((result.frequency - 1760.0) / 1760.0).abs() * 100.0;
-        assert!(error_percent < 2.0,
+        assert!(
+            error_percent < 2.0,
             "Expected ~1760 Hz, got {} Hz ({}% error)",
-            result.frequency, error_percent);
+            result.frequency,
+            error_percent
+        );
     }
 }

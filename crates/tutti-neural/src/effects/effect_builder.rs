@@ -4,9 +4,9 @@
 //! External code should use `SyncEffectBuilder` which handles threading safely.
 
 use crate::error::{Error, Result};
-use crate::gpu::{NeuralInferenceEngine, NeuralModelId, ModelType, NeuralEffectNode};
-use std::sync::Arc;
+use crate::gpu::{ModelType, NeuralEffectNode, NeuralInferenceEngine, NeuralModelId};
 use burn::tensor::backend::Backend;
+use std::sync::Arc;
 
 /// Builder for creating neural effect instances (internal use only)
 ///
@@ -50,13 +50,9 @@ impl<B: Backend> EffectBuilder<B> {
     {
         let model_path = model_path.into();
 
-        tracing::info!("Loading neural effect model: {}", model_path);
-
         let model_id = engine
             .load_model(&model_path, ModelType::Effect)
             .map_err(|e| Error::ModelLoad(format!("Failed to load effect model: {}", e)))?;
-
-        tracing::info!("Neural effect model loaded: ID {}", model_id.as_u64());
 
         let model_name = std::path::Path::new(&model_path)
             .file_stem()
@@ -83,7 +79,6 @@ impl<B: Backend> EffectBuilder<B> {
     pub fn name(&self) -> &str {
         &self.model_name
     }
-
 }
 
 impl<B: Backend + 'static> EffectBuilder<B> {
@@ -92,17 +87,8 @@ impl<B: Backend + 'static> EffectBuilder<B> {
     /// Returns a `NeuralEffectNode` wrapped as `AudioUnit`. Each call creates
     /// a fresh pair of audio channels for the instance.
     pub fn build_effect(&self) -> Result<Box<dyn tutti_core::AudioUnit>> {
-        tracing::info!(
-            "Building neural effect instance (model ID: {}, buffer: {})",
-            self.model_id.as_u64(),
-            self.buffer_size,
-        );
-
-        let node = NeuralEffectNode::new(
-            self.model_id,
-            self.buffer_size,
-        )
-        .with_sample_rate(self.sample_rate);
+        let node = NeuralEffectNode::new(self.model_id, self.buffer_size)
+            .with_sample_rate(self.sample_rate);
 
         Ok(Box::new(node))
     }
@@ -110,19 +96,15 @@ impl<B: Backend + 'static> EffectBuilder<B> {
 
 impl<B: Backend> Drop for EffectBuilder<B> {
     fn drop(&mut self) {
-        tracing::info!("Unloading neural effect model: {}", self.model_path);
-
-        if let Err(e) = self.engine.unload_model(self.model_id) {
-            tracing::error!("Failed to unload effect model: {}", e);
-        }
+        let _ = self.engine.unload_model(self.model_id);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu::InferenceConfig;
     use crate::backend::BackendPool;
+    use crate::gpu::InferenceConfig;
     use burn::backend::ndarray::NdArray;
 
     #[test]
@@ -131,11 +113,8 @@ mod tests {
         let cpu_device = backend_pool.cpu_device();
 
         let engine = Arc::new(
-            NeuralInferenceEngine::<NdArray>::new(
-                cpu_device.clone(),
-                InferenceConfig::default(),
-            )
-            .unwrap(),
+            NeuralInferenceEngine::<NdArray>::new(cpu_device.clone(), InferenceConfig::default())
+                .unwrap(),
         );
 
         // Should fail gracefully with nonexistent model file

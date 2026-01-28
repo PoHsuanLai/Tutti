@@ -122,7 +122,7 @@ pub enum ButlerCommand {
     /// Stop streaming for a channel
     StopStreaming {
         /// Channel index to stop
-        channel_index: usize
+        channel_index: usize,
     },
     /// Set playback position for a channel (in seconds)
     SetPlaybackPosition {

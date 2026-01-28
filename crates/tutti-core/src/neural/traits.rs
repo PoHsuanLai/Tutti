@@ -1,8 +1,8 @@
 //! Builder traits for neural synthesis and effects.
 
-use crate::Result;
-use crate::AudioUnit;
 use super::metadata::NeuralModelId;
+use crate::AudioUnit;
+use crate::Result;
 use std::sync::Arc;
 
 /// Builder for neural synthesis voices.

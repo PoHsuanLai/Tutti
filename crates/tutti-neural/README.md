@@ -1,15 +1,12 @@
 # Tutti Neural
 
-GPU-accelerated neural audio synthesis and effects for Tutti.
+Neural audio synthesis and effects on the GPU.
 
-## Overview
+## What this is
 
-Neural audio processing with GPU acceleration:
+Neural audio processing for DAW applications. Supports synthesis (DDSP, vocoders) where inference generates control parameters on a separate thread, and effects (amp sims, compressors) that process audio directly.
 
-- **Neural synthesis** - GPU-accelerated audio synthesis (DDSP, vocoders)
-- **Neural effects** - Real-time effects processing (amp sims, compressors)
-- **Lock-free queues** - GPU → audio thread communication
-- **Model management** - Model caching and loading
+Uses [Burn](https://github.com/tracel-ai/burn) for ML inference with wgpu backend. Lock-free queues move control parameters from inference thread to audio thread.
 
 ## Quick Start
 
@@ -25,30 +22,13 @@ let model = neural.load_synth_model("violin.onnx")?;
 let voice = neural.synth().build_voice(&model)?;
 ```
 
-## Architecture
+## How it works
 
-Two-tier for performance and safety:
-1. **WASM Extensions** - Sandboxed, validated WebGPU-style API (~1.5ms latency)
-2. **Native processing** - Direct GPU access for maximum performance (~0.5ms latency)
+**Synthesis**: Neural model runs on inference thread, outputs control parameters (pitch, amplitude, filter coefficients) which go through a lock-free queue to the audio thread. Audio thread renders DSP based on these parameters.
 
-### Synthesis (DDSP-like)
+**Effects**: Neural model processes audio directly on audio thread. Must complete within buffer deadline.
 
-Neural models generate control parameters:
-- Inference thread → Lock-free queue → Audio thread
-- Examples: DDSP, WaveRNN, neural vocoders
-- ~0.5ms latency with look-ahead prefetching
-
-### Effects (Direct Processing)
-
-Neural models process audio samples directly on audio thread:
-- Must be RT-safe (<1ms processing time)
-- Examples: Amp simulators, compressors, neural reverbs
-
-## Performance
-
-- **Batch processing** - 8 tracks in 1 GPU call = 8x speedup
-- **Lock-free queues** - Zero audio thread blocking
-- **Look-ahead prefetch** - Inference runs ahead of audio callback
+**Batching**: Multiple voices/tracks can be batched into a single GPU call for efficiency.
 
 ## License
 

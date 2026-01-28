@@ -1,4 +1,3 @@
-
 use crate::{AtomicFloat, AtomicU32, AtomicU8, Ordering};
 use std::sync::atomic::AtomicI64;
 

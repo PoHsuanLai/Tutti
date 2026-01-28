@@ -220,7 +220,6 @@ impl TransportFSM {
                 };
                 TransitionResult::DirectionChanged(self.direction)
             }
-
         };
 
         if !matches!(result, TransitionResult::None) {

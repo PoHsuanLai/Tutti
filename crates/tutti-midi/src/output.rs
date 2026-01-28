@@ -6,14 +6,14 @@
 #![cfg_attr(not(feature = "midi-io"), allow(unused_imports, dead_code))]
 
 use crate::MidiEvent;
-use std::sync::atomic::{AtomicBool, Ordering};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use midi_msg::MidiMsg;
 #[cfg(feature = "midi-io")]
 use midir::{MidiOutput, MidiOutputConnection};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use tracing::{debug, error, info, warn};
+use tracing::debug;
 
 /// MIDI message to send to output device
 #[derive(Debug, Clone)]
@@ -171,13 +171,8 @@ impl MidiOutputManager {
                             connection = Some(conn);
                             is_connected.store(true, Ordering::SeqCst);
                             connected_device.store(Arc::new(Some(name.clone())));
-                            info!("🎹 Connected to MIDI output device: {}", name);
                         }
-                        Err(e) => {
-                            error!(
-                                "Failed to connect to MIDI output device {}: {}",
-                                device_index, e
-                            );
+                        Err(_e) => {
                             is_connected.store(false, Ordering::SeqCst);
                             connected_device.store(Arc::new(None));
                         }
@@ -185,20 +180,14 @@ impl MidiOutputManager {
                 }
                 Ok(MidiOutputCommand::Disconnect) => {
                     if let Some(conn) = connection.take() {
-                        let name = connected_device.load().as_ref().clone();
                         drop(conn);
                         is_connected.store(false, Ordering::SeqCst);
                         connected_device.store(Arc::new(None));
-                        if let Some(name) = name {
-                            info!("🎹 Disconnected from MIDI output device: {}", name);
-                        }
                     }
                 }
                 Ok(MidiOutputCommand::SendMessage(msg)) => {
                     if let Some(ref mut conn) = connection {
-                        if let Err(e) = conn.send(&msg.bytes) {
-                            warn!("Failed to send MIDI message: {}", e);
-                        }
+                        let _ = conn.send(&msg.bytes);
                     } else {
                         debug!("Cannot send MIDI message: no device connected");
                     }
@@ -243,18 +232,13 @@ impl MidiOutputManager {
 
     pub fn list_devices() -> Vec<MidiOutputDevice> {
         let mut devices = Vec::new();
-        match MidiOutput::new("dawai-device-list") {
-            Ok(midi_output) => {
-                let ports = midi_output.ports();
-                for (index, port) in ports.iter().enumerate() {
-                    let name = midi_output
-                        .port_name(port)
-                        .unwrap_or_else(|_| format!("Unknown Device {}", index));
-                    devices.push(MidiOutputDevice { index, name });
-                }
-            }
-            Err(e) => {
-                error!("Failed to create MIDI output for device listing: {}", e);
+        if let Ok(midi_output) = MidiOutput::new("dawai-device-list") {
+            let ports = midi_output.ports();
+            for (index, port) in ports.iter().enumerate() {
+                let name = midi_output
+                    .port_name(port)
+                    .unwrap_or_else(|_| format!("Unknown Device {}", index));
+                devices.push(MidiOutputDevice { index, name });
             }
         }
         devices

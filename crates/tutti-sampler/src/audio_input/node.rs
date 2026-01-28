@@ -1,8 +1,8 @@
 //! Audio input nodes for hardware audio capture.
 
 use crossbeam_channel::{bounded, Receiver, Sender};
-use tutti_core::dsp::*;
 use std::sync::Arc;
+use tutti_core::dsp::*;
 
 /// Audio input frontend that creates channel and provides sender for CPAL callback.
 pub struct AudioInput {

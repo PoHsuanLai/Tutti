@@ -4,7 +4,7 @@
 //! Uses Neural synthesis: harmonic oscillators + filtered noise.
 
 use super::neural_synth::NeuralSynth;
-use tutti_core::{AudioUnit, BufferRef, BufferMut, SignalFrame};
+use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 /// AudioUnit implementation for NeuralSynth
 ///
@@ -108,11 +108,6 @@ impl AudioUnit for NeuralSynth {
 
     fn set_sample_rate(&mut self, sample_rate: f64) {
         self.sample_rate = sample_rate as f32;
-        tracing::info!(
-            "Neural synth sample rate changed: {} Hz (track {})",
-            sample_rate,
-            self.track_id
-        );
     }
 
     fn reset(&mut self) {
@@ -158,21 +153,14 @@ impl Clone for NeuralSynth {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu::{NeuralParamQueue, ControlParams, NeuralModelId};
+    use crate::gpu::{ControlParams, NeuralModelId, NeuralParamQueue};
     use std::sync::Arc;
 
     #[test]
     fn test_neural_synth_outputs() {
         let param_queue = Arc::new(NeuralParamQueue::new(16));
         let (midi_tx, _midi_rx) = crossbeam_channel::unbounded();
-        let synth = NeuralSynth::new(
-            0,
-            NeuralModelId::new(),
-            param_queue,
-            44100.0,
-            512,
-            midi_tx,
-        );
+        let synth = NeuralSynth::new(0, NeuralModelId::new(), param_queue, 44100.0, 512, midi_tx);
 
         // Synth should have stereo output
         assert_eq!(synth.outputs(), 2);
@@ -198,7 +186,9 @@ mod tests {
             f0: vec![220.0; 512],
             amplitudes: vec![0.5; 512],
         };
-        param_queue.try_push(new_params).expect("push should succeed");
+        param_queue
+            .try_push(new_params)
+            .expect("push should succeed");
 
         // Update should be non-blocking
         synth.update_params_from_queue();

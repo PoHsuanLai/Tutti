@@ -1,7 +1,7 @@
 //! Time-stretching audio unit wrapper.
 
-use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
 use std::sync::Arc;
+use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 use super::phase_vocoder::PhaseVocoderProcessor;
 use super::types::{AtomicF32, FftSize, TimeStretchAlgorithm};

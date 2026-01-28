@@ -1,4 +1,4 @@
-use tutti_core::{AudioUnit, BufferRef, BufferMut, SignalFrame, dsp::Signal};
+use tutti_core::{dsp::Signal, AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 /// Default smoothing time for position changes (50ms for smooth automation)
 const DEFAULT_POSITION_SMOOTH_TIME: f32 = 0.05;

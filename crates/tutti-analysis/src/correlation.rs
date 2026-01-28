@@ -15,7 +15,10 @@
 
 /// Stereo analysis results
 #[derive(Debug, Clone, Copy, Default)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct StereoAnalysis {
     /// Phase correlation (-1.0 to 1.0)
     /// - 1.0 = Mono (L and R identical)
@@ -101,8 +104,8 @@ impl CorrelationMeter {
             sample_rate,
             smoothing: 0.9,
             current: StereoAnalysis::default(),
-            attack_time: 0.01,  // 10ms attack
-            release_time: 0.1,  // 100ms release
+            attack_time: 0.01, // 10ms attack
+            release_time: 0.1, // 100ms release
         }
     }
 
@@ -137,31 +140,15 @@ impl CorrelationMeter {
             instant.correlation,
             buffer_duration,
         );
-        self.current.width = self.smooth_value(
-            self.current.width,
-            instant.width,
-            buffer_duration,
-        );
-        self.current.balance = self.smooth_value(
-            self.current.balance,
-            instant.balance,
-            buffer_duration,
-        );
-        self.current.mid_level = self.smooth_value(
-            self.current.mid_level,
-            instant.mid_level,
-            buffer_duration,
-        );
-        self.current.side_level = self.smooth_value(
-            self.current.side_level,
-            instant.side_level,
-            buffer_duration,
-        );
-        self.current.left_level = self.smooth_value(
-            self.current.left_level,
-            instant.left_level,
-            buffer_duration,
-        );
+        self.current.width = self.smooth_value(self.current.width, instant.width, buffer_duration);
+        self.current.balance =
+            self.smooth_value(self.current.balance, instant.balance, buffer_duration);
+        self.current.mid_level =
+            self.smooth_value(self.current.mid_level, instant.mid_level, buffer_duration);
+        self.current.side_level =
+            self.smooth_value(self.current.side_level, instant.side_level, buffer_duration);
+        self.current.left_level =
+            self.smooth_value(self.current.left_level, instant.left_level, buffer_duration);
         self.current.right_level = self.smooth_value(
             self.current.right_level,
             instant.right_level,
@@ -299,12 +286,21 @@ mod tests {
 
         let analysis = analyze_stereo(&samples, &samples);
 
-        assert!(analysis.correlation > 0.99, "Mono signal should have ~1.0 correlation");
+        assert!(
+            analysis.correlation > 0.99,
+            "Mono signal should have ~1.0 correlation"
+        );
         assert!(analysis.is_mono());
         assert!(!analysis.has_phase_issues());
         assert!(analysis.width < 0.1, "Mono signal should have ~0 width");
-        assert!(analysis.balance.abs() < 0.01, "Identical channels should be balanced");
-        assert!(analysis.side_level < 0.001, "Mono signal should have ~0 side level");
+        assert!(
+            analysis.balance.abs() < 0.01,
+            "Identical channels should be balanced"
+        );
+        assert!(
+            analysis.side_level < 0.001,
+            "Mono signal should have ~0 side level"
+        );
     }
 
     #[test]
@@ -315,10 +311,16 @@ mod tests {
 
         let analysis = analyze_stereo(&left, &right);
 
-        assert!(analysis.correlation < -0.99, "Out of phase should have ~-1.0 correlation");
+        assert!(
+            analysis.correlation < -0.99,
+            "Out of phase should have ~-1.0 correlation"
+        );
         assert!(analysis.has_phase_issues());
         assert!(analysis.width > 1.9, "Out of phase should have ~2.0 width");
-        assert!(analysis.mid_level < 0.001, "Out of phase should have ~0 mid level");
+        assert!(
+            analysis.mid_level < 0.001,
+            "Out of phase should have ~0 mid level"
+        );
     }
 
     #[test]
@@ -331,8 +333,11 @@ mod tests {
 
         // Different frequencies should have lower correlation than identical signals
         // but may not be exactly 0 due to harmonic relationships
-        assert!(analysis.correlation < 0.9,
-            "Different frequency signals should have lower correlation, got {}", analysis.correlation);
+        assert!(
+            analysis.correlation < 0.9,
+            "Different frequency signals should have lower correlation, got {}",
+            analysis.correlation
+        );
     }
 
     #[test]
@@ -342,11 +347,17 @@ mod tests {
         let right: Vec<f32> = vec![0.0; 1000];
 
         let analysis = analyze_stereo(&left, &right);
-        assert!(analysis.balance < -0.9, "Left-only should have negative balance");
+        assert!(
+            analysis.balance < -0.9,
+            "Left-only should have negative balance"
+        );
 
         // Right only
         let analysis = analyze_stereo(&right, &left);
-        assert!(analysis.balance > 0.9, "Right-only should have positive balance");
+        assert!(
+            analysis.balance > 0.9,
+            "Right-only should have positive balance"
+        );
     }
 
     #[test]
@@ -373,7 +384,10 @@ mod tests {
         }
 
         let current = meter.current();
-        assert!(current.correlation > 0.9, "Should converge to ~1.0 for mono signal");
+        assert!(
+            current.correlation > 0.9,
+            "Should converge to ~1.0 for mono signal"
+        );
     }
 
     #[test]
@@ -382,13 +396,19 @@ mod tests {
         let samples: Vec<f32> = (0..1000).map(|i| (i as f32 / 100.0).sin()).collect();
         let analysis = analyze_stereo(&samples, &samples);
 
-        assert!(analysis.ms_ratio_db() > 40.0, "Mono should have high M/S ratio");
+        assert!(
+            analysis.ms_ratio_db() > 40.0,
+            "Mono should have high M/S ratio"
+        );
 
         // Out of phase: all side, no mid
         let right: Vec<f32> = samples.iter().map(|&s| -s).collect();
         let analysis = analyze_stereo(&samples, &right);
 
-        assert!(analysis.ms_ratio_db() < -40.0, "Out of phase should have low M/S ratio");
+        assert!(
+            analysis.ms_ratio_db() < -40.0,
+            "Out of phase should have low M/S ratio"
+        );
     }
 
     #[test]

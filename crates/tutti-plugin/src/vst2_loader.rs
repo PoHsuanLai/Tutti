@@ -43,7 +43,6 @@ impl Vst2Instance {
     pub fn load(path: &Path, sample_rate: f32) -> Result<Self> {
         #[cfg(feature = "vst2")]
         {
-
             // Create channel for parameter automation
             let (param_tx, param_rx) = crossbeam_channel::unbounded();
 
@@ -73,12 +72,6 @@ impl Vst2Instance {
                     .audio_io(info.inputs as usize, info.outputs as usize)
                     .midi(info.midi_inputs > 0 || info.midi_outputs > 0)
                     .f64_support(info.f64_precision);
-
-                "Loaded VST2: {} ({} in, {} out)",
-                info.name,
-                info.inputs,
-                info.outputs
-            );
 
             Ok(Self {
                 instance,
@@ -116,8 +109,8 @@ impl Vst2Instance {
     ) -> Vec<MidiEvent> {
         #[cfg(feature = "vst2")]
         {
-            use vst::buffer::AudioBuffer as VstBuffer;
             use vst::api;
+            use vst::buffer::AudioBuffer as VstBuffer;
 
             let num_samples = buffer.num_samples;
             if num_samples == 0 {
@@ -137,10 +130,8 @@ impl Vst2Instance {
                     let num_events = api_events.len() as i32;
 
                     // Box the events to get stable pointers
-                    let boxed_events: Vec<Box<api::MidiEvent>> = api_events
-                        .into_iter()
-                        .map(Box::new)
-                        .collect();
+                    let boxed_events: Vec<Box<api::MidiEvent>> =
+                        api_events.into_iter().map(Box::new).collect();
 
                     // Create event pointers (cast MidiEvent* to Event*)
                     let event_ptrs: Vec<*mut api::Event> = boxed_events
@@ -249,8 +240,8 @@ impl Vst2Instance {
     /// Convert Tutti MidiEvent to VST API MidiEvent
     #[cfg(feature = "vst2")]
     fn midi_to_api_event(event: &MidiEvent) -> Option<vst::api::MidiEvent> {
-        use vst::api;
         use std::mem;
+        use vst::api;
 
         // Access midi_msg types through the imported MidiEvent
         // We need to match on the msg field which contains ChannelVoiceMsg
@@ -258,31 +249,23 @@ impl Vst2Instance {
 
         // Convert to MIDI bytes
         let (status, data1, data2) = match event.msg {
-            ChannelVoiceMsg::NoteOn { note, velocity } => {
-                (0x90 | channel_num, note, velocity)
-            }
-            ChannelVoiceMsg::NoteOff { note, velocity } => {
-                (0x80 | channel_num, note, velocity)
-            }
+            ChannelVoiceMsg::NoteOn { note, velocity } => (0x90 | channel_num, note, velocity),
+            ChannelVoiceMsg::NoteOff { note, velocity } => (0x80 | channel_num, note, velocity),
             ChannelVoiceMsg::PolyPressure { note, pressure } => {
                 (0xA0 | channel_num, note, pressure)
             }
             ChannelVoiceMsg::ControlChange { control } => {
                 let (cc, value) = match control {
                     ControlChange::CC { control, value } => (control, value),
-                    ControlChange::CCHighRes { control1, value, .. } => {
-                        (control1, (value >> 7) as u8)
-                    }
+                    ControlChange::CCHighRes {
+                        control1, value, ..
+                    } => (control1, (value >> 7) as u8),
                     _ => return None,
                 };
                 (0xB0 | channel_num, cc, value)
             }
-            ChannelVoiceMsg::ProgramChange { program } => {
-                (0xC0 | channel_num, program, 0)
-            }
-            ChannelVoiceMsg::ChannelPressure { pressure } => {
-                (0xD0 | channel_num, pressure, 0)
-            }
+            ChannelVoiceMsg::ProgramChange { program } => (0xC0 | channel_num, program, 0),
+            ChannelVoiceMsg::ChannelPressure { pressure } => (0xD0 | channel_num, pressure, 0),
             ChannelVoiceMsg::PitchBend { bend } => {
                 let lsb = (bend & 0x7F) as u8;
                 let msb = ((bend >> 7) & 0x7F) as u8;
@@ -343,8 +326,8 @@ impl Vst2Instance {
     ) -> Vec<MidiEvent> {
         #[cfg(feature = "vst2")]
         {
-            use vst::buffer::AudioBuffer as VstBuffer;
             use vst::api;
+            use vst::buffer::AudioBuffer as VstBuffer;
 
             let num_samples = buffer.num_samples;
             if num_samples == 0 {
@@ -360,10 +343,8 @@ impl Vst2Instance {
 
                 if !api_events.is_empty() {
                     let num_events = api_events.len() as i32;
-                    let boxed_events: Vec<Box<api::MidiEvent>> = api_events
-                        .into_iter()
-                        .map(Box::new)
-                        .collect();
+                    let boxed_events: Vec<Box<api::MidiEvent>> =
+                        api_events.into_iter().map(Box::new).collect();
                     let event_ptrs: Vec<*mut api::Event> = boxed_events
                         .iter()
                         .map(|e| e.as_ref() as *const api::MidiEvent as *mut api::Event)

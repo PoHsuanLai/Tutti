@@ -7,9 +7,9 @@ use crate::options::{BitDepth, ExportOptions};
 use flacenc::bitsink::ByteSink;
 use flacenc::component::BitRepr;
 use flacenc::config::Encoder as EncoderConfig;
+use flacenc::encode_with_fixed_block_size;
 use flacenc::error::Verify;
 use flacenc::source::MemSource;
-use flacenc::encode_with_fixed_block_size;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -76,13 +76,10 @@ impl FlacConfig {
 }
 
 /// Export stereo audio to FLAC file using ExportOptions
-pub fn export_flac(
-    path: &str,
-    left: &[f32],
-    right: &[f32],
-    options: &ExportOptions,
-) -> Result<()> {
-    use crate::dsp::{apply_dither, calculate_loudness, normalize_loudness, normalize_peak, DitherState};
+pub fn export_flac(path: &str, left: &[f32], right: &[f32], options: &ExportOptions) -> Result<()> {
+    use crate::dsp::{
+        apply_dither, calculate_loudness, normalize_loudness, normalize_peak, DitherState,
+    };
     use crate::options::NormalizationMode;
 
     let config = FlacConfig {
@@ -116,7 +113,10 @@ pub fn export_flac(
         NormalizationMode::Peak(target_db) => {
             normalize_peak(&mut left_proc, &mut right_proc, target_db);
         }
-        NormalizationMode::Loudness { target_lufs, true_peak_dbtp } => {
+        NormalizationMode::Loudness {
+            target_lufs,
+            true_peak_dbtp,
+        } => {
             let current = calculate_loudness(&left_proc, &right_proc, config.sample_rate);
             normalize_loudness(
                 &mut left_proc,
@@ -131,7 +131,12 @@ pub fn export_flac(
     // Apply dithering if needed
     if options.dither != crate::options::DitherType::None {
         let mut state = DitherState::new(options.dither);
-        apply_dither(&mut left_proc, &mut right_proc, options.bit_depth.bits(), &mut state);
+        apply_dither(
+            &mut left_proc,
+            &mut right_proc,
+            options.bit_depth.bits(),
+            &mut state,
+        );
     }
 
     if options.mono {
@@ -249,7 +254,12 @@ pub fn encode_flac_mono_memory(samples: &[f32], config: &FlacConfig) -> Result<V
         .map_err(|e| ExportError::Encoding(format!("Invalid FLAC config: {:?}", e)))?;
 
     // Create source
-    let source = MemSource::from_samples(&int_samples, 1, bits_per_sample, config.sample_rate as usize);
+    let source = MemSource::from_samples(
+        &int_samples,
+        1,
+        bits_per_sample,
+        config.sample_rate as usize,
+    );
 
     // Encode
     let stream = encode_with_fixed_block_size(&encoder_config, source, config.block_size as usize)

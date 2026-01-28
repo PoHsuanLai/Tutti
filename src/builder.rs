@@ -1,7 +1,7 @@
 //! TuttiEngineBuilder for configuring the engine
 
-use crate::{TuttiEngine, Result};
 use crate::core::TuttiSystemBuilder;
+use crate::{Result, TuttiEngine};
 
 #[cfg(feature = "midi")]
 use crate::midi::{MidiSystem, MidiSystemBuilder};
@@ -87,21 +87,21 @@ impl TuttiEngineBuilder {
 
     /// Enable MIDI subsystem
     #[cfg(feature = "midi")]
-    pub fn with_midi(mut self) -> Self {
+    pub fn midi(mut self) -> Self {
         self.enable_midi = true;
         self
     }
 
     /// Enable sampler subsystem
     #[cfg(feature = "sampler")]
-    pub fn with_sampler(mut self) -> Self {
+    pub fn sampler(mut self) -> Self {
         self.enable_sampler = true;
         self
     }
 
     /// Enable neural subsystem
     #[cfg(feature = "neural")]
-    pub fn with_neural(mut self) -> Self {
+    pub fn neural(mut self) -> Self {
         self.enable_neural = true;
         self
     }

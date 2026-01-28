@@ -28,8 +28,8 @@ use crate::{AudioUnit, BufferMut, BufferRef, Result};
 use fundsp::signal::SignalFrame;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-use super::vbap_panner::SpatialPanner;
 use super::binaural_panner::BinauralPanner;
+use super::vbap_panner::SpatialPanner;
 
 /// VBAP-based spatial panner as an AudioUnit node
 ///
@@ -156,8 +156,10 @@ impl SpatialPannerNode {
     /// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left, -90 = right)
     /// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
     pub fn set_position(&self, azimuth: f32, elevation: f32) {
-        self.azimuth_atomic.store(azimuth.to_bits(), Ordering::Relaxed);
-        self.elevation_atomic.store(elevation.to_bits(), Ordering::Relaxed);
+        self.azimuth_atomic
+            .store(azimuth.to_bits(), Ordering::Relaxed);
+        self.elevation_atomic
+            .store(elevation.to_bits(), Ordering::Relaxed);
     }
 
     /// Get current azimuth
@@ -172,7 +174,8 @@ impl SpatialPannerNode {
 
     /// Set spread factor (0.0 = point source, 1.0 = diffuse)
     pub fn set_spread(&self, spread: f32) {
-        self.spread_atomic.store(spread.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        self.spread_atomic
+            .store(spread.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
     /// Get current spread
@@ -182,7 +185,8 @@ impl SpatialPannerNode {
 
     /// Set stereo width for stereo input mode (0.0 = mono, 1.0 = full stereo)
     pub fn set_width(&self, width: f32) {
-        self.width_atomic.store(width.max(0.0).to_bits(), Ordering::Relaxed);
+        self.width_atomic
+            .store(width.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
     /// Get current stereo width
@@ -216,10 +220,14 @@ impl AudioUnit for SpatialPannerNode {
     }
 
     fn reset(&mut self) {
-        self.azimuth_atomic.store(0.0_f32.to_bits(), Ordering::Relaxed);
-        self.elevation_atomic.store(0.0_f32.to_bits(), Ordering::Relaxed);
-        self.spread_atomic.store(0.0_f32.to_bits(), Ordering::Relaxed);
-        self.width_atomic.store(1.0_f32.to_bits(), Ordering::Relaxed);
+        self.azimuth_atomic
+            .store(0.0_f32.to_bits(), Ordering::Relaxed);
+        self.elevation_atomic
+            .store(0.0_f32.to_bits(), Ordering::Relaxed);
+        self.spread_atomic
+            .store(0.0_f32.to_bits(), Ordering::Relaxed);
+        self.width_atomic
+            .store(1.0_f32.to_bits(), Ordering::Relaxed);
         self.panner.set_position(0.0, 0.0);
         self.panner.set_spread(0.0);
     }
@@ -258,7 +266,8 @@ impl AudioUnit for SpatialPannerNode {
                 left
             };
 
-            self.panner.process_stereo_into(left, right, width, &mut sample_output);
+            self.panner
+                .process_stereo_into(left, right, width, &mut sample_output);
 
             for (ch, &sample) in sample_output.iter().enumerate() {
                 if ch < num_outputs {
@@ -360,8 +369,10 @@ impl BinauralPannerNode {
     /// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left, -90 = right)
     /// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
     pub fn set_position(&self, azimuth: f32, elevation: f32) {
-        self.azimuth_atomic.store(azimuth.to_bits(), Ordering::Relaxed);
-        self.elevation_atomic.store(elevation.to_bits(), Ordering::Relaxed);
+        self.azimuth_atomic
+            .store(azimuth.to_bits(), Ordering::Relaxed);
+        self.elevation_atomic
+            .store(elevation.to_bits(), Ordering::Relaxed);
     }
 
     /// Get current azimuth
@@ -376,7 +387,8 @@ impl BinauralPannerNode {
 
     /// Set stereo width for stereo input mode (0.0 = mono, 1.0 = full stereo)
     pub fn set_width(&self, width: f32) {
-        self.width_atomic.store(width.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
+        self.width_atomic
+            .store(width.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
     }
 
     /// Get current stereo width
@@ -403,9 +415,12 @@ impl AudioUnit for BinauralPannerNode {
     }
 
     fn reset(&mut self) {
-        self.azimuth_atomic.store(0.0_f32.to_bits(), Ordering::Relaxed);
-        self.elevation_atomic.store(0.0_f32.to_bits(), Ordering::Relaxed);
-        self.width_atomic.store(1.0_f32.to_bits(), Ordering::Relaxed);
+        self.azimuth_atomic
+            .store(0.0_f32.to_bits(), Ordering::Relaxed);
+        self.elevation_atomic
+            .store(0.0_f32.to_bits(), Ordering::Relaxed);
+        self.width_atomic
+            .store(1.0_f32.to_bits(), Ordering::Relaxed);
         self.panner = BinauralPanner::new(self.sample_rate);
     }
 
@@ -534,7 +549,10 @@ mod tests {
 
         // Left position should have left louder than right
         panner.tick(&input, &mut output);
-        assert!(output[0] > output[1], "Left should be louder for left position");
+        assert!(
+            output[0] > output[1],
+            "Left should be louder for left position"
+        );
     }
 
     #[test]

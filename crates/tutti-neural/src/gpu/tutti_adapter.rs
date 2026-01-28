@@ -32,10 +32,7 @@ pub(crate) struct NeuralEffectNode {
 
 impl NeuralEffectNode {
     /// Create a new neural effect node
-    pub fn new(
-        model_id: NeuralModelId,
-        buffer_size: usize,
-    ) -> Self {
+    pub fn new(model_id: NeuralModelId, buffer_size: usize) -> Self {
         Self {
             model_id,
             buffer_size,

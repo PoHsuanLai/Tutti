@@ -12,12 +12,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .expect("Usage: vst3_host <plugin.vst3>");
 
-    let (mut client, _handle) = PluginClient::load(
-        BridgeConfig::default(),
-        PathBuf::from(plugin_path),
-        44100.0,
-    )
-    .await?;
+    let (mut client, _handle) =
+        PluginClient::load(BridgeConfig::default(), PathBuf::from(plugin_path), 44100.0).await?;
 
     let ins = <PluginClient as AudioUnit>::inputs(&client);
     let outs = <PluginClient as AudioUnit>::outputs(&client);

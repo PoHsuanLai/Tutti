@@ -1,10 +1,10 @@
 //! Audio input management for recording from hardware devices.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use tutti_core::AtomicFloat;
 use cpal::traits::{DeviceTrait, HostTrait};
 use crossbeam_channel::{bounded, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Arc;
+use tutti_core::AtomicFloat;
 
 /// Sentinel value for "no device selected"
 const NO_DEVICE_SELECTED: usize = usize::MAX;
@@ -282,8 +282,6 @@ impl AudioInputManager {
 }
 
 /// The actual CPAL input stream (NonSend resource).
-///
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,6 +4,17 @@
 
 #[cfg(feature = "clap")]
 use clap_sys::entry::clap_plugin_entry;
+#[cfg(feature = "clap")]
+use clap_sys::events::{
+    clap_event_header, clap_event_midi, clap_event_note, clap_event_note_expression,
+    clap_event_param_value, clap_event_transport, clap_input_events, clap_output_events,
+    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF,
+    CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE, CLAP_NOTE_EXPRESSION_BRIGHTNESS,
+    CLAP_NOTE_EXPRESSION_PAN, CLAP_NOTE_EXPRESSION_TUNING, CLAP_NOTE_EXPRESSION_VIBRATO,
+    CLAP_NOTE_EXPRESSION_VOLUME, CLAP_TRANSPORT_HAS_BEATS_TIMELINE, CLAP_TRANSPORT_HAS_TEMPO,
+    CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_LOOP_ACTIVE, CLAP_TRANSPORT_IS_PLAYING,
+    CLAP_TRANSPORT_IS_RECORDING,
+};
 #[cfg(all(feature = "clap", target_os = "windows"))]
 use clap_sys::ext::gui::CLAP_WINDOW_API_WIN32;
 #[cfg(all(feature = "clap", target_os = "linux"))]
@@ -17,6 +28,8 @@ use clap_sys::ext::params::{clap_plugin_params, CLAP_EXT_PARAMS};
 #[cfg(feature = "clap")]
 use clap_sys::ext::state::{clap_plugin_state, CLAP_EXT_STATE};
 #[cfg(feature = "clap")]
+use clap_sys::fixedpoint::CLAP_BEATTIME_FACTOR;
+#[cfg(feature = "clap")]
 use clap_sys::host::clap_host;
 #[cfg(feature = "clap")]
 use clap_sys::plugin::clap_plugin;
@@ -26,29 +39,15 @@ use clap_sys::process::{clap_process, CLAP_PROCESS_ERROR};
 use clap_sys::stream::{clap_istream, clap_ostream};
 #[cfg(feature = "clap")]
 use clap_sys::version::CLAP_VERSION;
-#[cfg(feature = "clap")]
-use clap_sys::events::{
-    clap_event_header, clap_event_midi, clap_event_note, clap_event_note_expression,
-    clap_event_param_value, clap_event_transport, clap_input_events, clap_output_events,
-    CLAP_CORE_EVENT_SPACE_ID, CLAP_EVENT_MIDI, CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_OFF,
-    CLAP_EVENT_NOTE_ON, CLAP_EVENT_PARAM_VALUE, CLAP_NOTE_EXPRESSION_BRIGHTNESS,
-    CLAP_NOTE_EXPRESSION_PAN, CLAP_NOTE_EXPRESSION_TUNING, CLAP_NOTE_EXPRESSION_VIBRATO,
-    CLAP_NOTE_EXPRESSION_VOLUME,
-    CLAP_TRANSPORT_HAS_BEATS_TIMELINE, CLAP_TRANSPORT_HAS_TEMPO,
-    CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_LOOP_ACTIVE,
-    CLAP_TRANSPORT_IS_PLAYING, CLAP_TRANSPORT_IS_RECORDING,
-};
-#[cfg(feature = "clap")]
-use clap_sys::fixedpoint::CLAP_BEATTIME_FACTOR;
 
 use crate::error::{BridgeError, Result};
 use crate::protocol::{AudioBuffer, MidiEvent, PluginMetadata};
 
 // Import MIDI types for event conversion
-use tutti_midi::{ChannelVoiceMsg, ControlChange};
 use std::ffi::{CStr, CString};
 use std::path::Path;
 use std::ptr;
+use tutti_midi::{ChannelVoiceMsg, ControlChange};
 
 /// CLAP plugin instance wrapper
 pub struct ClapInstance {
@@ -349,7 +348,6 @@ impl ClapInstance {
     pub fn load(path: &Path, sample_rate: f32) -> Result<Self> {
         #[cfg(feature = "clap")]
         {
-
             // Load library
             let library = unsafe {
                 libloading::Library::new(path).map_err(|e| {
@@ -389,9 +387,7 @@ impl ClapInstance {
                 .get_factory
                 .ok_or_else(|| BridgeError::LoadFailed("No get_factory function".to_string()))?;
             let factory_ptr = unsafe {
-                get_factory_fn(
-                    clap_sys::factory::plugin_factory::CLAP_PLUGIN_FACTORY_ID.as_ptr(),
-                )
+                get_factory_fn(clap_sys::factory::plugin_factory::CLAP_PLUGIN_FACTORY_ID.as_ptr())
             };
 
             if factory_ptr.is_null() {
@@ -461,7 +457,6 @@ impl ClapInstance {
                 .version(version.to_string())
                 .audio_io(2, 2)
                 .f64_support(supports_f64);
-
 
             Ok(Self {
                 plugin,
@@ -576,8 +571,7 @@ impl ClapInstance {
             if let Some(process_fn) = plugin_ref.process {
                 let status = unsafe { process_fn(self.plugin, &process_data) };
 
-                if status == CLAP_PROCESS_ERROR {
-                }
+                if status == CLAP_PROCESS_ERROR {}
             }
         }
 
@@ -662,8 +656,7 @@ impl ClapInstance {
             if let Some(process_fn) = plugin_ref.process {
                 let status = unsafe { process_fn(self.plugin, &process_data) };
 
-                if status == CLAP_PROCESS_ERROR {
-                }
+                if status == CLAP_PROCESS_ERROR {}
             }
 
             // Convert output events back to MIDI (if any)
@@ -685,38 +678,34 @@ impl ClapInstance {
         let time = event.frame_offset as u32;
 
         match event.msg {
-            ChannelVoiceMsg::NoteOn { note, velocity } => {
-                Some(ClapEvent::NoteOn {
-                    header: clap_event_header {
-                        size: std::mem::size_of::<clap_event_note>() as u32,
-                        time,
-                        space_id: CLAP_CORE_EVENT_SPACE_ID,
-                        type_: CLAP_EVENT_NOTE_ON,
-                        flags: 0,
-                    },
-                    note_id: -1,
-                    port_index: 0,
-                    channel,
-                    key: note as i16,
-                    velocity: (velocity as f64) / 127.0,
-                })
-            }
-            ChannelVoiceMsg::NoteOff { note, velocity } => {
-                Some(ClapEvent::NoteOff {
-                    header: clap_event_header {
-                        size: std::mem::size_of::<clap_event_note>() as u32,
-                        time,
-                        space_id: CLAP_CORE_EVENT_SPACE_ID,
-                        type_: CLAP_EVENT_NOTE_OFF,
-                        flags: 0,
-                    },
-                    note_id: -1,
-                    port_index: 0,
-                    channel,
-                    key: note as i16,
-                    velocity: (velocity as f64) / 127.0,
-                })
-            }
+            ChannelVoiceMsg::NoteOn { note, velocity } => Some(ClapEvent::NoteOn {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_note>() as u32,
+                    time,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_NOTE_ON,
+                    flags: 0,
+                },
+                note_id: -1,
+                port_index: 0,
+                channel,
+                key: note as i16,
+                velocity: (velocity as f64) / 127.0,
+            }),
+            ChannelVoiceMsg::NoteOff { note, velocity } => Some(ClapEvent::NoteOff {
+                header: clap_event_header {
+                    size: std::mem::size_of::<clap_event_note>() as u32,
+                    time,
+                    space_id: CLAP_CORE_EVENT_SPACE_ID,
+                    type_: CLAP_EVENT_NOTE_OFF,
+                    flags: 0,
+                },
+                note_id: -1,
+                port_index: 0,
+                channel,
+                key: note as i16,
+                velocity: (velocity as f64) / 127.0,
+            }),
             ChannelVoiceMsg::ControlChange { .. }
             | ChannelVoiceMsg::ProgramChange { .. }
             | ChannelVoiceMsg::ChannelPressure { .. }
@@ -749,16 +738,14 @@ impl ClapInstance {
             ChannelVoiceMsg::ControlChange { control } => {
                 let (cc, value) = match control {
                     ControlChange::CC { control, value } => (control, value),
-                    ControlChange::CCHighRes { control1, value, .. } => {
-                        (control1, (value >> 7) as u8)
-                    }
+                    ControlChange::CCHighRes {
+                        control1, value, ..
+                    } => (control1, (value >> 7) as u8),
                     _ => return None,
                 };
                 Some((0xB0 | channel_num, cc, value))
             }
-            ChannelVoiceMsg::ProgramChange { program } => {
-                Some((0xC0 | channel_num, program, 0))
-            }
+            ChannelVoiceMsg::ProgramChange { program } => Some((0xC0 | channel_num, program, 0)),
             ChannelVoiceMsg::ChannelPressure { pressure } => {
                 Some((0xD0 | channel_num, pressure, 0))
             }
@@ -816,9 +803,7 @@ impl ClapInstance {
                         },
                     },
                     0xC0 => ChannelVoiceMsg::ProgramChange { program: data[1] },
-                    0xD0 => ChannelVoiceMsg::ChannelPressure {
-                        pressure: data[1],
-                    },
+                    0xD0 => ChannelVoiceMsg::ChannelPressure { pressure: data[1] },
                     0xE0 => {
                         let bend = (data[1] as u16) | ((data[2] as u16) << 7);
                         ChannelVoiceMsg::PitchBend { bend }
@@ -843,9 +828,7 @@ impl ClapInstance {
 
     /// Convert protocol note expression to CLAP event
     #[cfg(feature = "clap")]
-    fn note_expression_to_clap_event(
-        expr: &crate::protocol::NoteExpressionValue,
-    ) -> ClapEvent {
+    fn note_expression_to_clap_event(expr: &crate::protocol::NoteExpressionValue) -> ClapEvent {
         let expression_id = match expr.expression_type {
             crate::protocol::NoteExpressionType::Volume => CLAP_NOTE_EXPRESSION_VOLUME,
             crate::protocol::NoteExpressionType::Pan => CLAP_NOTE_EXPRESSION_PAN,
@@ -902,9 +885,7 @@ impl ClapInstance {
 
     /// Build CLAP transport from protocol TransportInfo
     #[cfg(feature = "clap")]
-    fn build_transport(
-        transport: &crate::protocol::TransportInfo,
-    ) -> clap_event_transport {
+    fn build_transport(transport: &crate::protocol::TransportInfo) -> clap_event_transport {
         let mut flags: u32 = 0;
         flags |= CLAP_TRANSPORT_HAS_TEMPO;
         flags |= CLAP_TRANSPORT_HAS_BEATS_TIMELINE;
@@ -932,8 +913,7 @@ impl ClapInstance {
             song_pos_seconds: 0, // Not computing seconds timeline
             tempo: transport.tempo,
             tempo_inc: 0.0,
-            loop_start_beats: (transport.cycle_start_quarters * CLAP_BEATTIME_FACTOR as f64)
-                as i64,
+            loop_start_beats: (transport.cycle_start_quarters * CLAP_BEATTIME_FACTOR as f64) as i64,
             loop_end_beats: (transport.cycle_end_quarters * CLAP_BEATTIME_FACTOR as f64) as i64,
             loop_start_seconds: 0,
             loop_end_seconds: 0,
@@ -1052,8 +1032,7 @@ impl ClapInstance {
             if let Some(process_fn) = plugin_ref.process {
                 let status = unsafe { process_fn(self.plugin, &process_data) };
 
-                if status == CLAP_PROCESS_ERROR {
-                }
+                if status == CLAP_PROCESS_ERROR {}
             }
 
             // Collect all outputs
@@ -1066,7 +1045,13 @@ impl ClapInstance {
 
         #[cfg(not(feature = "clap"))]
         {
-            let _ = (buffer, midi_events, param_changes, note_expression, transport);
+            let _ = (
+                buffer,
+                midi_events,
+                param_changes,
+                note_expression,
+                transport,
+            );
             (
                 Vec::new(),
                 crate::protocol::ParameterChanges::new(),
@@ -1137,8 +1122,7 @@ impl ClapInstance {
             let plugin_ref = unsafe { &*self.plugin };
             if let Some(process_fn) = plugin_ref.process {
                 let status = unsafe { process_fn(self.plugin, &process_data) };
-                if status == CLAP_PROCESS_ERROR {
-                }
+                if status == CLAP_PROCESS_ERROR {}
             }
         }
 
@@ -1247,8 +1231,7 @@ impl ClapInstance {
             let plugin_ref = unsafe { &*self.plugin };
             if let Some(process_fn) = plugin_ref.process {
                 let status = unsafe { process_fn(self.plugin, &process_data) };
-                if status == CLAP_PROCESS_ERROR {
-                }
+                if status == CLAP_PROCESS_ERROR {}
             }
 
             let midi_output = output_events.to_midi_events();
@@ -1260,7 +1243,13 @@ impl ClapInstance {
 
         #[cfg(not(feature = "clap"))]
         {
-            let _ = (buffer, midi_events, param_changes, note_expression, transport);
+            let _ = (
+                buffer,
+                midi_events,
+                param_changes,
+                note_expression,
+                transport,
+            );
             (
                 Vec::new(),
                 crate::protocol::ParameterChanges::new(),
@@ -1662,7 +1651,6 @@ struct StreamContext<'a> {
 #[cfg(feature = "clap")]
 impl Drop for ClapInstance {
     fn drop(&mut self) {
-
         let plugin_ref = unsafe { &*self.plugin };
 
         // Stop processing

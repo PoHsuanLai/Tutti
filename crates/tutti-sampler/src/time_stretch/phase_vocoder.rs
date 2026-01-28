@@ -14,8 +14,8 @@
 //!
 //! All buffers are pre-allocated. The `process()` method performs no allocations.
 
-use tutti_core::{inverse_fft, real_fft, Complex32};
 use std::f32::consts::PI;
+use tutti_core::{inverse_fft, real_fft, Complex32};
 
 use super::types::FftSize;
 
@@ -103,9 +103,7 @@ impl PhaseVocoderProcessor {
     /// Create a Hann window of the specified size
     fn create_hann_window(size: usize) -> Vec<f32> {
         (0..size)
-            .map(|i| {
-                0.5 * (1.0 - (2.0 * PI * i as f32 / size as f32).cos())
-            })
+            .map(|i| 0.5 * (1.0 - (2.0 * PI * i as f32 / size as f32).cos()))
             .collect()
     }
 
@@ -273,7 +271,8 @@ impl PhaseVocoderProcessor {
             let scaled_freq = true_freq * pitch_shift_ratio;
 
             // Accumulate phase for synthesis
-            self.phase_accumulator[k] += scaled_freq * (synthesis_hop as f32 / self.hop_analysis as f32);
+            self.phase_accumulator[k] +=
+                scaled_freq * (synthesis_hop as f32 / self.hop_analysis as f32);
             self.phase_accumulator[k] = Self::wrap_phase(self.phase_accumulator[k]);
 
             // Store current phase for next frame
@@ -421,11 +420,7 @@ mod tests {
 
         // Wrap around: 3*PI = PI + 2*PI, should wrap to PI
         let wrapped = PhaseVocoderProcessor::wrap_phase(3.0 * PI);
-        assert!(
-            (wrapped - PI).abs() < 0.1,
-            "Expected ~PI, got {}",
-            wrapped
-        );
+        assert!((wrapped - PI).abs() < 0.1, "Expected ~PI, got {}", wrapped);
     }
 
     #[test]

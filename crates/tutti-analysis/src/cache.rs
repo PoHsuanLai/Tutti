@@ -10,12 +10,12 @@
 
 use crate::waveform::MultiResolutionSummary;
 use lru::LruCache;
+use std::collections::hash_map::DefaultHasher;
+use std::fs::{self, File};
+use std::hash::{Hash, Hasher};
+use std::io::{self, Read, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::fs::{self, File};
-use std::io::{self, Read, Write};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 
 /// Thumbnail cache with LRU memory cache and optional disk persistence
 pub struct ThumbnailCache {
@@ -170,7 +170,12 @@ impl ThumbnailCache {
         self.deserialize_summary(&data)
     }
 
-    fn save_to_disk(&self, base: &Path, hash: u64, summary: &MultiResolutionSummary) -> io::Result<()> {
+    fn save_to_disk(
+        &self,
+        base: &Path,
+        hash: u64,
+        summary: &MultiResolutionSummary,
+    ) -> io::Result<()> {
         let path = self.disk_cache_path(base, hash);
         let mut file = File::create(path)?;
 
@@ -226,7 +231,8 @@ impl ThumbnailCache {
         pos += 1;
 
         // Base samples per block
-        let base_samples_per_block = u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
+        let base_samples_per_block =
+            u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
         pos += 4;
 
         // Number of levels
@@ -237,11 +243,13 @@ impl ThumbnailCache {
 
         for _ in 0..num_levels {
             // Samples per block
-            let samples_per_block = u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
+            let samples_per_block =
+                u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
             pos += 4;
 
             // Total samples
-            let total_samples = u64::from_le_bytes(data.get(pos..pos + 8)?.try_into().ok()?) as usize;
+            let total_samples =
+                u64::from_le_bytes(data.get(pos..pos + 8)?.try_into().ok()?) as usize;
             pos += 8;
 
             // Number of blocks
@@ -281,7 +289,10 @@ impl ThumbnailCache {
 /// reading its contents.
 pub fn hash_file(path: &Path) -> io::Result<u64> {
     let metadata = fs::metadata(path)?;
-    let modified = metadata.modified()?.duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let modified = metadata
+        .modified()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
 
     let mut hasher = DefaultHasher::new();
     path.hash(&mut hasher);
@@ -319,16 +330,26 @@ mod tests {
             levels: vec![
                 WaveformSummary {
                     blocks: vec![
-                        WaveformBlock { min: -0.5, max: 0.5, rms: 0.3 },
-                        WaveformBlock { min: -0.8, max: 0.8, rms: 0.5 },
+                        WaveformBlock {
+                            min: -0.5,
+                            max: 0.5,
+                            rms: 0.3,
+                        },
+                        WaveformBlock {
+                            min: -0.8,
+                            max: 0.8,
+                            rms: 0.5,
+                        },
                     ],
                     samples_per_block: 512,
                     total_samples: 1024,
                 },
                 WaveformSummary {
-                    blocks: vec![
-                        WaveformBlock { min: -0.8, max: 0.8, rms: 0.4 },
-                    ],
+                    blocks: vec![WaveformBlock {
+                        min: -0.8,
+                        max: 0.8,
+                        rms: 0.4,
+                    }],
                     samples_per_block: 1024,
                     total_samples: 1024,
                 },
@@ -401,7 +422,10 @@ mod tests {
         let restored = deserialized.unwrap();
 
         assert_eq!(restored.levels.len(), original.levels.len());
-        assert_eq!(restored.base_samples_per_block, original.base_samples_per_block);
+        assert_eq!(
+            restored.base_samples_per_block,
+            original.base_samples_per_block
+        );
 
         for (orig_level, rest_level) in original.levels.iter().zip(restored.levels.iter()) {
             assert_eq!(orig_level.blocks.len(), rest_level.blocks.len());

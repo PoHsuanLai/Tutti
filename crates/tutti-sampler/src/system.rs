@@ -1,6 +1,9 @@
 //! Sampler system - unified API for streaming, recording, and butler operations.
 
-use crate::butler::{ButlerCommand, CaptureBuffer, CaptureBufferProducer, CaptureId, FlushPriority, FlushRequest, RegionBufferProducer, RegionId};
+use crate::butler::{
+    ButlerCommand, CaptureBuffer, CaptureBufferProducer, CaptureId, FlushPriority, FlushRequest,
+    RegionBufferProducer, RegionId,
+};
 use crate::error::Result;
 use crossbeam_channel::Sender;
 use std::path::PathBuf;
@@ -156,7 +159,11 @@ impl SamplerSystem {
     // File streaming
 
     /// Stream an audio file to a channel.
-    pub fn stream_file(&self, channel_index: usize, file_path: impl Into<PathBuf>) -> StreamBuilder {
+    pub fn stream_file(
+        &self,
+        channel_index: usize,
+        file_path: impl Into<PathBuf>,
+    ) -> StreamBuilder {
         StreamBuilder {
             butler_tx: self.butler_tx.clone(),
             channel_index,
@@ -171,7 +178,9 @@ impl SamplerSystem {
 
     /// Stop streaming for a channel.
     pub fn stop_stream(&self, channel_index: usize) -> &Self {
-        let _ = self.butler_tx.send(ButlerCommand::StopStreaming { channel_index });
+        let _ = self
+            .butler_tx
+            .send(ButlerCommand::StopStreaming { channel_index });
         self
     }
 
@@ -185,7 +194,9 @@ impl SamplerSystem {
     }
 
     /// Get sample cache (for preloading audio files).
-    pub fn sample_cache(&self) -> &std::sync::Arc<dashmap::DashMap<std::path::PathBuf, std::sync::Arc<Wave>>> {
+    pub fn sample_cache(
+        &self,
+    ) -> &std::sync::Arc<dashmap::DashMap<std::path::PathBuf, std::sync::Arc<Wave>>> {
         &self.sample_cache
     }
 
@@ -195,7 +206,9 @@ impl SamplerSystem {
     }
 
     /// Get the automation manager (for parameter automation).
-    pub fn automation(&self) -> &std::sync::Arc<crate::recording::automation_manager::AutomationManager> {
+    pub fn automation(
+        &self,
+    ) -> &std::sync::Arc<crate::recording::automation_manager::AutomationManager> {
         &self.automation
     }
 
@@ -245,7 +258,8 @@ impl SamplerSystemBuilder {
         ));
 
         // Create AutomationManager
-        let automation = std::sync::Arc::new(crate::recording::automation_manager::AutomationManager::new());
+        let automation =
+            std::sync::Arc::new(crate::recording::automation_manager::AutomationManager::new());
 
         // Create AudioInputManager
         let audio_input = std::sync::Arc::new(crate::audio_input::manager::AudioInputManager::new(

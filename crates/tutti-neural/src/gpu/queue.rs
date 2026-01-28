@@ -56,7 +56,6 @@ impl ParamSender {
     pub fn try_send(&self, params: ControlParams) -> Result<(), ControlParams> {
         self.sender.try_send(params).map_err(|e| e.into_inner())
     }
-
 }
 
 /// Control parameters from neural inference

@@ -1,10 +1,21 @@
-# Tutti
+<div align="center">
+  <img src="logo/logo.png" alt="Tutti Logo" width="200"/>
 
-Real-time audio engine built from modular subsystems.
+  # Tutti
+
+  [![Crates.io](https://img.shields.io/crates/v/tutti.svg)](https://crates.io/crates/tutti)
+  [![Documentation](https://docs.rs/tutti/badge.svg)](https://docs.rs/tutti)
+  [![License](https://img.shields.io/crates/l/tutti.svg)](https://github.com/PoHsuanLai/tutti#license)
+  [![CI](https://github.com/PoHsuanLai/tutti/workflows/CI/badge.svg)](https://github.com/PoHsuanLai/tutti/actions)
+
+  A real-time audio engine for DAW applications in Rust. Tutti provides an audio graph runtime, MIDI processing, sample playback, plugin hosting, and neural audio synthesis.
+
+  For audio UI components, see [Armas](https://github.com/PoHsuanLai/Armas).
+</div>
 
 ## Overview
 
-Tutti is an umbrella crate that coordinates multiple audio subsystems into a unified engine:
+Umbrella crate that coordinates multiple audio subsystems:
 
 - **[tutti-core]** - Audio graph runtime (Net, Transport, Metering, PDC)
 - **[tutti-midi]** - MIDI subsystem (I/O, MPE, MIDI 2.0, CC mapping)
@@ -73,8 +84,8 @@ TuttiEngine
 use tutti::prelude::*;
 
 let engine = TuttiEngine::builder()
-    .with_midi()
-    .with_sampler()
+    .midi()
+    .sampler()
     .build()?;
 
 // Access subsystems

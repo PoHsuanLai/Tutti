@@ -1,17 +1,12 @@
 # Tutti MIDI
 
-MIDI subsystem for the Tutti audio engine.
+MIDI I/O, MPE, MIDI 2.0, and CC mapping.
 
-## Overview
+## What this is
 
-Provides comprehensive MIDI functionality:
+MIDI processing for DAW applications. Virtual port routing, hardware device I/O, MIDI Polyphonic Expression (MPE), MIDI 2.0 high-resolution messages, CC-to-parameter mapping with MIDI learn, and MIDI output collection from audio nodes.
 
-- **Port management** - Virtual MIDI ports for routing
-- **Hardware I/O** - Device enumeration and real-time I/O (feature: `midi-io`)
-- **MPE** - MIDI Polyphonic Expression (feature: `mpe`)
-- **MIDI 2.0** - High-resolution messages (feature: `midi2`)
-- **CC mapping** - MIDI learn and parameter control
-- **Output collection** - Lock-free MIDI output from audio nodes
+Uses [midir](https://crates.io/crates/midir) for hardware I/O and [midi-msg](https://crates.io/crates/midi-msg) for message parsing.
 
 ## Quick Start
 

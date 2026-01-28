@@ -58,7 +58,7 @@ pub trait MidiAudioUnit: AudioUnit {
     /// If true, TuttiNet will call `collect_midi_output()` after processing
     /// to route MIDI to downstream nodes.
     fn has_midi_output(&self) -> bool {
-        false  // Default: most nodes don't generate MIDI
+        false // Default: most nodes don't generate MIDI
     }
 
     /// Collect MIDI events generated during the last `process()` call.
@@ -72,7 +72,7 @@ pub trait MidiAudioUnit: AudioUnit {
     /// # RT-Safety
     /// Should avoid allocations where possible (reuse buffers internally)
     fn collect_midi_output(&mut self) -> Vec<MidiEvent> {
-        Vec::new()  // Default: no output
+        Vec::new() // Default: no output
     }
 
     /// Clear any queued MIDI events.

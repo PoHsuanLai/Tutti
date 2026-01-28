@@ -6,9 +6,9 @@
 //! use tutti_midi::{MidiSystem, MpeMode, MpeZoneConfig};
 //!
 //! // Create MIDI system with I/O and MPE
-//! let midi = MidiSystem::new()
-//!     .with_io()
-//!     .with_mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
+//! let midi = MidiSystem::builder()
+//!     .io()
+//!     .mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
 //!     .build()?;
 //!
 //! // List and connect devices
@@ -27,9 +27,9 @@
 //! let event = midi.note_on(0, 60, 100);
 //! ```
 
+use crate::error::Result;
 use crate::event::MidiEvent;
 use crate::multi_port::{MidiPortManager, PortInfo};
-use crate::error::Result;
 use std::sync::Arc;
 
 #[cfg(feature = "midi-io")]
@@ -76,8 +76,8 @@ impl MidiSystem {
     /// # Example
     ///
     /// ```ignore
-    /// let midi = MidiSystem::new()
-    ///     .with_io()
+    /// let midi = MidiSystem::builder()
+    ///     .io()
     ///     .build()?;
     /// ```
     #[allow(clippy::new_ret_no_self)]
@@ -282,7 +282,13 @@ impl MidiSystem {
     }
 
     /// Create a Note On event with frame offset for sample-accurate timing
-    pub fn note_on_at(&self, frame_offset: usize, channel: u8, note: u8, velocity: u8) -> MidiEvent {
+    pub fn note_on_at(
+        &self,
+        frame_offset: usize,
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    ) -> MidiEvent {
         MidiEvent::note_on(frame_offset, channel.min(15), note, velocity)
     }
 
@@ -292,7 +298,13 @@ impl MidiSystem {
     }
 
     /// Create a Note Off event with frame offset
-    pub fn note_off_at(&self, frame_offset: usize, channel: u8, note: u8, velocity: u8) -> MidiEvent {
+    pub fn note_off_at(
+        &self,
+        frame_offset: usize,
+        channel: u8,
+        note: u8,
+        velocity: u8,
+    ) -> MidiEvent {
         MidiEvent::note_off(frame_offset, channel.min(15), note, velocity)
     }
 
@@ -420,26 +432,26 @@ impl Default for MidiSystemBuilder {
 impl MidiSystemBuilder {
     /// Enable hardware MIDI I/O
     #[cfg(feature = "midi-io")]
-    pub fn with_io(mut self) -> Self {
+    pub fn io(mut self) -> Self {
         self.enable_io = true;
         self
     }
 
     /// Enable MPE with the given mode
     #[cfg(feature = "mpe")]
-    pub fn with_mpe(mut self, mode: MpeMode) -> Self {
+    pub fn mpe(mut self, mode: MpeMode) -> Self {
         self.mpe_mode = Some(mode);
         self
     }
 
     /// Enable CC mapping manager
-    pub fn with_cc_mapping(mut self) -> Self {
+    pub fn cc_mapping(mut self) -> Self {
         self.enable_cc_mapping = true;
         self
     }
 
     /// Enable MIDI output collector (for collecting MIDI from audio nodes)
-    pub fn with_output_collector(mut self) -> Self {
+    pub fn output_collector(mut self) -> Self {
         self.enable_output_collector = true;
         self
     }
@@ -467,7 +479,9 @@ impl MidiSystemBuilder {
         };
 
         let output_collector = if self.enable_output_collector {
-            Some(Arc::new(crate::output_collector::MidiOutputAggregator::new()))
+            Some(Arc::new(
+                crate::output_collector::MidiOutputAggregator::new(),
+            ))
         } else {
             None
         };
@@ -591,12 +605,7 @@ impl MpeHandle {
     pub fn has_lower_zone(&self) -> bool {
         self.processor
             .as_ref()
-            .map(|p| {
-                matches!(
-                    p.mode(),
-                    MpeMode::LowerZone(_) | MpeMode::DualZone { .. }
-                )
-            })
+            .map(|p| matches!(p.mode(), MpeMode::LowerZone(_) | MpeMode::DualZone { .. }))
             .unwrap_or(false)
     }
 
@@ -604,12 +613,7 @@ impl MpeHandle {
     pub fn has_upper_zone(&self) -> bool {
         self.processor
             .as_ref()
-            .map(|p| {
-                matches!(
-                    p.mode(),
-                    MpeMode::UpperZone(_) | MpeMode::DualZone { .. }
-                )
-            })
+            .map(|p| matches!(p.mode(), MpeMode::UpperZone(_) | MpeMode::DualZone { .. }))
             .unwrap_or(false)
     }
 }
@@ -802,8 +806,8 @@ mod tests {
     fn test_mpe_builder() {
         use crate::mpe::MpeZoneConfig;
 
-        let midi = MidiSystem::new()
-            .with_mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
+        let midi = MidiSystem::builder()
+            .mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
             .build()
             .unwrap();
 

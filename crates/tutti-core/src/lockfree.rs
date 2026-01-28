@@ -13,7 +13,9 @@ pub struct AtomicFloat {
 
 impl AtomicFloat {
     pub fn new(value: f32) -> Self {
-        Self { value: AtomicF32::new(value) }
+        Self {
+            value: AtomicF32::new(value),
+        }
     }
 
     #[inline]
@@ -58,7 +60,9 @@ pub struct AtomicFlag {
 
 impl AtomicFlag {
     pub fn new(value: bool) -> Self {
-        Self { value: StdAtomicBool::new(value) }
+        Self {
+            value: StdAtomicBool::new(value),
+        }
     }
 
     #[inline]
@@ -98,7 +102,9 @@ pub struct AtomicDouble {
 
 impl AtomicDouble {
     pub fn new(value: f64) -> Self {
-        Self { value: AtomicF64::new(value) }
+        Self {
+            value: AtomicF64::new(value),
+        }
     }
 
     #[inline]

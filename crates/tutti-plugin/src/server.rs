@@ -70,10 +70,8 @@ impl PluginServer {
         // Listen for connection from host
         let listener = TransportListener::bind(&self.config.socket_path).await?;
 
-
         // Accept connection
         let mut transport = listener.accept().await?;
-
 
         // Send Ready message
         transport.send_bridge_message(&BridgeMessage::Ready).await?;
@@ -109,8 +107,11 @@ impl PluginServer {
     /// Handle a single host message
     async fn handle_message(&mut self, msg: HostMessage) -> Result<Option<BridgeMessage>> {
         match msg {
-            HostMessage::LoadPlugin { path, sample_rate, preferred_format } => {
-
+            HostMessage::LoadPlugin {
+                path,
+                sample_rate,
+                preferred_format,
+            } => {
                 let metadata = self.load_plugin(path, sample_rate, preferred_format)?;
 
                 Ok(Some(BridgeMessage::PluginLoaded {
@@ -163,7 +164,6 @@ impl PluginServer {
             }
 
             HostMessage::SetParameter { id, value } => {
-
                 if let Some(ref mut plugin) = self.plugin {
                     // Parse parameter ID as index
                     if let Ok(index) = id.parse::<u32>() {
@@ -182,7 +182,6 @@ impl PluginServer {
             }
 
             HostMessage::GetParameter { id } => {
-
                 if let Some(ref mut plugin) = self.plugin {
                     // Parse parameter ID as index
                     if let Ok(index) = id.parse::<u32>() {
@@ -202,7 +201,6 @@ impl PluginServer {
             }
 
             HostMessage::OpenEditor { parent_handle } => {
-
                 if let Some(ref mut plugin) = self.plugin {
                     // Convert parent_handle u64 to raw pointer
                     let parent_ptr = parent_handle as *mut std::ffi::c_void;
@@ -221,11 +219,9 @@ impl PluginServer {
                             self.editor_open = true;
                             Ok(Some(BridgeMessage::EditorOpened { width, height }))
                         }
-                        Err(e) => {
-                            Ok(Some(BridgeMessage::Error {
-                                message: format!("Failed to open editor: {}", e),
-                            }))
-                        }
+                        Err(e) => Ok(Some(BridgeMessage::Error {
+                            message: format!("Failed to open editor: {}", e),
+                        })),
                     }
                 } else {
                     Ok(Some(BridgeMessage::Error {
@@ -235,7 +231,6 @@ impl PluginServer {
             }
 
             HostMessage::CloseEditor => {
-
                 if let Some(ref mut plugin) = self.plugin {
                     match plugin {
                         #[cfg(feature = "vst2")]
@@ -269,7 +264,6 @@ impl PluginServer {
             }
 
             HostMessage::SetSampleRate { rate } => {
-
                 if let Some(ref mut plugin) = self.plugin {
                     match plugin {
                         #[cfg(feature = "vst2")]
@@ -285,7 +279,6 @@ impl PluginServer {
             }
 
             HostMessage::Reset => {
-
                 // Reset plugin state (silence audio buffers, reset internal state)
                 // VST2/VST3 don't have explicit reset, so we do soft reset via suspend/resume pattern
                 // This is handled by the plugin itself on next process() call
@@ -294,7 +287,6 @@ impl PluginServer {
             }
 
             HostMessage::SaveState => {
-
                 if let Some(ref mut plugin) = self.plugin {
                     let state_result: Result<Vec<u8>> = match plugin {
                         #[cfg(feature = "vst2")]
@@ -306,14 +298,10 @@ impl PluginServer {
                     };
 
                     match state_result {
-                        Ok(data) => {
-                            Ok(Some(BridgeMessage::StateData { data }))
-                        }
-                        Err(e) => {
-                            Ok(Some(BridgeMessage::Error {
-                                message: format!("Failed to save state: {}", e),
-                            }))
-                        }
+                        Ok(data) => Ok(Some(BridgeMessage::StateData { data })),
+                        Err(e) => Ok(Some(BridgeMessage::Error {
+                            message: format!("Failed to save state: {}", e),
+                        })),
                     }
                 } else {
                     Ok(Some(BridgeMessage::StateData { data: vec![] }))
@@ -321,7 +309,6 @@ impl PluginServer {
             }
 
             HostMessage::LoadState { data } => {
-
                 if let Some(ref mut plugin) = self.plugin {
                     let result: Result<()> = match plugin {
                         #[cfg(feature = "vst2")]
@@ -333,14 +320,10 @@ impl PluginServer {
                     };
 
                     match result {
-                        Ok(()) => {
-                            Ok(None)
-                        }
-                        Err(e) => {
-                            Ok(Some(BridgeMessage::Error {
-                                message: format!("Failed to load state: {}", e),
-                            }))
-                        }
+                        Ok(()) => Ok(None),
+                        Err(e) => Ok(Some(BridgeMessage::Error {
+                            message: format!("Failed to load state: {}", e),
+                        })),
                     }
                 } else {
                     Ok(None)
@@ -410,7 +393,8 @@ impl PluginServer {
                         }
                     }
 
-                    let input_slices: Vec<&[f64]> = input_vecs.iter().map(|v| v.as_slice()).collect();
+                    let input_slices: Vec<&[f64]> =
+                        input_vecs.iter().map(|v| v.as_slice()).collect();
                     let mut output_slices: Vec<&mut [f64]> =
                         output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
@@ -432,7 +416,9 @@ impl PluginServer {
 
                     midi_output = match plugin {
                         #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.process_with_midi_f64(&mut audio_buffer, midi_events),
+                        LoadedPlugin::Vst2(p) => {
+                            p.process_with_midi_f64(&mut audio_buffer, midi_events)
+                        }
                         #[cfg(feature = "vst3")]
                         LoadedPlugin::Vst3(p) => {
                             p.process_f64(&mut audio_buffer);
@@ -446,8 +432,7 @@ impl PluginServer {
                     };
 
                     for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel_f64(ch, output) {
-                        }
+                        if let Err(_e) = shared_buffer.write_channel_f64(ch, output) {}
                     }
                 }
                 crate::protocol::SampleFormat::Float32 => {
@@ -462,7 +447,8 @@ impl PluginServer {
                         }
                     }
 
-                    let input_slices: Vec<&[f32]> = input_vecs.iter().map(|v| v.as_slice()).collect();
+                    let input_slices: Vec<&[f32]> =
+                        input_vecs.iter().map(|v| v.as_slice()).collect();
                     let mut output_slices: Vec<&mut [f32]> =
                         output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
@@ -484,16 +470,21 @@ impl PluginServer {
 
                     midi_output = match plugin {
                         #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.process_with_midi(&mut audio_buffer, midi_events),
+                        LoadedPlugin::Vst2(p) => {
+                            p.process_with_midi(&mut audio_buffer, midi_events)
+                        }
                         #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.process_with_midi(&mut audio_buffer, midi_events),
+                        LoadedPlugin::Vst3(p) => {
+                            p.process_with_midi(&mut audio_buffer, midi_events)
+                        }
                         #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.process_with_midi(&mut audio_buffer, midi_events),
+                        LoadedPlugin::Clap(p) => {
+                            p.process_with_midi(&mut audio_buffer, midi_events)
+                        }
                     };
 
                     for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel(ch, output) {
-                        }
+                        if let Err(_e) = shared_buffer.write_channel(ch, output) {}
                     }
                 }
             }
@@ -572,7 +563,8 @@ impl PluginServer {
                         }
                     }
 
-                    let input_slices: Vec<&[f64]> = input_vecs.iter().map(|v| v.as_slice()).collect();
+                    let input_slices: Vec<&[f64]> =
+                        input_vecs.iter().map(|v| v.as_slice()).collect();
                     let mut output_slices: Vec<&mut [f64]> =
                         output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
@@ -595,31 +587,36 @@ impl PluginServer {
                     match plugin {
                         #[cfg(feature = "vst2")]
                         LoadedPlugin::Vst2(p) => {
-                            midi_output =
-                                p.process_with_transport_f64(&mut audio_buffer, midi_events, transport);
+                            midi_output = p.process_with_transport_f64(
+                                &mut audio_buffer,
+                                midi_events,
+                                transport,
+                            );
                         }
                         #[cfg(feature = "vst3")]
                         LoadedPlugin::Vst3(p) => {
-                            let (midi_out, param_out, note_expr_out) = p.process_with_automation_f64(
-                                &mut audio_buffer,
-                                midi_events,
-                                param_changes,
-                                note_expression,
-                                transport,
-                            );
+                            let (midi_out, param_out, note_expr_out) = p
+                                .process_with_automation_f64(
+                                    &mut audio_buffer,
+                                    midi_events,
+                                    param_changes,
+                                    note_expression,
+                                    transport,
+                                );
                             midi_output = midi_out;
                             param_output = param_out;
                             note_expression_output = note_expr_out;
                         }
                         #[cfg(feature = "clap")]
                         LoadedPlugin::Clap(p) => {
-                            let (midi_out, param_out, note_expr_out) = p.process_with_automation_f64(
-                                &mut audio_buffer,
-                                midi_events,
-                                param_changes,
-                                note_expression,
-                                transport,
-                            );
+                            let (midi_out, param_out, note_expr_out) = p
+                                .process_with_automation_f64(
+                                    &mut audio_buffer,
+                                    midi_events,
+                                    param_changes,
+                                    note_expression,
+                                    transport,
+                                );
                             midi_output = midi_out;
                             param_output = param_out;
                             note_expression_output = note_expr_out;
@@ -627,8 +624,7 @@ impl PluginServer {
                     };
 
                     for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel_f64(ch, output) {
-                        }
+                        if let Err(_e) = shared_buffer.write_channel_f64(ch, output) {}
                     }
                 }
                 crate::protocol::SampleFormat::Float32 => {
@@ -643,7 +639,8 @@ impl PluginServer {
                         }
                     }
 
-                    let input_slices: Vec<&[f32]> = input_vecs.iter().map(|v| v.as_slice()).collect();
+                    let input_slices: Vec<&[f32]> =
+                        input_vecs.iter().map(|v| v.as_slice()).collect();
                     let mut output_slices: Vec<&mut [f32]> =
                         output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
 
@@ -698,8 +695,7 @@ impl PluginServer {
                     };
 
                     for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel(ch, output) {
-                        }
+                        if let Err(_e) = shared_buffer.write_channel(ch, output) {}
                     }
                 }
             }
@@ -722,7 +718,6 @@ impl PluginServer {
         if let Some(LoadedPlugin::Vst2(vst2)) = &self.plugin {
             let changes = vst2.poll_parameter_changes();
             for (index, value) in changes {
-
                 if let Some(ref mut transport) = self.transport {
                     transport
                         .send_bridge_message(&BridgeMessage::ParameterChanged { index, value })
@@ -822,7 +817,6 @@ impl PluginServer {
 
 impl Drop for PluginServer {
     fn drop(&mut self) {
-
         // Clean up socket
         let _ = std::fs::remove_file(&self.config.socket_path);
     }

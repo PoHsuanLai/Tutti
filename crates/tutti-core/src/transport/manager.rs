@@ -1,13 +1,13 @@
 //! Transport manager with FSM-based state management.
 
-use std::sync::Arc;
-use std::cell::UnsafeCell;
 use arc_swap::ArcSwap;
-use crossbeam_channel::{Sender, Receiver, unbounded};
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use std::cell::UnsafeCell;
+use std::sync::Arc;
 
+use super::fsm::{TransportEvent, TransportFSM};
+use super::position::{LoopRange, MusicalPosition};
 use super::tempo_map::{TempoMap, TempoMapSnapshot, TimeSignature, BBT};
-use super::fsm::{TransportFSM, TransportEvent};
-use super::position::{MusicalPosition, LoopRange};
 use crate::{AtomicDouble, AtomicFlag, AtomicFloat, AtomicU8};
 use std::sync::atomic::Ordering;
 
@@ -388,9 +388,9 @@ mod tests {
         let manager = TransportManager::new(48000.0);
 
         assert_eq!(manager.get_tempo(), 120.0);
-        assert_eq!(manager.is_paused(), true);
+        assert!(manager.is_paused());
         assert_eq!(manager.get_current_beat(), 0.0);
-        assert_eq!(manager.is_loop_enabled(), false);
+        assert!(!manager.is_loop_enabled());
         assert_eq!(manager.sample_rate(), 48000.0);
     }
 
@@ -418,13 +418,13 @@ mod tests {
     fn test_playback_state() {
         let manager = TransportManager::new(48000.0);
 
-        assert_eq!(manager.is_paused(), true);
+        assert!(manager.is_paused());
 
         manager.set_paused(false);
-        assert_eq!(manager.is_paused(), false);
+        assert!(!manager.is_paused());
 
         manager.set_paused(true);
-        assert_eq!(manager.is_paused(), true);
+        assert!(manager.is_paused());
     }
 
     #[test]
@@ -444,13 +444,13 @@ mod tests {
         let manager = TransportManager::new(48000.0);
 
         // Initially disabled
-        assert_eq!(manager.is_loop_enabled(), false);
+        assert!(!manager.is_loop_enabled());
         assert_eq!(manager.get_loop_range(), None);
 
         manager.set_loop_range(2.0, 8.0);
         manager.set_loop_enabled(true);
 
-        assert_eq!(manager.is_loop_enabled(), true);
+        assert!(manager.is_loop_enabled());
         assert_eq!(manager.get_loop_range(), Some((2.0, 8.0)));
 
         // Disable loop

@@ -1,6 +1,6 @@
 use crate::spatial::types::ChannelLayout;
 use crate::Result;
-use tutti_core::{AudioUnit, BufferRef, BufferMut, SignalFrame, dsp::Signal};
+use tutti_core::{dsp::Signal, AudioUnit, BufferMut, BufferRef, SignalFrame};
 use vbap::{SpeakerConfig, VBAPanner};
 
 /// Default smoothing time for position changes (50ms for smooth automation)

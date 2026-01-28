@@ -50,13 +50,11 @@ impl WavConfig {
 }
 
 /// Export stereo audio to WAV file using ExportOptions
-pub fn export_wav(
-    path: &str,
-    left: &[f32],
-    right: &[f32],
-    options: &ExportOptions,
-) -> Result<()> {
-    use crate::dsp::{apply_dither, calculate_loudness, normalize_loudness, normalize_peak, resample_stereo, DitherState};
+pub fn export_wav(path: &str, left: &[f32], right: &[f32], options: &ExportOptions) -> Result<()> {
+    use crate::dsp::{
+        apply_dither, calculate_loudness, normalize_loudness, normalize_peak, resample_stereo,
+        DitherState,
+    };
     use crate::options::NormalizationMode;
 
     let config = WavConfig {
@@ -88,7 +86,10 @@ pub fn export_wav(
         NormalizationMode::Peak(target_db) => {
             normalize_peak(&mut left_proc, &mut right_proc, target_db);
         }
-        NormalizationMode::Loudness { target_lufs, true_peak_dbtp } => {
+        NormalizationMode::Loudness {
+            target_lufs,
+            true_peak_dbtp,
+        } => {
             let current = calculate_loudness(&left_proc, &right_proc, config.sample_rate);
             normalize_loudness(
                 &mut left_proc,
@@ -103,7 +104,12 @@ pub fn export_wav(
     // Apply dithering if needed
     if options.dither != crate::options::DitherType::None {
         let mut state = DitherState::new(options.dither);
-        apply_dither(&mut left_proc, &mut right_proc, options.bit_depth.bits(), &mut state);
+        apply_dither(
+            &mut left_proc,
+            &mut right_proc,
+            options.bit_depth.bits(),
+            &mut state,
+        );
     }
 
     if options.mono {
@@ -126,12 +132,7 @@ pub fn export_wav(
 /// * `right` - Right channel samples (normalized -1.0 to 1.0)
 /// * `path` - Output file path
 /// * `config` - WAV configuration
-pub fn encode_wav_file(
-    left: &[f32],
-    right: &[f32],
-    path: &Path,
-    config: &WavConfig,
-) -> Result<()> {
+pub fn encode_wav_file(left: &[f32], right: &[f32], path: &Path, config: &WavConfig) -> Result<()> {
     if left.len() != right.len() {
         return Err(ExportError::InvalidData(
             "Left and right channels have different lengths".into(),
@@ -139,8 +140,8 @@ pub fn encode_wav_file(
     }
 
     let spec = create_wav_spec(config);
-    let mut writer = WavWriter::create(path, spec)
-        .map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
+    let mut writer =
+        WavWriter::create(path, spec).map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
 
     write_samples(&mut writer, left, right, config)?;
 
@@ -171,8 +172,8 @@ pub fn encode_wav_memory(left: &[f32], right: &[f32], config: &WavConfig) -> Res
     let mut buffer = Vec::new();
     {
         let cursor = std::io::Cursor::new(&mut buffer);
-        let mut writer = WavWriter::new(cursor, spec)
-            .map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
+        let mut writer =
+            WavWriter::new(cursor, spec).map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
 
         write_samples(&mut writer, left, right, config)?;
 
@@ -207,8 +208,8 @@ pub fn encode_wav_mono_memory(samples: &[f32], config: &WavConfig) -> Result<Vec
     let mut buffer = Vec::new();
     {
         let cursor = std::io::Cursor::new(&mut buffer);
-        let mut writer = WavWriter::new(cursor, spec)
-            .map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
+        let mut writer =
+            WavWriter::new(cursor, spec).map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
 
         write_mono_samples(&mut writer, samples, config)?;
 
@@ -232,8 +233,8 @@ pub fn encode_wav_mono_file(samples: &[f32], path: &Path, config: &WavConfig) ->
         },
     };
 
-    let mut writer = WavWriter::create(path, spec)
-        .map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
+    let mut writer =
+        WavWriter::create(path, spec).map_err(|e| ExportError::Io(std::io::Error::other(e)))?;
 
     write_mono_samples(&mut writer, samples, config)?;
 

@@ -1,8 +1,8 @@
 //! Dynamics processors with sidechain support.
 
-use tutti_core::AtomicFloat;
-use tutti_core::{AudioUnit, BufferRef, BufferMut, SignalFrame, dsp::DEFAULT_SR};
 use std::sync::Arc;
+use tutti_core::AtomicFloat;
+use tutti_core::{dsp::DEFAULT_SR, AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 /// Convert linear amplitude to decibels
 #[inline]
@@ -111,31 +111,25 @@ impl SidechainCompressor {
         self.ratio.set(ratio.max(1.0));
     }
 
-
     pub fn set_attack(&self, seconds: f32) {
         self.attack.set(seconds.max(0.0));
     }
-
 
     pub fn set_release(&self, seconds: f32) {
         self.release.set(seconds.max(0.0));
     }
 
-
     pub fn set_makeup(&self, db: f32) {
         self.makeup_db.set(db);
     }
-
 
     pub fn gain_reduction_db(&self) -> f32 {
         self.gain_reduction
     }
 
-
     pub fn envelope_level(&self) -> f32 {
         self.envelope
     }
-
 
     #[inline]
     fn update_coefficients(&mut self) {
@@ -152,7 +146,6 @@ impl SidechainCompressor {
             self.last_release = release;
         }
     }
-
 
     #[inline]
     fn compute_gain_reduction(&self, input_db: f32) -> f32 {
@@ -183,7 +176,6 @@ impl SidechainCompressor {
             }
         }
     }
-
 
     #[inline]
     fn process_sample(&mut self, audio: f32, sidechain: f32) -> f32 {
@@ -618,7 +610,6 @@ impl SidechainGate {
         }
     }
 
-
     pub fn with_range(mut self, range_db: f32) -> Self {
         self.range_db = Arc::new(AtomicFloat::new(range_db.min(0.0)));
         self
@@ -641,11 +632,9 @@ impl SidechainGate {
         Arc::clone(&self.range_db)
     }
 
-
     pub fn is_open(&self) -> bool {
         self.gate_level > 0.5
     }
-
 
     pub fn gate_level(&self) -> f32 {
         self.gate_level
@@ -688,8 +677,7 @@ impl SidechainGate {
             // Gate should be open
             self.hold_counter = self.hold_samples;
             // Attack - open the gate
-            self.gate_level =
-                self.attack_coeff * self.gate_level + (1.0 - self.attack_coeff) * 1.0;
+            self.gate_level = self.attack_coeff * self.gate_level + (1.0 - self.attack_coeff) * 1.0;
         } else if self.hold_counter > 0 {
             // In hold phase - keep gate open
             self.hold_counter -= 1;
@@ -922,8 +910,7 @@ impl AudioUnit for StereoSidechainGate {
 
         if gate_open {
             self.hold_counter = self.hold_samples;
-            self.gate_level =
-                self.attack_coeff * self.gate_level + (1.0 - self.attack_coeff) * 1.0;
+            self.gate_level = self.attack_coeff * self.gate_level + (1.0 - self.attack_coeff) * 1.0;
         } else if self.hold_counter > 0 {
             self.hold_counter -= 1;
         } else {

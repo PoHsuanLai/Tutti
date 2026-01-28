@@ -1,9 +1,9 @@
 //! Real-time audio callback for FunDSP Net processing.
 
 use crate::metering::MeteringManager;
-use fundsp::realnet::NetBackend;
 use crate::transport::TransportManager;
 use fundsp::audiounit::AudioUnit;
+use fundsp::realnet::NetBackend;
 use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;

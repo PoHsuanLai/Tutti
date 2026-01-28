@@ -65,23 +65,17 @@ pub use tutti_core::AudioUnit;
 mod error;
 pub use error::{Error, Result};
 
-mod lfo;
-mod envelope_follower;
 mod dynamics;
+mod envelope_follower;
+mod lfo;
 mod spatial;
 
-pub use lfo::{LfoNode, LfoShape, LfoMode};
-pub use envelope_follower::{EnvelopeFollowerNode, EnvelopeMode};
 pub use dynamics::{
-    SidechainCompressor, StereoSidechainCompressor,
-    SidechainGate, StereoSidechainGate,
+    SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate,
 };
-pub use spatial::{
-    ChannelLayout,
-};
+pub use envelope_follower::{EnvelopeFollowerNode, EnvelopeMode};
+pub use lfo::{LfoMode, LfoNode, LfoShape};
+pub use spatial::ChannelLayout;
 
 #[cfg(feature = "spatial-audio")]
-pub use spatial::{
-    SpatialPannerNode, BinauralPannerNode,
-    BinauralPanner, SpatialPanner,
-};
+pub use spatial::{BinauralPanner, BinauralPannerNode, SpatialPanner, SpatialPannerNode};

@@ -114,7 +114,8 @@ impl AudioUnit for PdcDelayUnit {
     }
 
     fn footprint(&self) -> usize {
-        std::mem::size_of::<Self>() + self.delay_buffer.delay_samples() * 2 * std::mem::size_of::<f32>()
+        std::mem::size_of::<Self>()
+            + self.delay_buffer.delay_samples() * 2 * std::mem::size_of::<f32>()
     }
 }
 

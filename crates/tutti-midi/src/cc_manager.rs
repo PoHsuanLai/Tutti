@@ -51,7 +51,7 @@ impl CCMappingManager {
 
     // ==================== Mapping CRUD ====================
 
-    /// Add a MIDI CC mapping 
+    /// Add a MIDI CC mapping
     pub fn add_mapping(
         &self,
         channel: Option<MidiChannel>,
@@ -66,7 +66,7 @@ impl CCMappingManager {
         id
     }
 
-    /// Remove a MIDI CC mapping 
+    /// Remove a MIDI CC mapping
     pub fn remove_mapping(&self, mapping_id: MappingId) -> bool {
         self.mappings.remove(&mapping_id).is_some()
     }
@@ -102,7 +102,7 @@ impl CCMappingManager {
             .collect()
     }
 
-    /// Enable/disable a MIDI CC mapping 
+    /// Enable/disable a MIDI CC mapping
     pub fn set_mapping_enabled(&self, mapping_id: MappingId, enabled: bool) -> bool {
         if let Some(mut entry) = self.mappings.get_mut(&mapping_id) {
             entry.enabled = enabled;
@@ -112,14 +112,14 @@ impl CCMappingManager {
         }
     }
 
-    /// Clear all MIDI CC mappings 
+    /// Clear all MIDI CC mappings
     pub fn clear_all(&self) {
         self.mappings.clear();
     }
 
     // ==================== MIDI Learn ====================
 
-    /// Start MIDI learn mode for a target 
+    /// Start MIDI learn mode for a target
     pub fn start_learn(
         &self,
         target: CCTarget,
@@ -136,12 +136,12 @@ impl CCMappingManager {
         self.learn_state.store(Arc::new(Some(state)));
     }
 
-    /// Cancel MIDI learn mode 
+    /// Cancel MIDI learn mode
     pub fn cancel_learn(&self) {
         self.learn_state.store(Arc::new(None));
     }
 
-    /// Check if we're in MIDI learn mode 
+    /// Check if we're in MIDI learn mode
     pub fn is_learning(&self) -> bool {
         self.learn_state.load().is_some()
     }

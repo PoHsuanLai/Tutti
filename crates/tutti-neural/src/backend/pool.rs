@@ -1,11 +1,11 @@
 //! GPU backend pool for managing Burn backends across different devices
 
+use crate::error::{GpuError, Result};
+use burn::backend::wgpu::{init_device, RuntimeOptions, WgpuDevice, WgpuSetup};
 use burn::backend::{Autodiff, NdArray};
-use burn::backend::wgpu::{WgpuDevice, WgpuSetup, init_device, RuntimeOptions};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use wgpu::{Backends, DeviceDescriptor, Features, Limits, PowerPreference};
-use crate::error::{GpuError, Result};
 
 /// GPU backend type using Wgpu (Burn's Wgpu backend with fusion + autodiff)
 pub type GpuBackend = Autodiff<burn::backend::wgpu::Wgpu>;
@@ -52,28 +52,19 @@ pub enum GpuBackendType {
     OpenGl,
 }
 
-
 impl BackendPool {
     /// Create a new backend pool with automatic GPU detection
     pub fn new() -> Result<Self> {
-        tracing::info!("Initializing GPU backend pool...");
-
         // CPU device (always available)
         let cpu_device = Arc::new(CpuDevice::default());
-        tracing::info!("CPU backend initialized");
 
         // Try to initialize GPU device
         let (gpu_device, gpu_info) = match Self::init_gpu() {
             Ok((device, info)) => {
-                tracing::info!(
-                    "GPU backend initialized: {} ({:?})",
-                    info.name,
-                    info.backend
-                );
                 (Some(Arc::new(device)), Some(info))
             }
-            Err(e) => {
-                tracing::warn!("GPU backend initialization failed: {}. Using CPU fallback.", e);
+            Err(_e) => {
+                // GPU initialization failed, using CPU fallback
                 (None, None)
             }
         };
@@ -196,14 +187,12 @@ impl BackendPool {
     pub fn gpu_info(&self) -> Option<&GpuInfo> {
         self.gpu_info.as_ref()
     }
-
 }
 
 impl Default for BackendPool {
     fn default() -> Self {
-        Self::new().unwrap_or_else(|e| {
-            tracing::error!("Failed to create BackendPool: {}", e);
-            // Fallback to CPU-only
+        Self::new().unwrap_or_else(|_e| {
+            // Failed to create BackendPool, fallback to CPU-only
             Self {
                 gpu_device: None,
                 cpu_device: Arc::new(CpuDevice::default()),

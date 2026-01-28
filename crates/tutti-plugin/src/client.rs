@@ -159,13 +159,12 @@ impl PluginClient {
         };
 
         // Determine negotiated format: use f64 if we preferred it AND plugin supports it
-        let negotiated_format = if preferred_format == SampleFormat::Float64
-            && metadata.supports_f64
-        {
-            SampleFormat::Float64
-        } else {
-            SampleFormat::Float32
-        };
+        let negotiated_format =
+            if preferred_format == SampleFormat::Float64 && metadata.supports_f64 {
+                SampleFormat::Float64
+            } else {
+                SampleFormat::Float32
+            };
 
         // Create shared memory for audio with the negotiated format
         let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
@@ -579,10 +578,9 @@ impl AudioUnit for PluginClient {
 
                 if success {
                     for ch in 0..self.outputs {
-                        if let Ok(n) = bridge.read_output_channel_into_f64(
-                            ch,
-                            &mut self.scratch_f64.output[..size],
-                        ) {
+                        if let Ok(n) = bridge
+                            .read_output_channel_into_f64(ch, &mut self.scratch_f64.output[..size])
+                        {
                             for i in 0..n {
                                 output.set_f32(ch, i, self.scratch_f64.output[i] as f32);
                             }
@@ -734,10 +732,9 @@ impl AudioUnit<F64> for PluginClient {
 
                 if success {
                     for ch in 0..self.outputs {
-                        if let Ok(n) = bridge.read_output_channel_into_f64(
-                            ch,
-                            &mut self.scratch_f64.output[..size],
-                        ) {
+                        if let Ok(n) = bridge
+                            .read_output_channel_into_f64(ch, &mut self.scratch_f64.output[..size])
+                        {
                             for i in 0..n {
                                 output.set_scalar(ch, i, self.scratch_f64.output[i]);
                             }

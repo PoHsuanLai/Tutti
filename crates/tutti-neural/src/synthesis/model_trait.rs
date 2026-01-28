@@ -232,18 +232,8 @@ pub fn load_model_config(model_path: &std::path::Path) -> Option<ModelConfig> {
     }
 
     match std::fs::read_to_string(&toml_path) {
-        Ok(contents) => {
-            toml::from_str(&contents)
-                .map_err(|e| {
-                    tracing::warn!("Failed to parse model config TOML: {}", e);
-                    e
-                })
-                .ok()
-        }
-        Err(e) => {
-            tracing::warn!("Failed to read model config file: {}", e);
-            None
-        }
+        Ok(contents) => toml::from_str(&contents).ok(),
+        Err(_e) => None,
     }
 }
 
@@ -260,10 +250,7 @@ pub fn parameter_from_tensor_name(name: &str, index: usize) -> ParameterDescript
     ParameterDescriptor {
         id: name.to_string(),
         display_name: format!("Parameter {}", index),
-        param_type: ParameterType::Continuous {
-            min: 0.0,
-            max: 1.0,
-        },
+        param_type: ParameterType::Continuous { min: 0.0, max: 1.0 },
         default: 0.5,
         description: Some(format!("Neural parameter from tensor: {}", name)),
         unit: None,

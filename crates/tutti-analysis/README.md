@@ -1,17 +1,12 @@
 # Tutti Analysis
 
-Audio analysis tools for the Tutti audio engine.
+Audio analysis: waveforms, transients, pitch, correlation.
 
-## Overview
+## What this is
 
-Efficient algorithms for audio analysis:
+Analysis algorithms for DAW waveform displays and audio processing. Waveform thumbnails (multi-resolution min/max/RMS), transient/onset detection (spectral flux), pitch detection (YIN algorithm), and stereo correlation (phase, width, balance).
 
-- **Waveform thumbnails** - Multi-resolution min/max/RMS summaries for visualization
-- **Transient detection** - Onset/beat detection using spectral flux
-- **Pitch detection** - Monophonic pitch tracking using the YIN algorithm
-- **Stereo correlation** - Phase correlation, stereo width, and balance analysis
-
-All functions operate on raw `&[f32]` sample buffers - no framework dependencies.
+Operates on raw `&[f32]` buffers. Uses [rustfft](https://crates.io/crates/rustfft) for FFT operations.
 
 ## Quick Start
 

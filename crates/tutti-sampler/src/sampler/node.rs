@@ -3,9 +3,9 @@
 //! - `SamplerUnit`: In-memory playback
 //! - `StreamingSamplerUnit`: Disk streaming playback
 
-use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, Wave};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, Wave};
 
 /// In-memory sample playback.
 pub struct SamplerUnit {
@@ -266,7 +266,6 @@ impl AudioUnit for SamplerUnit {
     }
 }
 
-
 mod streaming {
     use super::*;
     use crate::butler::RegionBufferConsumer;
@@ -423,7 +422,6 @@ mod streaming {
         }
     }
 }
-
 
 pub use streaming::StreamingSamplerUnit;
 

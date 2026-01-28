@@ -1,11 +1,11 @@
 //! Lock-free ring buffers for audio streaming.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use ringbuf::{
     traits::{Consumer, Observer, Producer, Split},
     HeapCons, HeapProd, HeapRb,
 };
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use super::request::{CaptureId, RegionId};

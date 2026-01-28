@@ -17,16 +17,16 @@
 //! use tutti_midi::MidiSystem;
 //!
 //! // Basic MIDI I/O
-//! let midi = MidiSystem::new()
-//!     .with_io()
+//! let midi = MidiSystem::builder()
+//!     .io()
 //!     .build()?;
 //! midi.connect_device_by_name("Keyboard")?;
 //! midi.send_note_on(0, 60, 100)?;
 //!
 //! // With CC mapping
-//! let midi = MidiSystem::new()
-//!     .with_io()
-//!     .with_cc_mapping()
+//! let midi = MidiSystem::builder()
+//!     .io()
+//!     .cc_mapping()
 //!     .build()?;
 //!
 //! if let Some(cc_mgr) = midi.cc_manager() {
@@ -43,10 +43,10 @@ mod system;
 pub use system::{MidiSystem, MidiSystemBuilder};
 
 // Sub-handles
-#[cfg(feature = "mpe")]
-pub use system::MpeHandle;
 #[cfg(feature = "midi2")]
 pub use system::Midi2Handle;
+#[cfg(feature = "mpe")]
+pub use system::MpeHandle;
 
 // Essential types users need
 pub use event::{MidiEvent, RawMidiEvent};
@@ -70,7 +70,7 @@ pub use input::MidiInputDevice;
 pub use file::{MidiEventType, ParsedMidiFile, TimedMidiEvent};
 
 // Utility functions
-pub use utils::{hz_to_note, note_to_hz, velocity_to_gain, gain_to_velocity};
+pub use utils::{gain_to_velocity, hz_to_note, note_to_hz, velocity_to_gain};
 
 // CC mapping types
 pub use cc_manager::{CCMappingManager, CCProcessResult};
@@ -78,14 +78,14 @@ pub use cc_mapping::{CCMapping, CCMappingRegistry, CCNumber, CCTarget, MappingId
 
 // MIDI output collection types
 pub use output_collector::{
-    MidiOutputProducer, MidiOutputConsumer, MidiOutputAggregator,
-    midi_output_channel, midi_output_channel_with_capacity,
+    midi_output_channel, midi_output_channel_with_capacity, MidiOutputAggregator,
+    MidiOutputConsumer, MidiOutputProducer,
 };
 
 // Re-export essential upstream types (users shouldn't need to import midi-msg directly)
 pub use midi_msg::{
-    Channel, ChannelVoiceMsg, ChannelModeMsg, MidiMsg,
-    ControlChange, SystemRealTimeMsg, SystemCommonMsg,
+    Channel, ChannelModeMsg, ChannelVoiceMsg, ControlChange, MidiMsg, SystemCommonMsg,
+    SystemRealTimeMsg,
 };
 
 pub(crate) mod async_port;
@@ -109,4 +109,3 @@ pub(crate) mod mpe;
 
 #[cfg(feature = "midi2")]
 pub(crate) mod midi2;
-

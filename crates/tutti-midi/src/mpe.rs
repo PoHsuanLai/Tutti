@@ -898,13 +898,8 @@ mod tests {
         let processor = MpeProcessor::new(MpeMode::LowerZone(MpeZoneConfig::lower(15)));
 
         // Note on
-        let note_on = super::super::midi2::Midi2Event::note_on(
-            0,
-            u4::new(0),
-            u4::new(0),
-            u7::new(60),
-            65535,
-        );
+        let note_on =
+            super::super::midi2::Midi2Event::note_on(0, u4::new(0), u4::new(0), u7::new(60), 65535);
         processor.process_midi2(&note_on);
 
         // Per-note pitch bend (max up)

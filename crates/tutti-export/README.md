@@ -1,16 +1,12 @@
 # Tutti Export
 
-Offline audio export and rendering for the Tutti audio engine.
+Offline rendering and audio export.
 
-## Overview
+## What this is
 
-Provides offline rendering and export to WAV and FLAC formats with DSP processing:
+Renders audio graphs offline (faster than real-time) and exports to WAV/FLAC. Includes sample rate conversion, dithering (rectangular, triangular, noise-shaped), and loudness normalization (EBU R128).
 
-- **Offline rendering** - Render audio graphs to memory buffers
-- **Format encoding** - Export to WAV, FLAC (pure Rust)
-- **DSP utilities** - Resampling, dithering, loudness normalization (LUFS)
-
-The export system is instruction-driven and framework-agnostic.
+Uses [hound](https://crates.io/crates/hound) for WAV, [flacenc](https://crates.io/crates/flacenc) for FLAC, [rubato](https://crates.io/crates/rubato) for resampling, and [ebur128](https://crates.io/crates/ebur128) for loudness metering.
 
 ## Quick Start
 
@@ -28,12 +24,6 @@ let right = vec![0.0f32; 44100];
 let options = ExportOptions::default();
 tutti_export::export_wav("output.wav", &left, &right, &options)?;
 ```
-
-## Features
-
-- **Resampling** - Sample rate conversion using rubato
-- **Dithering** - Rectangular, triangular, and noise-shaped dithering
-- **Normalization** - Peak and LUFS/EBU R128 loudness normalization
 
 ## Feature Flags
 

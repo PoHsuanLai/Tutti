@@ -11,7 +11,10 @@
 
 /// A single block of waveform summary data
 #[derive(Debug, Clone, Copy, Default)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct WaveformBlock {
     /// Minimum sample value in this block
     pub min: f32,
@@ -23,7 +26,10 @@ pub struct WaveformBlock {
 
 /// Waveform summary for a single channel
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct WaveformSummary {
     /// Summary blocks
     pub blocks: Vec<WaveformBlock>,
@@ -119,7 +125,10 @@ impl WaveformSummary {
 
 /// Stereo waveform summary (left and right channels)
 #[derive(Debug, Clone, Default)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct StereoWaveformSummary {
     /// Left channel summary
     pub left: WaveformSummary,
@@ -181,13 +190,17 @@ fn compute_block(samples: &[f32]) -> WaveformBlock {
 ///
 /// # Returns
 /// Waveform summary for the first channel
-pub fn compute_summary(samples: &[f32], channels: usize, samples_per_block: usize) -> WaveformSummary {
+pub fn compute_summary(
+    samples: &[f32],
+    channels: usize,
+    samples_per_block: usize,
+) -> WaveformSummary {
     if samples.is_empty() || samples_per_block == 0 || channels == 0 {
         return WaveformSummary::new(samples_per_block);
     }
 
     let channel_samples = samples.len() / channels;
-    let num_blocks = (channel_samples + samples_per_block - 1) / samples_per_block;
+    let num_blocks = channel_samples.div_ceil(samples_per_block);
     let mut summary = WaveformSummary::with_capacity(samples_per_block, num_blocks);
     summary.total_samples = channel_samples;
 
@@ -238,7 +251,7 @@ pub fn compute_stereo_summary(samples: &[f32], samples_per_block: usize) -> Ster
     }
 
     let channel_samples = samples.len() / 2;
-    let num_blocks = (channel_samples + samples_per_block - 1) / samples_per_block;
+    let num_blocks = channel_samples.div_ceil(samples_per_block);
 
     let mut left = WaveformSummary::with_capacity(samples_per_block, num_blocks);
     let mut right = WaveformSummary::with_capacity(samples_per_block, num_blocks);
@@ -305,7 +318,10 @@ pub fn compute_stereo_summary(samples: &[f32], samples_per_block: usize) -> Ster
 ///
 /// Stores summaries at multiple zoom levels for efficient rendering.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct MultiResolutionSummary {
     /// Summaries at different resolutions (index 0 = finest, higher = coarser)
     pub levels: Vec<WaveformSummary>,
@@ -350,7 +366,9 @@ impl MultiResolutionSummary {
     /// Level 0 is finest, higher levels are coarser.
     /// Returns the coarsest level if index is out of bounds.
     pub fn at_level(&self, level: usize) -> &WaveformSummary {
-        self.levels.get(level).unwrap_or_else(|| self.levels.last().unwrap())
+        self.levels
+            .get(level)
+            .unwrap_or_else(|| self.levels.last().unwrap())
     }
 
     /// Get the appropriate level for a given zoom factor
@@ -379,7 +397,7 @@ impl MultiResolutionSummary {
 /// Downsample a summary by combining adjacent blocks (2:1)
 fn downsample_summary(summary: &WaveformSummary) -> WaveformSummary {
     let new_samples_per_block = summary.samples_per_block * 2;
-    let num_blocks = (summary.blocks.len() + 1) / 2;
+    let num_blocks = summary.blocks.len().div_ceil(2);
     let mut result = WaveformSummary::with_capacity(new_samples_per_block, num_blocks);
     result.total_samples = summary.total_samples;
 
@@ -484,6 +502,9 @@ mod tests {
         summary.append_samples(&chunk2);
         // Note: streaming mode may not perfectly handle cross-chunk blocks
         // The important thing is that blocks are added
-        assert!(summary.len() >= 4, "Should have at least 4 blocks after 500 samples");
+        assert!(
+            summary.len() >= 4,
+            "Should have at least 4 blocks after 500 samples"
+        );
     }
 }

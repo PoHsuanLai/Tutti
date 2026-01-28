@@ -171,11 +171,8 @@ impl TuttiSystemBuilder {
         // Initialize PDC with outputs count (channels = outputs for now)
         let pdc = Arc::new(PdcManager::new(outputs, 0));
 
-        let mut callback_state = AudioCallbackState::new(
-            transport.clone(),
-            metering.clone(),
-            sample_rate,
-        );
+        let mut callback_state =
+            AudioCallbackState::new(transport.clone(), metering.clone(), sample_rate);
 
         callback_state.set_net_backend(backend);
 

@@ -1,15 +1,12 @@
 # Tutti Plugin
 
-Multi-process plugin hosting for Tutti.
+VST2, VST3, and CLAP plugin hosting.
 
-## Overview
+## What this is
 
-Multi-process architecture for loading VST2, VST3, and CLAP plugins in isolated server processes.
+Loads audio plugins in separate server processes. Each plugin runs in its own process, so crashes don't affect the main application. Audio buffers are passed via shared memory (mmap).
 
-**Benefits:**
-- **Crash isolation** - Plugin crashes don't crash the DAW
-- **Security** - Malicious plugins sandboxed from main process
-- **Memory safety** - Separate address spaces
+Uses [vst](https://crates.io/crates/vst) for VST2, [vst3-sys](https://crates.io/crates/vst3-sys) for VST3, and [clap-sys](https://crates.io/crates/clap-sys) for CLAP.
 
 ## Quick Start
 
@@ -28,12 +25,9 @@ let buffer = AudioBuffer { /* ... */ };
 client.process(&mut buffer);
 ```
 
-## Features
+## How it works
 
-- **32-bit and 64-bit audio** - Full support for both sample formats
-- **Zero-copy shared memory** - Audio buffers passed via mmap
-- **Sample-accurate MIDI** - Frame-precise event timing
-- **Full transport context** - Tempo, time signature, play state
+Client-server architecture with IPC. Audio buffers transferred via shared memory. Supports both f32 and f64 sample formats. MIDI events include frame offsets for sample-accurate timing. Transport context (tempo, time signature, position) is passed to plugins.
 
 ## License
 

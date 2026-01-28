@@ -381,7 +381,8 @@ impl ProcessContext {
         }
 
         // Set validity flags for fields we populate
-        state |= K_PROJECT_TIME_MUSIC_VALID | K_BAR_POSITION_VALID | K_TEMPO_VALID | K_TIME_SIG_VALID;
+        state |=
+            K_PROJECT_TIME_MUSIC_VALID | K_BAR_POSITION_VALID | K_TEMPO_VALID | K_TIME_SIG_VALID;
 
         Self {
             state,
@@ -447,7 +448,7 @@ struct DataEvent {
     header: EventHeader,
     size: u32,
     event_type: u32,
-    bytes: [u8; 16],  // Up to 16 bytes of MIDI data
+    bytes: [u8; 16], // Up to 16 bytes of MIDI data
 }
 
 /// VST3 Poly Pressure Event
@@ -705,7 +706,7 @@ impl EventList {
             sample_offset,
             ppq_position: 0.0,
             flags: 0,
-            event_type: 0,  // Will be set below
+            event_type: 0, // Will be set below
         };
 
         match event.msg {
@@ -750,9 +751,9 @@ impl EventList {
                 let channel_byte = event.channel as u8;
                 let (cc, value) = match control {
                     ControlChange::CC { control, value } => (control, value),
-                    ControlChange::CCHighRes { control1, value, .. } => {
-                        (control1, (value >> 7) as u8)
-                    }
+                    ControlChange::CCHighRes {
+                        control1, value, ..
+                    } => (control1, (value >> 7) as u8),
                     _ => return None,
                 };
 
@@ -766,7 +767,7 @@ impl EventList {
                 Some(Vst3Event::Data(DataEvent {
                     header,
                     size: 3,
-                    event_type: 0,  // Legacy MIDI
+                    event_type: 0, // Legacy MIDI
                     bytes,
                 }))
             }
@@ -818,9 +819,7 @@ impl EventList {
     }
 
     /// Convert protocol note expression to VST3 event
-    fn note_expression_to_vst3_event(
-        expr: &crate::protocol::NoteExpressionValue,
-    ) -> Vst3Event {
+    fn note_expression_to_vst3_event(expr: &crate::protocol::NoteExpressionValue) -> Vst3Event {
         let header = EventHeader {
             bus_index: 0,
             sample_offset: expr.sample_offset,
@@ -874,12 +873,18 @@ unsafe extern "system" fn event_list_query_interface(
 
 unsafe extern "system" fn event_list_add_ref(this: *mut c_void) -> u32 {
     let event_list = &*(this as *const EventList);
-    event_list.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    event_list
+        .ref_count
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1
 }
 
 unsafe extern "system" fn event_list_release(this: *mut c_void) -> u32 {
     let event_list = &*(this as *const EventList);
-    let count = event_list.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
+    let count = event_list
+        .ref_count
+        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+        - 1;
     if count == 0 {
         let _ = Box::from_raw(this as *mut EventList);
     }
@@ -1031,12 +1036,18 @@ unsafe extern "system" fn param_queue_query_interface(
 
 unsafe extern "system" fn param_queue_add_ref(this: *mut c_void) -> u32 {
     let queue = &*(this as *const ParamValueQueue);
-    queue.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    queue
+        .ref_count
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1
 }
 
 unsafe extern "system" fn param_queue_release(this: *mut c_void) -> u32 {
     let queue = &*(this as *const ParamValueQueue);
-    let count = queue.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
+    let count = queue
+        .ref_count
+        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+        - 1;
     if count == 0 {
         let _ = Box::from_raw(this as *mut ParamValueQueue);
     }
@@ -1164,12 +1175,18 @@ unsafe extern "system" fn param_changes_query_interface(
 
 unsafe extern "system" fn param_changes_add_ref(this: *mut c_void) -> u32 {
     let changes = &*(this as *const ParameterChanges);
-    changes.ref_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+    changes
+        .ref_count
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        + 1
 }
 
 unsafe extern "system" fn param_changes_release(this: *mut c_void) -> u32 {
     let changes = &*(this as *const ParameterChanges);
-    let count = changes.ref_count.fetch_sub(1, std::sync::atomic::Ordering::SeqCst) - 1;
+    let count = changes
+        .ref_count
+        .fetch_sub(1, std::sync::atomic::Ordering::SeqCst)
+        - 1;
     if count == 0 {
         let _ = Box::from_raw(this as *mut ParameterChanges);
     }
@@ -1430,7 +1447,6 @@ unsafe impl Sync for Vst3Instance {}
 impl Vst3Instance {
     /// Load a VST3 plugin from path
     pub fn load(path: &Path, sample_rate: f32) -> Result<Self> {
-
         if !path.exists() {
             return Err(BridgeError::LoadFailed(format!(
                 "Plugin not found: {:?}",
@@ -1558,7 +1574,6 @@ impl Vst3Instance {
         // Initialize the plugin
         instance.initialize()?;
 
-
         Ok(instance)
     }
 
@@ -1578,8 +1593,7 @@ impl Vst3Instance {
         // Initialize controller if separate
         if let (Some(ctrl), Some(vtable)) = (self.controller, self.controller_vtable) {
             let result = unsafe { ((*vtable).initialize)(ctrl, std::ptr::null_mut()) };
-            if result != K_RESULT_OK && result != K_RESULT_TRUE {
-            }
+            if result != K_RESULT_OK && result != K_RESULT_TRUE {}
         }
 
         // Setup processing with negotiated sample format
@@ -1610,13 +1624,11 @@ impl Vst3Instance {
         // Set active state
         let result = unsafe { ((*self.processor_vtable).set_processing)(self.processor, 1) };
 
-        if result != K_RESULT_OK && result != K_RESULT_TRUE {
-        }
+        if result != K_RESULT_OK && result != K_RESULT_TRUE {}
 
         let result = unsafe { ((*self.component_vtable).set_active)(self.component, 1) };
 
-        if result != K_RESULT_OK && result != K_RESULT_TRUE {
-        }
+        if result != K_RESULT_OK && result != K_RESULT_TRUE {}
 
         self.is_active = true;
         Ok(())
@@ -1728,8 +1740,7 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {
-        }
+        if result != K_RESULT_OK {}
     }
 
     /// Process audio with MIDI events through the plugin
@@ -1809,8 +1820,7 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {
-        }
+        if result != K_RESULT_OK {}
 
         // Collect output MIDI events from the plugin (e.g., synths, arpeggiators)
         output_event_list.to_midi_events()
@@ -1824,14 +1834,26 @@ impl Vst3Instance {
         param_changes: &crate::protocol::ParameterChanges,
         note_expression: &crate::protocol::NoteExpressionChanges,
         transport: &crate::protocol::TransportInfo,
-    ) -> (Vec<MidiEvent>, crate::protocol::ParameterChanges, crate::protocol::NoteExpressionChanges) {
+    ) -> (
+        Vec<MidiEvent>,
+        crate::protocol::ParameterChanges,
+        crate::protocol::NoteExpressionChanges,
+    ) {
         if !self.is_active {
-            return (Vec::new(), crate::protocol::ParameterChanges::new(), crate::protocol::NoteExpressionChanges::new());
+            return (
+                Vec::new(),
+                crate::protocol::ParameterChanges::new(),
+                crate::protocol::NoteExpressionChanges::new(),
+            );
         }
 
         let num_samples = buffer.num_samples;
         if num_samples == 0 {
-            return (Vec::new(), crate::protocol::ParameterChanges::new(), crate::protocol::NoteExpressionChanges::new());
+            return (
+                Vec::new(),
+                crate::protocol::ParameterChanges::new(),
+                crate::protocol::NoteExpressionChanges::new(),
+            );
         }
 
         // Update buffer pointers
@@ -1863,7 +1885,10 @@ impl Vst3Instance {
         // Create event list from MIDI and note expression events
         let mut input_event_list_box: Option<Box<EventList>> =
             if !midi_events.is_empty() || !note_expression.is_empty() {
-                Some(EventList::from_midi_and_expression(midi_events, note_expression))
+                Some(EventList::from_midi_and_expression(
+                    midi_events,
+                    note_expression,
+                ))
             } else {
                 None
             };
@@ -1895,7 +1920,8 @@ impl Vst3Instance {
         let mut output_param_changes = ParameterChanges::new_empty();
 
         // Create process context from transport info
-        let mut process_context = ProcessContext::from_transport_info(transport, buffer.sample_rate as f64);
+        let mut process_context =
+            ProcessContext::from_transport_info(transport, buffer.sample_rate as f64);
 
         // Create process data
         let mut process_data = ProcessData {
@@ -1918,8 +1944,7 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {
-        }
+        if result != K_RESULT_OK {}
 
         // Collect outputs
         let midi_output = output_event_list.to_midi_events();
@@ -1983,8 +2008,7 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {
-        }
+        if result != K_RESULT_OK {}
     }
 
     /// Process audio with full automation using f64 buffers
@@ -1995,14 +2019,26 @@ impl Vst3Instance {
         param_changes: &crate::protocol::ParameterChanges,
         note_expression: &crate::protocol::NoteExpressionChanges,
         transport: &crate::protocol::TransportInfo,
-    ) -> (Vec<MidiEvent>, crate::protocol::ParameterChanges, crate::protocol::NoteExpressionChanges) {
+    ) -> (
+        Vec<MidiEvent>,
+        crate::protocol::ParameterChanges,
+        crate::protocol::NoteExpressionChanges,
+    ) {
         if !self.is_active {
-            return (Vec::new(), crate::protocol::ParameterChanges::new(), crate::protocol::NoteExpressionChanges::new());
+            return (
+                Vec::new(),
+                crate::protocol::ParameterChanges::new(),
+                crate::protocol::NoteExpressionChanges::new(),
+            );
         }
 
         let num_samples = buffer.num_samples;
         if num_samples == 0 {
-            return (Vec::new(), crate::protocol::ParameterChanges::new(), crate::protocol::NoteExpressionChanges::new());
+            return (
+                Vec::new(),
+                crate::protocol::ParameterChanges::new(),
+                crate::protocol::NoteExpressionChanges::new(),
+            );
         }
 
         // Update f64 buffer pointers
@@ -2032,7 +2068,10 @@ impl Vst3Instance {
         // Create event list from MIDI and note expression events
         let mut input_event_list_box: Option<Box<EventList>> =
             if !midi_events.is_empty() || !note_expression.is_empty() {
-                Some(EventList::from_midi_and_expression(midi_events, note_expression))
+                Some(EventList::from_midi_and_expression(
+                    midi_events,
+                    note_expression,
+                ))
             } else {
                 None
             };
@@ -2059,7 +2098,8 @@ impl Vst3Instance {
         };
 
         let mut output_param_changes = ParameterChanges::new_empty();
-        let mut process_context = ProcessContext::from_transport_info(transport, buffer.sample_rate as f64);
+        let mut process_context =
+            ProcessContext::from_transport_info(transport, buffer.sample_rate as f64);
 
         let mut process_data = ProcessData {
             process_mode: K_REALTIME,
@@ -2080,8 +2120,7 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {
-        }
+        if result != K_RESULT_OK {}
 
         let midi_output = output_event_list.to_midi_events();
         let param_output = output_param_changes.to_protocol();
@@ -2103,8 +2142,7 @@ impl Vst3Instance {
 
         let result = unsafe { ((*self.processor_vtable).setup_processing)(self.processor, &setup) };
 
-        if result != K_RESULT_OK && result != K_RESULT_TRUE {
-        }
+        if result != K_RESULT_OK && result != K_RESULT_TRUE {}
     }
 
     /// Get parameter count
@@ -2293,7 +2331,6 @@ impl Vst3Instance {
 
 impl Drop for Vst3Instance {
     fn drop(&mut self) {
-
         // Deactivate plugin
         if self.is_active {
             unsafe {

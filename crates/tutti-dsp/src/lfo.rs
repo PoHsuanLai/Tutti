@@ -1,8 +1,11 @@
 //! Low Frequency Oscillator (LFO) node.
 
-use tutti_core::AtomicFloat;
-use tutti_core::{AudioUnit, BufferRef, BufferMut, SignalFrame, dsp::{DEFAULT_SR, Signal}};
 use std::sync::Arc;
+use tutti_core::AtomicFloat;
+use tutti_core::{
+    dsp::{Signal, DEFAULT_SR},
+    AudioUnit, BufferMut, BufferRef, SignalFrame,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LfoShape {
@@ -180,7 +183,6 @@ impl LfoNode {
     pub fn set_phase_offset(&self, offset: f32) {
         self.phase_offset.set(offset % 1.0);
     }
-
 
     #[inline]
     fn evaluate(&mut self, phase: f32) -> f32 {
@@ -373,7 +375,11 @@ mod tests {
             lfo.tick(&[], &mut output);
         }
 
-        assert!((output[0] - 1.0).abs() < 0.1, "Expected ~1.0, got {}", output[0]);
+        assert!(
+            (output[0] - 1.0).abs() < 0.1,
+            "Expected ~1.0, got {}",
+            output[0]
+        );
     }
 
     #[test]
@@ -384,11 +390,19 @@ mod tests {
 
         // At beat 1.0, phase = 1.0/4.0 = 0.25 (sine = 1.0)
         lfo.tick(&[1.0], &mut output);
-        assert!((output[0] - 1.0).abs() < 0.01, "Expected 1.0, got {}", output[0]);
+        assert!(
+            (output[0] - 1.0).abs() < 0.01,
+            "Expected 1.0, got {}",
+            output[0]
+        );
 
         // At beat 2.0, phase = 2.0/4.0 = 0.5 (sine = 0.0)
         lfo.tick(&[2.0], &mut output);
-        assert!((output[0] - 0.0).abs() < 0.01, "Expected 0.0, got {}", output[0]);
+        assert!(
+            (output[0] - 0.0).abs() < 0.01,
+            "Expected 0.0, got {}",
+            output[0]
+        );
     }
 
     #[test]
@@ -413,7 +427,11 @@ mod tests {
         lfo.tick(&[], &mut output);
 
         // With 0.25 offset, should start near 1.0 (sine peak)
-        assert!((output[0] - 1.0).abs() < 0.1, "Expected ~1.0, got {}", output[0]);
+        assert!(
+            (output[0] - 1.0).abs() < 0.1,
+            "Expected ~1.0, got {}",
+            output[0]
+        );
     }
 
     #[test]
@@ -433,11 +451,13 @@ mod tests {
         }
 
         // Should have at least some different values (one per cycle = 5)
-        let unique: std::collections::HashSet<u32> = values
-            .iter()
-            .map(|v| (v * 1000.0) as u32)
-            .collect();
+        let unique: std::collections::HashSet<u32> =
+            values.iter().map(|v| (v * 1000.0) as u32).collect();
 
-        assert!(unique.len() > 1, "Random LFO should produce different values, got {}", unique.len());
+        assert!(
+            unique.len() > 1,
+            "Random LFO should produce different values, got {}",
+            unique.len()
+        );
     }
 }

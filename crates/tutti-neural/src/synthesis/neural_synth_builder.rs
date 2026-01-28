@@ -3,12 +3,12 @@
 //! This is an internal implementation detail used only on the inference thread.
 //! External code should use `SyncNeuralSynthBuilder` which handles threading safely.
 
-use crate::error::{Error, Result};
-use tutti_core::AudioUnit;
-use crate::gpu::{NeuralInferenceEngine, NeuralModelId, VoiceId, ModelType, InferenceRequest};
 use super::neural_synth::NeuralSynth;
-use std::sync::Arc;
+use crate::error::{Error, Result};
+use crate::gpu::{InferenceRequest, ModelType, NeuralInferenceEngine, NeuralModelId, VoiceId};
 use burn::tensor::backend::Backend;
+use std::sync::Arc;
+use tutti_core::AudioUnit;
 
 /// Builder for creating neural synth instances (internal use only)
 ///
@@ -74,14 +74,10 @@ impl<B: Backend> NeuralSynthBuilder<B> {
     {
         let model_path = model_path.into();
 
-        tracing::info!("Loading neural synth model: {}", model_path);
-
         // Load model into engine
         let model_id = engine
             .load_model(&model_path, ModelType::NeuralSynth)
             .map_err(|e| Error::ModelLoad(format!("Failed to load neural synth model: {}", e)))?;
-
-        tracing::info!("Neural synth model loaded: ID {}", model_id.as_u64());
 
         // Extract model name from path
         let model_name = std::path::Path::new(&model_path)
@@ -102,7 +98,6 @@ impl<B: Backend> NeuralSynthBuilder<B> {
         })
     }
 
-
     /// Get the loaded model ID
     pub fn model_id(&self) -> NeuralModelId {
         self.model_id
@@ -116,14 +111,9 @@ impl<B: Backend + 'static> NeuralSynthBuilder<B> {
     /// traditional plugin features like parameters/presets.
     pub fn build_synth(&self) -> Result<Box<dyn AudioUnit>> {
         // Assign next voice ID
-        let track_id: VoiceId = self.next_track_id
-            .fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64;
-
-        tracing::info!(
-            "Building neural synth instance for track {} (model ID: {})",
-            track_id,
-            self.model_id.as_u64()
-        );
+        let track_id: VoiceId =
+            self.next_track_id
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst) as u64;
 
         // Create lock-free parameter queue for this voice
         let param_queue = self.engine.create_queue(track_id);
@@ -153,20 +143,16 @@ impl<B: Backend + 'static> NeuralSynthBuilder<B> {
 
 impl<B: Backend> Drop for NeuralSynthBuilder<B> {
     fn drop(&mut self) {
-        tracing::info!("Unloading neural synth model: {}", self.model_path);
-
         // Unload model from engine
-        if let Err(e) = self.engine.unload_model(self.model_id) {
-            tracing::error!("Failed to unload neural synth model: {}", e);
-        }
+        let _ = self.engine.unload_model(self.model_id);
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::gpu::InferenceConfig;
     use crate::backend::BackendPool;
+    use crate::gpu::InferenceConfig;
     use burn::backend::ndarray::NdArray;
 
     #[test]
@@ -177,11 +163,8 @@ mod tests {
 
         // Create inference engine (verifying it constructs without error)
         let _engine = Arc::new(
-            NeuralInferenceEngine::<NdArray>::new(
-                cpu_device.clone(),
-                InferenceConfig::default(),
-            )
-            .unwrap()
+            NeuralInferenceEngine::<NdArray>::new(cpu_device.clone(), InferenceConfig::default())
+                .unwrap(),
         );
 
         // Create builder (model loading will fail without real model file, but constructor should work)

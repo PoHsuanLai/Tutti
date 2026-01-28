@@ -1,7 +1,7 @@
 //! MIDI 2.0 high-resolution messages.
 
-use midi2::prelude::*;
 use midi2::channel_voice2::NoteAttribute;
+use midi2::prelude::*;
 
 /// Helper to extract [u32; 2] from a message's data slice
 #[inline]
@@ -87,7 +87,13 @@ impl Midi2Event {
 
     /// Create a MIDI 2.0 Control Change event
     #[inline]
-    pub fn control_change(frame: usize, group: u4, channel: u4, controller: u7, value: u32) -> Self {
+    pub fn control_change(
+        frame: usize,
+        group: u4,
+        channel: u4,
+        controller: u7,
+        value: u32,
+    ) -> Self {
         let mut msg = midi2::channel_voice2::ControlChange::<[u32; 2]>::new();
         msg.set_group(group);
         msg.set_channel(channel);
@@ -235,10 +241,7 @@ impl Midi2Event {
                 // Control Change
                 let controller = ((self.data[0] >> 8) & 0x7F) as u8;
                 let value = self.data[1];
-                Midi2MessageType::ControlChange {
-                    controller,
-                    value,
-                }
+                Midi2MessageType::ControlChange { controller, value }
             }
             0xE => {
                 // Pitch Bend
@@ -326,8 +329,7 @@ impl Midi2Event {
     pub fn is_note_off(&self) -> bool {
         matches!(
             self.message_type(),
-            Midi2MessageType::NoteOff { .. }
-                | Midi2MessageType::NoteOn { velocity: 0, .. }
+            Midi2MessageType::NoteOff { .. } | Midi2MessageType::NoteOn { velocity: 0, .. }
         )
     }
 
@@ -782,8 +784,13 @@ mod tests {
 
     #[test]
     fn test_midi2_to_midi1_conversion() {
-        let midi2 =
-            Midi2Event::note_on(100, u4::new(0), u4::new(5), u7::new(60), midi1_velocity_to_midi2(100));
+        let midi2 = Midi2Event::note_on(
+            100,
+            u4::new(0),
+            u4::new(5),
+            u7::new(60),
+            midi1_velocity_to_midi2(100),
+        );
 
         let midi1 = midi2.to_midi1().unwrap();
         assert_eq!(midi1.frame_offset, 100);

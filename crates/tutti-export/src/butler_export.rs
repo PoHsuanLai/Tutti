@@ -159,7 +159,9 @@ impl<'a> ButlerExporter<'a> {
         let sample_rate = options.output_sample_rate() as f64;
 
         // Create and start capture session
-        let session = self.sampler.create_capture(path.to_path_buf(), sample_rate, channels, Some(5.0));
+        let session =
+            self.sampler
+                .create_capture(path.to_path_buf(), sample_rate, channels, Some(5.0));
         let mut session = self.sampler.start_capture(session);
 
         let total_samples = left.len();

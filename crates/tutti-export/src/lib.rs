@@ -65,8 +65,8 @@ pub mod butler_export;
 // Re-exports
 pub use error::{ExportError, Result};
 pub use options::{
-    AudioFormat, BitDepth, DitherType, ExportOptions, ExportRange, FlacOptions,
-    NormalizationMode, SampleRateTarget,
+    AudioFormat, BitDepth, DitherType, ExportOptions, ExportRange, FlacOptions, NormalizationMode,
+    SampleRateTarget,
 };
 pub use renderer::{OfflineRenderer, RenderResult};
 pub use types::{
@@ -101,14 +101,18 @@ pub fn export_to_file(
         #[cfg(feature = "wav")]
         return format::wav::export_wav(path, left, right, options);
         #[cfg(not(feature = "wav"))]
-        return Err(ExportError::UnsupportedFormat("WAV support not enabled".into()));
+        return Err(ExportError::UnsupportedFormat(
+            "WAV support not enabled".into(),
+        ));
     }
 
     if path_lower.ends_with(".flac") {
         #[cfg(feature = "flac")]
         return format::flac::export_flac(path, left, right, options);
         #[cfg(not(feature = "flac"))]
-        return Err(ExportError::UnsupportedFormat("FLAC support not enabled".into()));
+        return Err(ExportError::UnsupportedFormat(
+            "FLAC support not enabled".into(),
+        ));
     }
 
     Err(ExportError::UnsupportedFormat(format!(

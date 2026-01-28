@@ -1,6 +1,6 @@
 //! TuttiEngine that coordinates all audio subsystems
 
-use crate::core::{TuttiSystem, TransportManager, MeteringManager, PdcManager, TuttiNet};
+use crate::core::{MeteringManager, PdcManager, TransportManager, TuttiNet, TuttiSystem};
 use crate::Result;
 use std::sync::Arc;
 

@@ -20,7 +20,10 @@ const DEFAULT_HOP_SIZE: usize = 512;
 
 /// A detected transient/onset
 #[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct Transient {
     /// Sample position of the transient
     pub sample_position: usize,
@@ -32,7 +35,10 @@ pub struct Transient {
 
 /// Transient detection algorithm type
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-#[cfg_attr(feature = "serialization", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(
+    feature = "serialization",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub enum DetectionMethod {
     /// Spectral flux (default, good for most audio)
     #[default]
@@ -282,7 +288,8 @@ impl TransientDetector {
         // Calculate adaptive threshold
         let values: Vec<f32> = detection_fn.iter().map(|(_, v)| *v).collect();
         let mean: f32 = values.iter().sum::<f32>() / values.len() as f32;
-        let variance: f32 = values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
+        let variance: f32 =
+            values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
         let std_dev = variance.sqrt();
 
         let adaptive_threshold = mean + std_dev * self.threshold * 3.0;
@@ -319,10 +326,7 @@ impl TransientDetector {
 
     /// Analyze and return transient times in seconds
     pub fn detect_times(&mut self, samples: &[f32]) -> Vec<f64> {
-        self.detect(samples)
-            .into_iter()
-            .map(|t| t.time)
-            .collect()
+        self.detect(samples).into_iter().map(|t| t.time).collect()
     }
 
     /// Clean up transient list by removing closely spaced detections
@@ -515,11 +519,31 @@ mod tests {
     #[test]
     fn test_estimate_tempo() {
         let transients = vec![
-            Transient { sample_position: 0, time: 0.0, strength: 1.0 },
-            Transient { sample_position: 22050, time: 0.5, strength: 1.0 },
-            Transient { sample_position: 44100, time: 1.0, strength: 1.0 },
-            Transient { sample_position: 66150, time: 1.5, strength: 1.0 },
-            Transient { sample_position: 88200, time: 2.0, strength: 1.0 },
+            Transient {
+                sample_position: 0,
+                time: 0.0,
+                strength: 1.0,
+            },
+            Transient {
+                sample_position: 22050,
+                time: 0.5,
+                strength: 1.0,
+            },
+            Transient {
+                sample_position: 44100,
+                time: 1.0,
+                strength: 1.0,
+            },
+            Transient {
+                sample_position: 66150,
+                time: 1.5,
+                strength: 1.0,
+            },
+            Transient {
+                sample_position: 88200,
+                time: 2.0,
+                strength: 1.0,
+            },
         ];
 
         let tempo = estimate_tempo(&transients, 60.0, 200.0);
@@ -533,9 +557,21 @@ mod tests {
     fn test_slice_at_transients() {
         let samples: Vec<f32> = (0..1000).map(|i| i as f32).collect();
         let transients = vec![
-            Transient { sample_position: 200, time: 0.0, strength: 1.0 },
-            Transient { sample_position: 500, time: 0.0, strength: 1.0 },
-            Transient { sample_position: 800, time: 0.0, strength: 1.0 },
+            Transient {
+                sample_position: 200,
+                time: 0.0,
+                strength: 1.0,
+            },
+            Transient {
+                sample_position: 500,
+                time: 0.0,
+                strength: 1.0,
+            },
+            Transient {
+                sample_position: 800,
+                time: 0.0,
+                strength: 1.0,
+            },
         ];
 
         let slices = slice_at_transients(&samples, &transients, true);

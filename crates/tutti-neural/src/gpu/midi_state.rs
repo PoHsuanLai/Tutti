@@ -83,8 +83,7 @@ impl MidiState {
                 self.velocity = velocity;
                 true
             }
-            ChannelVoiceMsg::NoteOn { velocity: 0, .. }
-            | ChannelVoiceMsg::NoteOff { .. } => {
+            ChannelVoiceMsg::NoteOn { velocity: 0, .. } | ChannelVoiceMsg::NoteOff { .. } => {
                 self.velocity = 0;
                 true
             }

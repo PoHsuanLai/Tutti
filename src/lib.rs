@@ -50,33 +50,58 @@ pub use tutti_core as core;
 
 // Core types
 pub use tutti_core::{
-    // Audio graph
-    AudioUnit, BufferRef, BufferMut, SignalFrame, Shared,
-    TuttiNet, NodeId, Source, NetBackend,
-
-    // Transport
-    TransportManager, TempoMap, TimeSignature, BBT, MotionState,
-    Metronome, MetronomeMode, TransportClock,
-
-    // Metering (includes LUFS!)
-    MeteringManager, AtomicAmplitude, AtomicStereoAnalysis,
-    StereoAnalysisSnapshot, CpuMeter, CpuMetrics,
-
-    // PDC
-    PdcManager, PdcState, PdcDelayUnit,
+    AtomicAmplitude,
+    AtomicDouble,
+    AtomicFlag,
 
     // Lock-free primitives
-    AtomicFloat, AtomicDouble, AtomicFlag,
-
-    // Sequencer
-    Sequencer, EventId, Fade, ReplayMode,
+    AtomicFloat,
+    AtomicStereoAnalysis,
+    // Audio graph
+    AudioUnit,
+    BufferMut,
+    BufferRef,
+    CpuMeter,
+    CpuMetrics,
 
     // Error
-    Error, Result,
+    Error,
+    EventId,
+    Fade,
+    // Metering (includes LUFS!)
+    MeteringManager,
+    Metronome,
+    MetronomeMode,
+    MotionState,
+    NetBackend,
+
+    NodeId,
+    PdcDelayUnit,
+
+    // PDC
+    PdcManager,
+    PdcState,
+    ReplayMode,
+
+    Result,
+    // Sequencer
+    Sequencer,
+    Shared,
+    SignalFrame,
+    Source,
+    StereoAnalysisSnapshot,
+    TempoMap,
+    TimeSignature,
+    TransportClock,
+
+    // Transport
+    TransportManager,
+    TuttiNet,
+    BBT,
 };
 
 // Atomic types
-pub use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+pub use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 // Sample types
 pub use tutti_core::{Sample, F32, F64};
@@ -86,11 +111,7 @@ pub use tutti_core::{Sample, F32, F64};
 pub use tutti_midi as midi;
 
 #[cfg(feature = "midi")]
-pub use tutti_midi::{
-    MidiSystem, MidiSystemBuilder,
-    MidiEvent, RawMidiEvent,
-    PortInfo,
-};
+pub use tutti_midi::{MidiEvent, MidiSystem, MidiSystemBuilder, PortInfo, RawMidiEvent};
 
 // Sampler subsystem
 #[cfg(feature = "sampler")]
@@ -98,28 +119,20 @@ pub use tutti_sampler as sampler;
 
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::{
-    SamplerSystem, SamplerSystemBuilder,
-    SamplerUnit, StreamingSamplerUnit,
-    TimeStretchUnit, TimeStretchParams,
-    AudioInput, AudioInputBackend,
+    AudioInput, AudioInputBackend, SamplerSystem, SamplerSystemBuilder, SamplerUnit,
+    StreamingSamplerUnit, TimeStretchParams, TimeStretchUnit,
 };
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
 
 pub use tutti_dsp::{
-    LfoNode, LfoShape, LfoMode,
-    EnvelopeFollowerNode, EnvelopeMode,
-    SidechainCompressor, StereoSidechainCompressor,
-    SidechainGate, StereoSidechainGate,
-    ChannelLayout,
+    ChannelLayout, EnvelopeFollowerNode, EnvelopeMode, LfoMode, LfoNode, LfoShape,
+    SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate,
 };
 
 #[cfg(feature = "spatial-audio")]
-pub use tutti_dsp::{
-    SpatialPannerNode, BinauralPannerNode,
-    SpatialPanner, BinauralPanner,
-};
+pub use tutti_dsp::{BinauralPanner, BinauralPannerNode, SpatialPanner, SpatialPannerNode};
 
 // Analysis tools
 #[cfg(feature = "analysis")]
@@ -127,8 +140,7 @@ pub use tutti_analysis as analysis;
 
 #[cfg(feature = "analysis")]
 pub use tutti_analysis::{
-    TransientDetector, PitchDetector, CorrelationMeter,
-    Transient, PitchResult, StereoAnalysis,
+    CorrelationMeter, PitchDetector, PitchResult, StereoAnalysis, Transient, TransientDetector,
 };
 
 // Export
@@ -136,27 +148,21 @@ pub use tutti_analysis::{
 pub use tutti_export as export;
 
 #[cfg(feature = "export")]
-pub use tutti_export::{
-    OfflineRenderer, ExportOptions, AudioFormat,
-};
+pub use tutti_export::{AudioFormat, ExportOptions, OfflineRenderer};
 
 // Plugin hosting
 #[cfg(feature = "plugin")]
 pub use tutti_plugin as plugin;
 
 #[cfg(feature = "plugin")]
-pub use tutti_plugin::{
-    PluginClient, BridgeConfig,
-};
+pub use tutti_plugin::{BridgeConfig, PluginClient};
 
 // Neural audio
 #[cfg(feature = "neural")]
 pub use tutti_neural as neural;
 
 #[cfg(feature = "neural")]
-pub use tutti_neural::{
-    NeuralSystem, NeuralSystemBuilder,
-};
+pub use tutti_neural::{NeuralSystem, NeuralSystemBuilder};
 
 /// Full FunDSP prelude - oscillators, filters, effects, and more.
 ///
@@ -178,11 +184,11 @@ pub mod dsp {
     pub use fundsp::prelude::*;
 }
 
-mod engine;
 mod builder;
+mod engine;
 
-pub use engine::TuttiEngine;
 pub use builder::TuttiEngineBuilder;
+pub use engine::TuttiEngine;
 
 /// Convenience prelude for common imports
 pub mod prelude {
@@ -190,7 +196,7 @@ pub mod prelude {
     pub use crate::{TuttiEngine, TuttiEngineBuilder};
 
     // Essential types
-    pub use crate::core::{AudioUnit, BufferRef, BufferMut, SignalFrame};
+    pub use crate::core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
 
     // FunDSP toolkit
     pub use crate::dsp::*;
@@ -200,7 +206,7 @@ pub mod prelude {
 
     // MIDI
     #[cfg(feature = "midi")]
-    pub use crate::midi::{MidiSystem, MidiEvent};
+    pub use crate::midi::{MidiEvent, MidiSystem};
 
     // Sampler
     #[cfg(feature = "sampler")]

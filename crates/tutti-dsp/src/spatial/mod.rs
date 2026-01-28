@@ -56,16 +56,16 @@ pub use types::ChannelLayout;
 #[cfg(feature = "spatial-audio")]
 mod binaural_panner;
 #[cfg(feature = "spatial-audio")]
-mod vbap_panner;
-#[cfg(feature = "spatial-audio")]
 mod nodes;
+#[cfg(feature = "spatial-audio")]
+mod vbap_panner;
 
 #[cfg(feature = "spatial-audio")]
 pub use binaural_panner::BinauralPanner;
 #[cfg(feature = "spatial-audio")]
-pub use vbap_panner::SpatialPanner;
+pub use nodes::{BinauralPannerNode, SpatialPannerNode};
 #[cfg(feature = "spatial-audio")]
-pub use nodes::{SpatialPannerNode, BinauralPannerNode};
+pub use vbap_panner::SpatialPanner;
 
 // Re-export vbap types for advanced usage
 #[cfg(feature = "spatial-audio")]

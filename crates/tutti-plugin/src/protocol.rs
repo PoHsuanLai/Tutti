@@ -214,10 +214,7 @@ pub enum HostMessage {
     UnloadPlugin,
 
     /// Process audio (buffer ID in shared memory)
-    ProcessAudio {
-        buffer_id: u32,
-        num_samples: usize,
-    },
+    ProcessAudio { buffer_id: u32, num_samples: usize },
 
     /// Process audio with MIDI events (sample-accurate)
     ProcessAudioMidi {
@@ -389,7 +386,9 @@ mod tests {
         let decoded: HostMessage = bincode::deserialize(&encoded).unwrap();
 
         match decoded {
-            HostMessage::LoadPlugin { path, sample_rate, .. } => {
+            HostMessage::LoadPlugin {
+                path, sample_rate, ..
+            } => {
                 assert_eq!(path, PathBuf::from("/test/plugin.vst3"));
                 assert_eq!(sample_rate, 44100.0);
             }

@@ -278,7 +278,7 @@ fn butler_loop(
                         if let Some(mut state) = capture_consumers.remove(&capture_id) {
                             flush_capture(&mut state, usize::MAX);
                             if let Some(writer) = state.writer.take() {
-                                if let Err(_) = writer.finalize() {}
+                                if writer.finalize().is_err() {}
                             }
                         }
                     }
@@ -497,10 +497,7 @@ fn create_wav_writer(
     match File::create(file_path) {
         Ok(file) => {
             let buf_writer = BufWriter::new(file);
-            match WavWriter::new(buf_writer, spec) {
-                Ok(writer) => Some(writer),
-                Err(_) => None,
-            }
+            WavWriter::new(buf_writer, spec).ok()
         }
         Err(_) => None,
     }
@@ -524,13 +521,11 @@ fn flush_capture(state: &mut CaptureConsumerState, max_samples: usize) {
 
     // Write interleaved samples to WAV
     for &(left, right) in &buffer[..read] {
-        if let Err(_) = writer.write_sample(left) {
+        if writer.write_sample(left).is_err() {
             return;
         }
-        if state.channels > 1 {
-            if let Err(_) = writer.write_sample(right) {
-                return;
-            }
+        if state.channels > 1 && writer.write_sample(right).is_err() {
+            return;
         }
     }
 

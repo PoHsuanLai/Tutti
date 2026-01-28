@@ -1,16 +1,12 @@
 # Tutti Sampler
 
-Audio streaming, recording, and sample playback for the Tutti audio engine.
+Sample playback, disk streaming, audio input, and recording.
 
-## Overview
+## What this is
 
-Provides disk streaming, audio input recording, and time-stretching:
+Handles file playback and audio recording for DAW applications. Butler thread loads audio from disk asynchronously using ring buffers. Supports audio input from hardware, MIDI/audio/automation recording, time-stretching via phase vocoder, and SoundFont synthesis.
 
-- **Disk streaming** - Butler thread for asynchronous I/O with ring buffers
-- **Audio input** - Hardware capture with lock-free MPMC channels
-- **Recording** - MIDI, audio, and pattern recording
-- **Time-stretching** - Real-time pitch and tempo manipulation via phase vocoder
-- **SoundFont** - SoundFont synthesis (feature: `soundfont`)
+Uses [cpal](https://crates.io/crates/cpal) for audio I/O, [hound](https://crates.io/crates/hound) for WAV files, [symphonia](https://crates.io/crates/symphonia) for other formats, and [rustysynth](https://github.com/PoHsuanLai/rustysynth) for SoundFont.
 
 ## Quick Start
 

@@ -120,11 +120,11 @@ impl AutomationTarget {
     /// Returns (min, max, default) tuple
     pub fn default_range(&self) -> (f32, f32, f32) {
         match self {
-            Self::MasterVolume => (0.0, 2.0, 1.0),   // Allow slight boost
-            Self::MasterPan => (-1.0, 1.0, 0.0),    // Full left to right
-            Self::Tempo => (20.0, 300.0, 120.0),    // BPM range
+            Self::MasterVolume => (0.0, 2.0, 1.0), // Allow slight boost
+            Self::MasterPan => (-1.0, 1.0, 0.0),   // Full left to right
+            Self::Tempo => (20.0, 300.0, 120.0),   // BPM range
             Self::NodeParam { .. } => (0.0, 1.0, 0.5), // Normalized default
-            Self::Custom(_) => (0.0, 1.0, 0.5),     // Normalized default
+            Self::Custom(_) => (0.0, 1.0, 0.5),    // Normalized default
         }
     }
 }

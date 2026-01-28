@@ -109,7 +109,10 @@ impl TuttiNet {
     }
 
     #[cfg(all(feature = "neural", not(feature = "midi")))]
-    pub(crate) fn with_io(inputs: usize, outputs: usize) -> (Self, NetBackend, SharedNeuralNodeManager) {
+    pub(crate) fn with_io(
+        inputs: usize,
+        outputs: usize,
+    ) -> (Self, NetBackend, SharedNeuralNodeManager) {
         let mut net = Net::new(inputs, outputs);
         let backend = net.backend();
         let registry = Arc::new(NeuralNodeManager::new());
@@ -125,7 +128,10 @@ impl TuttiNet {
     }
 
     #[cfg(all(feature = "neural", feature = "midi"))]
-    pub(crate) fn with_io(inputs: usize, outputs: usize) -> (Self, NetBackend, SharedNeuralNodeManager) {
+    pub(crate) fn with_io(
+        inputs: usize,
+        outputs: usize,
+    ) -> (Self, NetBackend, SharedNeuralNodeManager) {
         let mut net = Net::new(inputs, outputs);
         let backend = net.backend();
         let registry = Arc::new(NeuralNodeManager::new());

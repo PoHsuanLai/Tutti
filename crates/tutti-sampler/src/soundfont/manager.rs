@@ -1,7 +1,7 @@
 //! SoundFont file management and loading
 
-use crate::{AtomicUsize, Ordering};
 use crate::error::{Error, Result};
+use crate::{AtomicUsize, Ordering};
 use dashmap::DashMap;
 use rustysynth::{SoundFont, SynthesizerSettings};
 use std::fs::File;

@@ -44,8 +44,7 @@ impl BitDepth {
 }
 
 /// Target sample rate for export
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SampleRateTarget {
     /// Keep original sample rate (no resampling)
     #[default]
@@ -61,7 +60,6 @@ pub enum SampleRateTarget {
     /// Custom sample rate
     Custom(u32),
 }
-
 
 impl SampleRateTarget {
     /// Get the sample rate in Hz, or None for Original
@@ -92,8 +90,7 @@ pub enum DitherType {
 }
 
 /// Normalization mode for export
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum NormalizationMode {
     /// No normalization
     #[default]
@@ -109,10 +106,8 @@ pub enum NormalizationMode {
     },
 }
 
-
 /// Range of audio to export
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ExportRange {
     /// Export the entire project
     #[default]
@@ -124,7 +119,6 @@ pub enum ExportRange {
     /// Export selected region
     Selection,
 }
-
 
 /// FLAC-specific encoding options
 #[derive(Debug, Clone, Copy, PartialEq)]

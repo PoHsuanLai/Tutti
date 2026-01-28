@@ -1,18 +1,12 @@
 # Tutti Core
 
-Low-level audio graph runtime for the Tutti audio engine.
+Audio graph runtime and transport management.
 
-## Overview
+## What this is
 
-`tutti-core` provides the foundational audio processing infrastructure:
+Core audio processing infrastructure for DAW applications. Built on FunDSP's Net for the audio graph, with transport control (tempo, time signatures, BBT positioning), real-time level metering, and plugin delay compensation. Uses atomic types (AtomicFloat, AtomicDouble) for parameter updates from the UI thread.
 
-- **Audio Graph** - FunDSP Net for DSP graph execution
-- **Transport** - Playback control with tempo, time signatures, and BBT
-- **Metering** - Real-time level monitoring with LUFS/EBU R128 support
-- **PDC** - Plugin delay compensation
-- **Lock-free primitives** - AtomicFloat, AtomicDouble for RT-safe parameter control
-
-This is a **low-level crate**. Most users should use the [tutti] umbrella crate instead.
+Most users should use the [tutti] umbrella crate instead.
 
 ## Quick Start
 

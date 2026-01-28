@@ -145,8 +145,8 @@ mod tests {
         let left = vec![1.0, 2.0, 3.0];
         let right = vec![4.0, 5.0, 6.0];
 
-        let (out_l, out_r) = resample_stereo(&left, &right, 44100, 44100, ResampleQuality::Fast)
-            .unwrap();
+        let (out_l, out_r) =
+            resample_stereo(&left, &right, 44100, 44100, ResampleQuality::Fast).unwrap();
 
         assert_eq!(out_l, left);
         assert_eq!(out_r, right);
@@ -164,12 +164,18 @@ mod tests {
             .collect();
         let right = left.clone();
 
-        let (out_l, out_r) =
-            resample_stereo(&left, &right, sample_rate, target_rate, ResampleQuality::Medium)
-                .unwrap();
+        let (out_l, out_r) = resample_stereo(
+            &left,
+            &right,
+            sample_rate,
+            target_rate,
+            ResampleQuality::Medium,
+        )
+        .unwrap();
 
         // Check output length is approximately correct
-        let expected_length = (duration_samples as f64 * target_rate as f64 / sample_rate as f64) as usize;
+        let expected_length =
+            (duration_samples as f64 * target_rate as f64 / sample_rate as f64) as usize;
         assert!(
             (out_l.len() as i32 - expected_length as i32).abs() < 100,
             "Output length {} differs too much from expected {}",
@@ -190,12 +196,18 @@ mod tests {
             .collect();
         let right = left.clone();
 
-        let (out_l, _out_r) =
-            resample_stereo(&left, &right, sample_rate, target_rate, ResampleQuality::High)
-                .unwrap();
+        let (out_l, _out_r) = resample_stereo(
+            &left,
+            &right,
+            sample_rate,
+            target_rate,
+            ResampleQuality::High,
+        )
+        .unwrap();
 
         // Check output length is approximately correct
-        let expected_length = (duration_samples as f64 * target_rate as f64 / sample_rate as f64) as usize;
+        let expected_length =
+            (duration_samples as f64 * target_rate as f64 / sample_rate as f64) as usize;
         assert!(
             (out_l.len() as i32 - expected_length as i32).abs() < 100,
             "Output length {} differs too much from expected {}",

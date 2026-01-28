@@ -97,8 +97,6 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
     {
         use burn::record::{BinFileRecorder, FullPrecisionSettings, Recorder};
 
-        tracing::info!("Loading Burn model from: {:?}", path);
-
         // Create recorder for loading
         let recorder = BinFileRecorder::<FullPrecisionSettings>::default();
 
@@ -110,7 +108,6 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
         // Initialize model structure and load weights
         let model = Self::new(device).load_record(record);
 
-        tracing::info!("Burn model loaded successfully");
         Ok(model)
     }
 
@@ -130,8 +127,6 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
         use burn::record::{FullPrecisionSettings, Recorder};
         use burn_import::safetensors::{LoadArgs, SafetensorsFileRecorder};
 
-        tracing::info!("Loading SafeTensors model from: {:?}", path);
-
         let recorder = SafetensorsFileRecorder::<FullPrecisionSettings>::default();
         let args = LoadArgs::new(path.to_path_buf());
 
@@ -140,8 +135,6 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
             .map_err(|e| format!("Failed to load SafeTensors model: {:?}", e))?;
 
         let model = Self::new(device).load_record(record);
-
-        tracing::info!("SafeTensors model loaded successfully");
         Ok(model)
     }
 
@@ -152,7 +145,6 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
              Enable it in Cargo.toml: tutti-neural = { features = [\"safetensors\"] }"
             .to_string())
     }
-
 
     /// Forward pass with automatic kernel fusion
     ///

@@ -3,9 +3,9 @@
 //! Wraps RustySynth's Synthesizer to work with fundsp's AudioUnit trait.
 //! Lock-free: each voice owns its Synthesizer instance (no shared state).
 
-use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, Setting};
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use std::sync::Arc;
+use tutti_core::{AudioUnit, BufferMut, BufferRef, Setting, SignalFrame};
 
 /// FunDSP adapter for RustySynth Synthesizer
 ///

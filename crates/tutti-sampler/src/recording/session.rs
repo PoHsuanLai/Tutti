@@ -3,9 +3,9 @@
 use super::config::{RecordingConfig, RecordingMode, RecordingSource};
 use super::events::RecordingBuffer;
 use crate::butler::{CaptureBufferProducer, CaptureId};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use arc_swap::ArcSwap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 
 /// Recording state
@@ -321,8 +321,10 @@ mod tests {
 
     #[test]
     fn test_preroll_countdown() {
-        let mut config = RecordingConfig::default();
-        config.preroll_beats = 4.0;
+        let config = RecordingConfig {
+            preroll_beats: 4.0,
+            ..Default::default()
+        };
 
         let session = RecordingSession::new(config, 44100.0, 0.0);
 
@@ -336,9 +338,11 @@ mod tests {
 
     #[test]
     fn test_punch_in_out() {
-        let mut config = RecordingConfig::default();
-        config.punch_in = Some(4.0);
-        config.punch_out = Some(8.0);
+        let config = RecordingConfig {
+            punch_in: Some(4.0),
+            punch_out: Some(8.0),
+            ..Default::default()
+        };
 
         let session = RecordingSession::new(config, 44100.0, 0.0);
 

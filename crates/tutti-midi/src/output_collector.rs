@@ -1,8 +1,8 @@
 //! Lock-free MIDI output collection from audio nodes.
 
 use crate::event::MidiEvent;
-use ringbuf::{traits::*, HeapRb, HeapCons, HeapProd};
 use parking_lot::Mutex;
+use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
 
 /// Default capacity for the MIDI output ring buffer
 const DEFAULT_CAPACITY: usize = 256;
@@ -69,7 +69,9 @@ pub fn midi_output_channel() -> (MidiOutputProducer, MidiOutputConsumer) {
 }
 
 /// Create a new MIDI output channel with specified capacity
-pub fn midi_output_channel_with_capacity(capacity: usize) -> (MidiOutputProducer, MidiOutputConsumer) {
+pub fn midi_output_channel_with_capacity(
+    capacity: usize,
+) -> (MidiOutputProducer, MidiOutputConsumer) {
     let rb = HeapRb::new(capacity);
     let (producer, consumer) = rb.split();
     (
@@ -121,8 +123,8 @@ impl Default for MidiOutputAggregator {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::event::MidiEvent;
+    use super::*;
     use midi_msg::{Channel, ChannelVoiceMsg};
 
     #[test]
@@ -133,12 +135,18 @@ mod tests {
         let event1 = MidiEvent {
             frame_offset: 0,
             channel: Channel::Ch1,
-            msg: ChannelVoiceMsg::NoteOn { note: 60, velocity: 100 },
+            msg: ChannelVoiceMsg::NoteOn {
+                note: 60,
+                velocity: 100,
+            },
         };
         let event2 = MidiEvent {
             frame_offset: 128,
             channel: Channel::Ch1,
-            msg: ChannelVoiceMsg::NoteOff { note: 60, velocity: 0 },
+            msg: ChannelVoiceMsg::NoteOff {
+                note: 60,
+                velocity: 0,
+            },
         };
 
         assert!(producer.push(event1));
@@ -166,12 +174,18 @@ mod tests {
         prod1.push(MidiEvent {
             frame_offset: 0,
             channel: Channel::Ch1,
-            msg: ChannelVoiceMsg::NoteOn { note: 60, velocity: 100 },
+            msg: ChannelVoiceMsg::NoteOn {
+                note: 60,
+                velocity: 100,
+            },
         });
         prod2.push(MidiEvent {
             frame_offset: 0,
             channel: Channel::Ch2,
-            msg: ChannelVoiceMsg::NoteOn { note: 72, velocity: 80 },
+            msg: ChannelVoiceMsg::NoteOn {
+                note: 72,
+                velocity: 80,
+            },
         });
 
         // Drain all
@@ -186,7 +200,10 @@ mod tests {
         let event = MidiEvent {
             frame_offset: 0,
             channel: Channel::Ch1,
-            msg: ChannelVoiceMsg::NoteOn { note: 60, velocity: 100 },
+            msg: ChannelVoiceMsg::NoteOn {
+                note: 60,
+                velocity: 100,
+            },
         };
 
         // Fill buffer

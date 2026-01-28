@@ -6,8 +6,8 @@
 
 use crate::error::Result;
 use crate::gpu::{NeuralInferenceEngine, NeuralModelId};
-use std::sync::Arc;
 use burn::tensor::backend::Backend;
+use std::sync::Arc;
 use tutti_core::AudioUnit;
 
 /// Sync-safe wrapper around neural effect builder
@@ -82,8 +82,6 @@ impl SyncEffectBuilder {
         std::thread::spawn(move || {
             use super::effect_builder::EffectBuilder;
 
-            tracing::info!("Neural effect inference thread starting for model: {}", model_path);
-
             // Create engine ON this thread
             let engine = match engine_factory() {
                 Ok(e) => e,
@@ -94,19 +92,19 @@ impl SyncEffectBuilder {
             };
 
             // Create builder ON this thread
-            let builder = match EffectBuilder::new(engine, &model_path, init_buffer_size, init_sample_rate) {
-                Ok(b) => {
-                    let model_name = b.name().to_string();
-                    let model_id = b.model_id();
-                    let _ = init_tx.send(Ok((model_name.clone(), model_id)));
-                    tracing::info!("Neural effect builder initialized: {}", model_name);
-                    b
-                }
-                Err(e) => {
-                    let _ = init_tx.send(Err(e));
-                    return;
-                }
-            };
+            let builder =
+                match EffectBuilder::new(engine, &model_path, init_buffer_size, init_sample_rate) {
+                    Ok(b) => {
+                        let model_name = b.name().to_string();
+                        let model_id = b.model_id();
+                        let _ = init_tx.send(Ok((model_name.clone(), model_id)));
+                        b
+                    }
+                    Err(e) => {
+                        let _ = init_tx.send(Err(e));
+                        return;
+                    }
+                };
 
             // Main loop: handle build requests
             // Effect inference happens inside the NeuralEffectNode's channels.
@@ -114,18 +112,12 @@ impl SyncEffectBuilder {
             loop {
                 match build_rx.recv() {
                     Ok(request) => {
-                        match builder.build_effect() {
-                            Ok(unit) => {
-                                let _ = request.response_tx.send(unit);
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to build neural effect: {:?}", e);
-                            }
+                        if let Ok(unit) = builder.build_effect() {
+                            let _ = request.response_tx.send(unit);
                         }
                     }
                     Err(_) => {
                         // All senders dropped — shut down
-                        tracing::info!("Neural effect inference thread shutting down");
                         break;
                     }
                 }
@@ -182,8 +174,9 @@ unsafe impl Sync for SyncEffectBuilder {}
 // Implement NeuralEffectBuilder for the sync wrapper
 impl tutti_core::neural::NeuralEffectBuilder for SyncEffectBuilder {
     fn build_effect(&self) -> tutti_core::Result<Box<dyn AudioUnit>> {
-        self.build_effect_sync()
-            .map_err(|e| tutti_core::Error::InvalidConfig(format!("Failed to build neural effect: {}", e)))
+        self.build_effect_sync().map_err(|e| {
+            tutti_core::Error::InvalidConfig(format!("Failed to build neural effect: {}", e))
+        })
     }
 
     fn name(&self) -> &str {

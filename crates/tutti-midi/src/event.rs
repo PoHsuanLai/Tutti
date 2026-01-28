@@ -51,10 +51,7 @@ impl MidiEvent {
             frame_offset,
             channel: Channel::from_u8(channel),
             msg: ChannelVoiceMsg::ControlChange {
-                control: midi_msg::ControlChange::CC {
-                    control: cc,
-                    value,
-                },
+                control: midi_msg::ControlChange::CC { control: cc, value },
             },
         }
     }
@@ -116,8 +113,7 @@ impl MidiEvent {
     pub fn is_note_off(&self) -> bool {
         matches!(
             self.msg,
-            ChannelVoiceMsg::NoteOff { .. }
-                | ChannelVoiceMsg::NoteOn { velocity: 0, .. }
+            ChannelVoiceMsg::NoteOff { .. } | ChannelVoiceMsg::NoteOn { velocity: 0, .. }
         )
     }
 
@@ -550,13 +546,8 @@ mod tests {
         #[test]
         fn test_unified_event_from_v2() {
             use midi2::prelude::*;
-            let v2 = crate::midi2::Midi2Event::note_on(
-                100,
-                u4::new(0),
-                u4::new(5),
-                u7::new(60),
-                32768,
-            );
+            let v2 =
+                crate::midi2::Midi2Event::note_on(100, u4::new(0), u4::new(5), u7::new(60), 32768);
             let unified: UnifiedMidiEvent = v2.into();
 
             assert!(!unified.is_v1());
@@ -577,13 +568,8 @@ mod tests {
 
             // MIDI 2.0 event
             use midi2::prelude::*;
-            let v2 = crate::midi2::Midi2Event::note_on(
-                0,
-                u4::new(0),
-                u4::new(0),
-                u7::new(60),
-                65535,
-            );
+            let v2 =
+                crate::midi2::Midi2Event::note_on(0, u4::new(0), u4::new(0), u7::new(60), 65535);
             let unified: UnifiedMidiEvent = v2.into();
             let norm = unified.velocity_normalized().unwrap();
             assert!((norm - 1.0).abs() < 0.0001);

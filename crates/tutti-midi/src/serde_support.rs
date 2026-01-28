@@ -50,22 +50,19 @@ impl Serialize for MidiEvent {
                 // Extract control number and value
                 let (cc, value) = match control {
                     ControlChange::CC { control, value } => (control, value),
-                    ControlChange::CCHighRes { control1, value, .. } => {
+                    ControlChange::CCHighRes {
+                        control1, value, ..
+                    } => {
                         // Convert 14-bit to 7-bit for serialization
                         (control1, (value >> 7) as u8)
                     }
                     // For other CC types, use default values
                     _ => (0, 0),
                 };
-                MsgData::ControlChange {
-                    control: cc,
-                    value,
-                }
+                MsgData::ControlChange { control: cc, value }
             }
             ChannelVoiceMsg::ProgramChange { program } => MsgData::ProgramChange { program },
-            ChannelVoiceMsg::ChannelPressure { pressure } => {
-                MsgData::ChannelPressure { pressure }
-            }
+            ChannelVoiceMsg::ChannelPressure { pressure } => MsgData::ChannelPressure { pressure },
             ChannelVoiceMsg::PitchBend { bend } => MsgData::PitchBend { bend },
         };
 
@@ -103,9 +100,7 @@ impl<'de> Deserialize<'de> for MidiEvent {
                 control: ControlChange::CC { control, value },
             },
             MsgData::ProgramChange { program } => ChannelVoiceMsg::ProgramChange { program },
-            MsgData::ChannelPressure { pressure } => {
-                ChannelVoiceMsg::ChannelPressure { pressure }
-            }
+            MsgData::ChannelPressure { pressure } => ChannelVoiceMsg::ChannelPressure { pressure },
             MsgData::PitchBend { bend } => ChannelVoiceMsg::PitchBend { bend },
         };
 

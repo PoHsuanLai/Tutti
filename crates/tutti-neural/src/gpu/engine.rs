@@ -167,8 +167,6 @@ pub struct InferenceResponse {
 impl<B: Backend> NeuralInferenceEngine<B> {
     /// Create a new neural inference engine for a specific backend
     pub fn new(device: Arc<B::Device>, config: InferenceConfig) -> Result<Self> {
-        tracing::info!("Creating NeuralInferenceEngine with config: {:?}", config);
-
         Ok(Self {
             config,
             device,
@@ -193,24 +191,14 @@ impl<B: Backend> NeuralInferenceEngine<B> {
     {
         let id = NeuralModelId::new();
 
-        tracing::info!(
-            "Loading neural model {} from {} ({:?})",
-            id.as_u64(),
-            path,
-            model_type
-        );
-
         // Load model from file
         let model = FusedNeuralSynthModel::load_from_file(path, &*self.device)
             .map_err(GpuError::ModelLoadError)?;
 
-        let entry = ModelEntry {
-            model,
-        };
+        let entry = ModelEntry { model };
 
         self.models.insert(id, Arc::new(entry));
 
-        tracing::info!("Loaded neural model {}", id.as_u64());
         Ok(id)
     }
 
@@ -220,7 +208,6 @@ impl<B: Backend> NeuralInferenceEngine<B> {
             .remove(&id)
             .ok_or_else(|| GpuError::ResourceNotFound(format!("Model {:?}", id)))?;
 
-        tracing::info!("Unloaded neural model {}", id.as_u64());
         Ok(())
     }
 
@@ -235,7 +222,8 @@ impl<B: Backend> NeuralInferenceEngine<B> {
 
         // Take the sender for inference thread use
         if let Some(sender) = queue.take_sender() {
-            self.param_senders.insert(track_id, ParamSender::new(sender));
+            self.param_senders
+                .insert(track_id, ParamSender::new(sender));
         }
 
         // Store the queue (with receiver) for audio thread
@@ -246,7 +234,10 @@ impl<B: Backend> NeuralInferenceEngine<B> {
     }
 
     /// Get parameter sender for a track (inference thread use)
-    pub fn get_sender(&self, track_id: VoiceId) -> Option<dashmap::mapref::one::Ref<'_, VoiceId, crate::gpu::queue::ParamSender>> {
+    pub fn get_sender(
+        &self,
+        track_id: VoiceId,
+    ) -> Option<dashmap::mapref::one::Ref<'_, VoiceId, crate::gpu::queue::ParamSender>> {
         self.param_senders.get(&track_id)
     }
 
@@ -255,8 +246,7 @@ impl<B: Backend> NeuralInferenceEngine<B> {
     /// The feature vector is produced by `MidiState::to_features()` on the caller side.
     /// The engine doesn't interpret the features — it just converts them to a tensor.
     fn features_to_tensor(&self, features: &[f32]) -> Tensor<B, 2> {
-        Tensor::<B, 1>::from_floats(features, &*self.device)
-            .unsqueeze_dim(0) // [features] → [1, features]
+        Tensor::<B, 1>::from_floats(features, &*self.device).unsqueeze_dim(0) // [features] → [1, features]
     }
 
     /// Convert output tensor to control parameters
@@ -269,7 +259,9 @@ impl<B: Backend> NeuralInferenceEngine<B> {
     fn tensor_to_params(&self, output: Tensor<B, 2>, buffer_size: usize) -> Result<ControlParams> {
         // Get tensor data back to CPU
         let data = output.into_data();
-        let values: Vec<f32> = data.to_vec::<f32>().expect("Failed to convert tensor to vec");
+        let values: Vec<f32> = data
+            .to_vec::<f32>()
+            .expect("Failed to convert tensor to vec");
 
         // Model output shape: [batch=1, features]
         // For DDSP: features = [f0..., amplitudes...]
@@ -277,7 +269,8 @@ impl<B: Backend> NeuralInferenceEngine<B> {
 
         let mid = values.len() / 2;
 
-        let f0: Vec<f32> = values[..mid].iter()
+        let f0: Vec<f32> = values[..mid]
+            .iter()
             .map(|&x| {
                 // Convert from normalized output to Hz
                 // Assuming output is in [0, 1], map to [50 Hz, 2000 Hz]
@@ -285,7 +278,8 @@ impl<B: Backend> NeuralInferenceEngine<B> {
             })
             .collect();
 
-        let amplitudes: Vec<f32> = values[mid..].iter()
+        let amplitudes: Vec<f32> = values[mid..]
+            .iter()
             .map(|&x| x.clamp(0.0, 1.0)) // Amplitude in [0, 1]
             .collect();
 
@@ -332,11 +326,9 @@ impl<B: Backend> NeuralInferenceEngine<B> {
         let start = std::time::Instant::now();
 
         // 1. Get the model
-        let model_entry = self.models
-            .get(&request.model_id)
-            .ok_or_else(|| GpuError::ResourceNotFound(
-                format!("Model {:?} not found", request.model_id)
-            ))?;
+        let model_entry = self.models.get(&request.model_id).ok_or_else(|| {
+            GpuError::ResourceNotFound(format!("Model {:?} not found", request.model_id))
+        })?;
 
         // 2. Convert feature vector to tensor
         let input_tensor = self.features_to_tensor(&request.features);
@@ -399,7 +391,7 @@ impl<B: Backend> NeuralInferenceEngine<B> {
             let model_entry = match self.models.get(&model_id) {
                 Some(entry) => entry,
                 None => {
-                    tracing::error!("Model {:?} not found for batch inference", model_id);
+                    // Model not found, skip this batch
                     continue;
                 }
             };
@@ -428,7 +420,9 @@ impl<B: Backend> NeuralInferenceEngine<B> {
             // Split batch output into individual responses
             for (i, req) in batch_requests.iter().enumerate() {
                 // Slice this voice's output from the batch
-                let voice_output = output_batch.clone().slice([i..i + 1, 0..output_batch.dims()[1]]);
+                let voice_output = output_batch
+                    .clone()
+                    .slice([i..i + 1, 0..output_batch.dims()[1]]);
 
                 let params = self.tensor_to_params(voice_output, req.buffer_size)?;
 
@@ -476,8 +470,11 @@ impl<B: Backend> NeuralInferenceEngine<B> {
     ///
     /// Requests using the same model can be batched together in a single GPU call.
     /// Different models require separate forward passes.
-    fn group_by_model(requests: Vec<InferenceRequest>) -> std::collections::HashMap<NeuralModelId, Vec<InferenceRequest>> {
-        let mut groups: std::collections::HashMap<NeuralModelId, Vec<InferenceRequest>> = std::collections::HashMap::new();
+    fn group_by_model(
+        requests: Vec<InferenceRequest>,
+    ) -> std::collections::HashMap<NeuralModelId, Vec<InferenceRequest>> {
+        let mut groups: std::collections::HashMap<NeuralModelId, Vec<InferenceRequest>> =
+            std::collections::HashMap::new();
         for req in requests {
             groups.entry(req.model_id).or_default().push(req);
         }
@@ -541,10 +538,8 @@ mod tests {
         let cpu_device = backend_pool.cpu_device().clone();
 
         // Create inference engine
-        let engine = NeuralInferenceEngine::<NdArray>::new(
-            cpu_device,
-            InferenceConfig::default(),
-        ).unwrap();
+        let engine =
+            NeuralInferenceEngine::<NdArray>::new(cpu_device, InferenceConfig::default()).unwrap();
 
         // Create a dummy model (random weights)
         let model_id = engine.load_model("test_model.mpk", ModelType::NeuralSynth);
@@ -564,10 +559,8 @@ mod tests {
         let backend_pool = BackendPool::new().unwrap();
         let cpu_device = backend_pool.cpu_device().clone();
 
-        let engine = NeuralInferenceEngine::<NdArray>::new(
-            cpu_device,
-            InferenceConfig::default(),
-        ).unwrap();
+        let engine =
+            NeuralInferenceEngine::<NdArray>::new(cpu_device, InferenceConfig::default()).unwrap();
 
         // Build features from MidiState (the new pattern)
         let mut state = MidiState::default();
@@ -581,59 +574,58 @@ mod tests {
         assert_eq!(shape, [1, crate::gpu::MIDI_FEATURE_COUNT]);
     }
 
-#[cfg(test)]
-mod old_tests {
-    use super::*;
-    use burn::backend::NdArray;
+    #[cfg(test)]
+    mod old_tests {
+        use super::*;
+        use burn::backend::NdArray;
 
-    // Use NdArray (CPU) backend for tests - no GPU required
-    type TestBackend = NdArray;
-    type TestDevice = burn::backend::ndarray::NdArrayDevice;
+        // Use NdArray (CPU) backend for tests - no GPU required
+        type TestBackend = NdArray;
+        type TestDevice = burn::backend::ndarray::NdArrayDevice;
 
-    fn test_device() -> Arc<TestDevice> {
-        Arc::new(TestDevice::default())
+        fn test_device() -> Arc<TestDevice> {
+            Arc::new(TestDevice::default())
+        }
+
+        #[test]
+        fn test_engine_creation() {
+            let device = test_device();
+            let config = InferenceConfig::default();
+            let engine: Result<NeuralInferenceEngine<TestBackend>> =
+                NeuralInferenceEngine::new(device, config);
+            assert!(engine.is_ok());
+        }
+
+        #[test]
+        fn test_config_default() {
+            let config = InferenceConfig::default();
+            assert_eq!(config.num_threads, 2);
+            assert_eq!(config.queue_size, 16);
+            assert_eq!(config.batch_size, 8);
+            assert!(!config.quantize);
+            assert!(config.enable_fusion);
+        }
+
+        #[test]
+        fn test_model_id_generation() {
+            let id1 = NeuralModelId::new();
+            let id2 = NeuralModelId::new();
+            // Each ID should be unique
+            assert_ne!(id1.as_u64(), id2.as_u64());
+        }
+
+        #[test]
+        fn test_inference_stats_default() {
+            let stats = InferenceStats::default();
+            assert_eq!(stats.total_inferences, 0);
+            assert_eq!(stats.avg_latency_ms, 0.0);
+            assert_eq!(stats.peak_latency_ms, 0.0);
+            assert_eq!(stats.gpu_utilization, 0.0);
+            assert_eq!(stats.batch_hit_rate, 0.0);
+        }
+
+        // Note: Model loading and inference tests require actual model files
+        // and are disabled in unit tests. Integration tests should be added
+        // separately with proper test fixtures.
     }
-
-    #[test]
-    fn test_engine_creation() {
-        let device = test_device();
-        let config = InferenceConfig::default();
-        let engine: Result<NeuralInferenceEngine<TestBackend>> =
-            NeuralInferenceEngine::new(device, config);
-        assert!(engine.is_ok());
-    }
-
-
-    #[test]
-    fn test_config_default() {
-        let config = InferenceConfig::default();
-        assert_eq!(config.num_threads, 2);
-        assert_eq!(config.queue_size, 16);
-        assert_eq!(config.batch_size, 8);
-        assert!(!config.quantize);
-        assert!(config.enable_fusion);
-    }
-
-    #[test]
-    fn test_model_id_generation() {
-        let id1 = NeuralModelId::new();
-        let id2 = NeuralModelId::new();
-        // Each ID should be unique
-        assert_ne!(id1.as_u64(), id2.as_u64());
-    }
-
-    #[test]
-    fn test_inference_stats_default() {
-        let stats = InferenceStats::default();
-        assert_eq!(stats.total_inferences, 0);
-        assert_eq!(stats.avg_latency_ms, 0.0);
-        assert_eq!(stats.peak_latency_ms, 0.0);
-        assert_eq!(stats.gpu_utilization, 0.0);
-        assert_eq!(stats.batch_hit_rate, 0.0);
-    }
-
-    // Note: Model loading and inference tests require actual model files
-    // and are disabled in unit tests. Integration tests should be added
-    // separately with proper test fixtures.
-}
 }
