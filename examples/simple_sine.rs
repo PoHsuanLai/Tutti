@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build a simple audio graph with a 440Hz sine wave
     engine.graph(|net| {
-        let sine = net.add(Box::new(sine_hz::<f32>(440.0) * 0.2)); // 440Hz at -14dB
+        let sine = net.add(Box::new(sine_hz::<f64>(440.0) * 0.5));
         net.pipe_output(sine);
     });
 
@@ -20,7 +20,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Playing 440Hz sine wave. Press Ctrl+C to exit.");
 
     // Keep the program running
-    std::thread::park();
-
-    Ok(())
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 }

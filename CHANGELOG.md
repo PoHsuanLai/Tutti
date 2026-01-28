@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - EBU R128 LUFS metering
 - Plugin Delay Compensation (PDC)
 - Modular feature flags for flexible builds
+- Ergonomic graph API with `pipe()`, `node_mut()`, `add_split()`, `add_join()`
+- 9 comprehensive examples showcasing core features
 
 ### Architecture
 - Workspace with 8 independent crates

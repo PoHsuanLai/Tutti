@@ -63,11 +63,15 @@ impl TuttiSystem {
 
     /// Modify the DSP graph (non-realtime).
     ///
+    /// The graph changes are automatically committed to the audio thread
+    /// when the closure returns.
+    ///
     /// # Example
     /// ```ignore
     /// system.graph(|net| {
     ///     let node = net.add(Box::new(sine_hz(440.0)));
     ///     net.pipe_output(node);
+    ///     // Auto-committed here
     /// });
     /// ```
     pub fn graph<F, R>(&self, f: F) -> R
@@ -75,7 +79,9 @@ impl TuttiSystem {
         F: FnOnce(&mut TuttiNet) -> R,
     {
         let mut net = self.net.lock().unwrap();
-        f(&mut net)
+        let result = f(&mut net);
+        net.commit(); // Auto-commit to audio thread
+        result
     }
 
     /// Get the transport manager.

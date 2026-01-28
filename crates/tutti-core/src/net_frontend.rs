@@ -168,6 +168,14 @@ impl TuttiNet {
         self.net.connect(from, from_port, to, to_port);
     }
 
+    /// Connect first output of source to first input of target (single-channel pipe).
+    ///
+    /// This is an alias for `connect()` - use whichever name is more intuitive.
+    /// For connecting all outputs to all inputs, use `pipe_all()`.
+    pub fn pipe(&mut self, source: NodeId, target: NodeId) {
+        self.net.connect(source, 0, target, 0);
+    }
+
     pub fn set_source(&mut self, node: NodeId, channel: usize, source: Source) {
         self.net.set_source(node, channel, source);
     }
@@ -215,6 +223,36 @@ impl TuttiNet {
 
     pub fn chain(&mut self, unit: Box<dyn AudioUnit>) -> NodeId {
         self.net.chain(unit)
+    }
+
+    /// Add a mono-to-stereo splitter node.
+    ///
+    /// Takes 1 input and produces 2 identical outputs (duplicates the signal).
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mono_synth = net.add(Box::new(sine_hz(440.0)));
+    /// let stereo = net.add_split();
+    /// net.pipe(mono_synth, stereo);
+    /// net.pipe_output(stereo);
+    /// ```
+    pub fn add_split(&mut self) -> NodeId {
+        use fundsp::prelude::*;
+        self.net.push(Box::new(split::<U1>()))
+    }
+
+    /// Add a stereo-to-mono joiner node.
+    ///
+    /// Takes 2 inputs and produces 1 output (mixes them together).
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mono = net.add_join();
+    /// net.pipe_all(stereo_source, mono);
+    /// ```
+    pub fn add_join(&mut self) -> NodeId {
+        use fundsp::prelude::*;
+        self.net.push(Box::new(join::<U2>()))
     }
 
     // MIDI Routing Methods (requires "midi" feature)
@@ -317,6 +355,29 @@ impl TuttiNet {
 
     pub fn inner_ref(&self) -> &Net {
         &self.net
+    }
+
+    /// Get immutable reference to a node's AudioUnit.
+    ///
+    /// Use this to read parameters or inspect node state.
+    pub fn node(&self, node: NodeId) -> &dyn AudioUnit {
+        self.net.node(node)
+    }
+
+    /// Get mutable reference to a node's AudioUnit.
+    ///
+    /// Use this to modify parameters on running nodes without rebuilding the graph.
+    ///
+    /// # Example
+    /// ```ignore
+    /// engine.graph(|net| {
+    ///     // Modify a parameter on an existing node
+    ///     net.node_mut(oscillator_id)
+    ///         .set_parameter("frequency", 880.0);
+    /// });
+    /// ```
+    pub fn node_mut(&mut self, node: NodeId) -> &mut dyn AudioUnit {
+        self.net.node_mut(node)
     }
 
     pub fn inputs(&self) -> usize {
