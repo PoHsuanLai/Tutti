@@ -276,7 +276,6 @@ impl SyncNeuralSynthBuilder {
                     }
                 }
             }
-            }
 
             // 5. Periodic stats logging (every 10 seconds)
             if last_stats_log.elapsed() > std::time::Duration::from_secs(10) {

@@ -60,9 +60,7 @@ impl BackendPool {
 
         // Try to initialize GPU device
         let (gpu_device, gpu_info) = match Self::init_gpu() {
-            Ok((device, info)) => {
-                (Some(Arc::new(device)), Some(info))
-            }
+            Ok((device, info)) => (Some(Arc::new(device)), Some(info)),
             Err(_e) => {
                 // GPU initialization failed, using CPU fallback
                 (None, None)
