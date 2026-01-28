@@ -1,0 +1,44 @@
+[package]
+name = "tutti-export"
+version = "0.1.0"
+edition = "2021"
+description = "Offline audio export and rendering for Tutti audio engine"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dawai/dawai"
+keywords = ["audio", "export", "render", "wav", "flac"]
+categories = ["multimedia::audio"]
+
+[features]
+default = ["wav", "flac"]
+
+# Format support (pure Rust)
+wav = ["hound"]
+flac = ["flacenc"]
+
+# Butler thread integration for async disk I/O
+butler = ["tutti-sampler"]
+
+[dependencies]
+# Core
+thiserror = "1.0"
+log = "0.4"
+
+# Audio processing
+tutti-core = { path = "../tutti-core", default-features = false }
+fundsp = { git = "https://github.com/PoHsuanLai/fundsp.git", default-features = false, features = ["std"] }
+
+# Resampling (always included - pure Rust with SIMD)
+rubato = "0.16"
+
+# WAV encoding (pure Rust)
+hound = { version = "3.5", optional = true }
+
+# FLAC encoding (pure Rust)
+flacenc = { version = "0.4", optional = true }
+
+# Butler thread integration (for async disk I/O)
+tutti-sampler = { path = "../tutti-sampler", optional = true, default-features = false }
+
+[dev-dependencies]
+tempfile = "3.10"
+approx = "0.5"

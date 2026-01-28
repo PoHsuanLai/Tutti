@@ -1,0 +1,43 @@
+[package]
+name = "tutti-midi"
+version = "0.1.0"
+edition = "2021"
+description = "MIDI subsystem - I/O, MPE, MIDI 2.0, CC mapping"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/tutti"
+
+[features]
+default = ["midi-io"]
+midi-io = ["midir"]
+midi2 = ["dep:midi2"]
+mpe = []
+
+[dependencies]
+thiserror = "2"
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
+
+# Lock-free
+ringbuf = "0.4"
+crossbeam-channel = "0.5"
+dashmap = "6.1"
+atomic_float = "1.1"
+parking_lot = "0.12"
+smallvec = "1.13"
+arc-swap = "1.7"
+
+# MIDI
+midir = { version = "0.9", optional = true }
+midi-msg = { version = "0.8", default-features = false }
+midly = "0.5"
+
+[dependencies.midi2]
+version = "0.11"
+default-features = false
+features = ["channel-voice2"]
+optional = true
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
+insta = { version = "1.41", features = ["yaml"] }
+bincode = "1"

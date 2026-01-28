@@ -1,0 +1,23 @@
+[package]
+name = "tutti-analysis"
+version = "0.1.0"
+edition = "2021"
+description = "Audio analysis tools: waveform thumbnails, transient detection, pitch detection, stereo correlation"
+license = "MIT OR Apache-2.0"
+keywords = ["audio", "analysis", "waveform", "pitch", "dsp"]
+categories = ["multimedia::audio"]
+
+[dependencies]
+# FFT for spectral analysis (transient detection, pitch detection)
+rustfft = "6"
+
+# LRU cache for thumbnail caching
+lru = { version = "0.12", optional = true }
+
+# Serialization
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+default = []
+cache = ["lru"]
+serialization = ["serde"]

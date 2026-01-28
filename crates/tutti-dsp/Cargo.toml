@@ -1,0 +1,25 @@
+[package]
+name = "tutti-dsp"
+version = "0.1.0"
+edition = "2021"
+description = "Real-time DSP building blocks for Tutti audio engine - LFO, envelope followers, dynamics, spatial audio"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dawai/dawai"
+
+[dependencies]
+# AudioUnit trait and DSP primitives from tutti-core
+tutti-core = { path = "../tutti-core", default-features = false }
+
+# Spatial audio VBAP library (optional)
+vbap = { version = "0.1", optional = true }
+
+# Serialization (optional)
+serde = { version = "1", features = ["derive"], optional = true }
+
+[dev-dependencies]
+approx = "0.5"
+
+[features]
+default = []
+spatial-audio = ["vbap"]
+serialization = ["serde"]

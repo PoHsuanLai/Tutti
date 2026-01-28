@@ -1,0 +1,47 @@
+[package]
+name = "tutti-core"
+version = "0.1.0"
+edition = "2021"
+description = "Core audio graph runtime kernel - Net/Graph, Transport, Metering, CPAL output"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/tutti"
+keywords = ["audio", "dsp", "real-time", "daw", "fundsp"]
+categories = ["multimedia::audio"]
+
+[features]
+default = []
+neural = []
+midi = ["dep:tutti-midi"]
+
+[dependencies]
+thiserror = "2"
+dyn-clone = "1.0"
+tracing = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Audio
+cpal = "0.15"
+fundsp = { git = "https://github.com/PoHsuanLai/fundsp.git", default-features = false, features = ["std", "files"] }
+audio-automation = { git = "https://github.com/PoHsuanLai/audio-automation.git" }
+
+# MIDI types (for trait only, no I/O dependency)
+tutti-midi = { path = "../tutti-midi", default-features = false, optional = true }
+
+# Lock-free
+crossbeam-channel = "0.5"
+atomic_float = "1.1"
+arc-swap = "1.7"
+dashmap = "6.1"
+
+# DSP (for future LUFS metering implementation)
+ebur128 = "0.1"
+
+[dev-dependencies]
+tracing-subscriber = "0.3"
+criterion = { version = "0.5", features = ["html_reports"] }
+proptest = "1.9.0"
+insta = { version = "1.41", features = ["yaml"] }
+approx = "0.5"
+tempfile = "3.8"
+rand = "0.8"
