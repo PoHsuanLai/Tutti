@@ -16,6 +16,11 @@ use std::sync::Arc;
 use std::thread;
 use tracing::debug;
 
+#[cfg(feature = "mpe")]
+use crate::mpe::MpeProcessor;
+#[cfg(feature = "mpe")]
+use parking_lot::RwLock;
+
 /// Information about an available MIDI input device
 #[derive(Debug, Clone)]
 pub struct MidiInputDevice {
@@ -32,6 +37,9 @@ enum MidiCommand {
     Shutdown,
 }
 
+#[cfg(feature = "mpe")]
+type MpeProcessorRef = Arc<RwLock<MpeProcessor>>;
+
 /// MIDI input manager with async connection handling.
 #[cfg(feature = "midi-io")]
 pub struct MidiInputManager {
@@ -44,7 +52,21 @@ pub struct MidiInputManager {
 
 #[cfg(feature = "midi-io")]
 impl MidiInputManager {
+    #[cfg(not(feature = "mpe"))]
     pub fn new(port_manager: Arc<MidiPortManager>) -> Self {
+        Self::new_with_mpe(port_manager, None)
+    }
+
+    #[cfg(feature = "mpe")]
+    pub fn new(port_manager: Arc<MidiPortManager>, mpe_processor: Option<MpeProcessorRef>) -> Self {
+        Self::new_with_mpe(port_manager, mpe_processor)
+    }
+
+    fn new_with_mpe(
+        port_manager: Arc<MidiPortManager>,
+        #[cfg(feature = "mpe")] mpe_processor: Option<MpeProcessorRef>,
+        #[cfg(not(feature = "mpe"))] _mpe_processor: Option<()>,
+    ) -> Self {
         let (command_sender, command_receiver) = bounded(16);
         let connected_device = Arc::new(arc_swap::ArcSwap::new(Arc::new(None)));
         let connected_port = Arc::new(arc_swap::ArcSwap::new(Arc::new(None)));
@@ -54,12 +76,17 @@ impl MidiInputManager {
         let connected_port_clone = Arc::clone(&connected_port);
         let is_connected_clone = Arc::clone(&is_connected);
 
+        #[cfg(feature = "mpe")]
+        let mpe_processor_clone = mpe_processor.clone();
+
         thread::spawn(move || {
             Self::midi_thread(
                 command_receiver,
                 connected_device_clone,
                 connected_port_clone,
                 is_connected_clone,
+                #[cfg(feature = "mpe")]
+                mpe_processor_clone,
             );
         });
 
@@ -77,6 +104,7 @@ impl MidiInputManager {
         connected_device: Arc<arc_swap::ArcSwap<Option<String>>>,
         connected_port: Arc<arc_swap::ArcSwap<Option<usize>>>,
         is_connected: Arc<AtomicBool>,
+        #[cfg(feature = "mpe")] mpe_processor: Option<MpeProcessorRef>,
     ) {
         let mut connection: Option<MidiInputConnection<()>> = None;
 
@@ -92,7 +120,12 @@ impl MidiInputManager {
                     }
 
                     // Try to connect
-                    match Self::connect_to_device(device_index, producer_handle) {
+                    match Self::connect_to_device(
+                        device_index,
+                        producer_handle,
+                        #[cfg(feature = "mpe")]
+                        mpe_processor.clone(),
+                    ) {
                         Ok((conn, name)) => {
                             connection = Some(conn);
                             is_connected.store(true, Ordering::SeqCst);
@@ -133,6 +166,7 @@ impl MidiInputManager {
     fn connect_to_device(
         device_index: usize,
         producer_handle: InputProducerHandle,
+        #[cfg(feature = "mpe")] mpe_processor: Option<MpeProcessorRef>,
     ) -> Result<(MidiInputConnection<()>, String), String> {
         let midi_input = MidiInput::new("dawai-midi-input")
             .map_err(|e| format!("Failed to create MIDI input: {}", e))?;
@@ -154,6 +188,20 @@ impl MidiInputManager {
                     // Parse raw MIDI bytes into structured MidiEvent
                     match MidiEvent::from_bytes(message) {
                         Ok(event) => {
+                            // Process through MPE if enabled
+                            #[cfg(feature = "mpe")]
+                            if let Some(ref processor) = mpe_processor {
+                                processor.write().process_midi1(&event);
+                            }
+
+                            // Also process as MIDI 2.0 for high-res MPE expression
+                            #[cfg(all(feature = "mpe", feature = "midi2"))]
+                            if let Some(ref processor) = mpe_processor {
+                                if let Some(midi2_event) = crate::midi2::midi1_to_midi2(&event) {
+                                    processor.read().process_midi2(&midi2_event);
+                                }
+                            }
+
                             if !producer_handle.push(event) {
                                 debug!("MIDI input ring buffer full, dropping event");
                             }
@@ -338,7 +386,11 @@ mod tests {
     #[test]
     fn test_manager_creation() {
         let port_manager = Arc::new(MidiPortManager::default());
-        let manager = MidiInputManager::new(port_manager);
+        let manager = MidiInputManager::new(
+            port_manager,
+            #[cfg(feature = "mpe")]
+            None,
+        );
         assert!(!manager.is_connected());
         assert!(manager.connected_device_name().is_none());
         assert!(manager.connected_port_index().is_none());

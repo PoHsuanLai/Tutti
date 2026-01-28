@@ -81,7 +81,7 @@ impl SyncNeuralSynthBuilder {
     ///         Arc::new(NeuralInferenceEngine::new(device, InferenceConfig::default())?)
     ///     },
     ///     "model.onnx",
-
+    ///
     /// Create with an optional strategy receiver for graph-aware batching.
     pub fn new_with_strategy<B: Backend + 'static, F>(
         engine_factory: F,
@@ -312,11 +312,9 @@ impl SyncNeuralSynthBuilder {
             if let Ok(response) = engine.infer(request) {
                 push_response_to_voice(engine, track_id, response.params);
             }
-        } else {
-            if let Ok(responses) = engine.infer_batch(batch) {
-                for response in responses {
-                    push_response_to_voice(engine, response.track_id, response.params);
-                }
+        } else if let Ok(responses) = engine.infer_batch(batch) {
+            for response in responses {
+                push_response_to_voice(engine, response.track_id, response.params);
             }
         }
     }

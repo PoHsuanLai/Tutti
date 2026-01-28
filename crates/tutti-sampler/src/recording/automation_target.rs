@@ -168,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_unique_keys() {
-        let targets = vec![
+        let targets = [
             AutomationTarget::node_param(0, 0),
             AutomationTarget::node_param(0, 1),
             AutomationTarget::node_param(1, 0),

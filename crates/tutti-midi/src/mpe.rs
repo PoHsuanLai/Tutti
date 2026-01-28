@@ -1,5 +1,9 @@
 //! MPE (MIDI Polyphonic Expression) per-note pitch bend, pressure, and slide.
 
+// Many public methods are only called from `midi-io` or `midi2` feature gates,
+// but they are part of the public API and tested directly.
+#![allow(dead_code)]
+
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -30,7 +34,7 @@ pub struct MpeZoneConfig {
 impl MpeZoneConfig {
     /// Create a Lower Zone configuration
     pub fn lower(member_count: u8) -> Self {
-        let member_count = member_count.min(15).max(1);
+        let member_count = member_count.clamp(1, 15);
         Self {
             zone: MpeZone::Lower,
             master_channel: 0, // Ch1 (0-indexed)
@@ -42,7 +46,7 @@ impl MpeZoneConfig {
 
     /// Create an Upper Zone configuration
     pub fn upper(member_count: u8) -> Self {
-        let member_count = member_count.min(15).max(1);
+        let member_count = member_count.clamp(1, 15);
         Self {
             zone: MpeZone::Upper,
             master_channel: 15, // Ch16 (0-indexed)
@@ -109,8 +113,9 @@ impl MpeZoneConfig {
 }
 
 /// MPE mode configuration
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum MpeMode {
+    #[default]
     Disabled,
     LowerZone(MpeZoneConfig),
     UpperZone(MpeZoneConfig),
@@ -118,12 +123,6 @@ pub enum MpeMode {
         lower: MpeZoneConfig,
         upper: MpeZoneConfig,
     },
-}
-
-impl Default for MpeMode {
-    fn default() -> Self {
-        MpeMode::Disabled
-    }
 }
 
 /// RT-safe atomic float
@@ -171,15 +170,11 @@ impl Default for PerNoteExpression {
 impl PerNoteExpression {
     /// Create new per-note expression state
     pub fn new() -> Self {
-        // Initialize arrays with const values
-        const ZERO_F32: AtomicF32 = AtomicF32::new(0.0);
-        const FALSE_BOOL: AtomicBool = AtomicBool::new(false);
-
         Self {
-            pitch_bend: [ZERO_F32; 128],
-            pressure: [ZERO_F32; 128],
-            slide: [ZERO_F32; 128],
-            active: [FALSE_BOOL; 128],
+            pitch_bend: std::array::from_fn(|_| AtomicF32::new(0.0)),
+            pressure: std::array::from_fn(|_| AtomicF32::new(0.0)),
+            slide: std::array::from_fn(|_| AtomicF32::new(0.0)),
+            active: std::array::from_fn(|_| AtomicBool::new(false)),
             global_pitch_bend: AtomicF32::new(0.0),
             global_pressure: AtomicF32::new(0.0),
         }
@@ -336,7 +331,7 @@ impl PerNoteExpression {
 /// channel is currently playing which note, allowing proper routing
 /// of per-channel expression to per-note expression.
 #[derive(Debug)]
-pub struct MpeChannelVoiceMap {
+pub(crate) struct MpeChannelVoiceMap {
     /// Channel (0-15) → Note number (or None if unused)
     channel_to_note: [Option<u8>; 16],
     /// Note number → Channel (or None if not playing)
@@ -349,7 +344,7 @@ pub struct MpeChannelVoiceMap {
 
 impl MpeChannelVoiceMap {
     /// Create a new channel-voice map for a zone
-    pub fn new(zone_config: MpeZoneConfig) -> Self {
+    pub(crate) fn new(zone_config: MpeZoneConfig) -> Self {
         Self {
             channel_to_note: [None; 16],
             note_to_channel: [None; 128],
@@ -448,7 +443,7 @@ impl MpeChannelVoiceMap {
 
 /// Zone information for a channel
 #[derive(Clone, Copy, Debug)]
-struct ZoneInfo {
+pub(crate) struct ZoneInfo {
     is_master: bool,
     is_member: bool,
     is_lower_zone: bool,
@@ -592,22 +587,22 @@ impl MpeProcessor {
                 let normalized = pressure as f32 / 127.0;
                 self.expression.set_pressure(note, normalized);
             }
-            ChannelVoiceMsg::ControlChange { control } => {
-                if let midi_msg::ControlChange::CC { control: cc, value } = control {
-                    if cc == 74 {
-                        // CC74 = Slide (MPE standard)
-                        let normalized = value as f32 / 127.0;
+            ChannelVoiceMsg::ControlChange {
+                control: midi_msg::ControlChange::CC { control: cc, value },
+            } => {
+                if cc == 74 {
+                    // CC74 = Slide (MPE standard)
+                    let normalized = value as f32 / 127.0;
 
-                        if zone_info.is_member {
-                            if let Some(ref map) = self.get_voice_map(zone_info.is_lower_zone) {
-                                if let Some(note) = map.get_note_for_channel(channel) {
-                                    self.expression.set_slide(note, normalized);
-                                }
+                    if zone_info.is_member {
+                        if let Some(ref map) = self.get_voice_map(zone_info.is_lower_zone) {
+                            if let Some(note) = map.get_note_for_channel(channel) {
+                                self.expression.set_slide(note, normalized);
                             }
                         }
                     }
-                    // Other CCs could be handled here (e.g., CC1 for modulation)
                 }
+                // Other CCs could be handled here (e.g., CC1 for modulation)
             }
             _ => {}
         }
@@ -731,6 +726,90 @@ impl MpeProcessor {
             }
             _ => {}
         }
+    }
+
+    /// Process a unified MIDI event (dispatches to MIDI 1.0 or 2.0 handler)
+    #[cfg(feature = "midi2")]
+    pub fn process_unified(&mut self, event: &crate::event::UnifiedMidiEvent) {
+        match event {
+            crate::event::UnifiedMidiEvent::V1(e) => self.process_midi1(e),
+            crate::event::UnifiedMidiEvent::V2(e) => self.process_midi2(e),
+        }
+    }
+
+    // ========================================================================
+    // Outgoing MPE: Send notes with automatic channel allocation
+    // ========================================================================
+
+    /// Allocate a channel for a note and return the channel to send on
+    ///
+    /// This is for **outgoing** MPE: converting a note to an MPE channel assignment.
+    /// Returns the allocated channel, or None if MPE is disabled.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let channel = processor.allocate_channel_for_note(60)?;
+    /// midi_out.send_note_on(channel, 60, 100)?;
+    /// ```
+    pub fn allocate_channel_for_note(&mut self, note: u8) -> Option<u8> {
+        match &self.mode {
+            MpeMode::Disabled => None,
+            MpeMode::LowerZone(_) => {
+                if let Some(ref mut map) = self.lower_zone_map {
+                    map.assign_note(note)
+                } else {
+                    None
+                }
+            }
+            MpeMode::UpperZone(_) => {
+                if let Some(ref mut map) = self.upper_zone_map {
+                    map.assign_note(note)
+                } else {
+                    None
+                }
+            }
+            MpeMode::DualZone { .. } => {
+                // For dual zone, prefer lower zone
+                if let Some(ref mut map) = self.lower_zone_map {
+                    map.assign_note(note)
+                } else if let Some(ref mut map) = self.upper_zone_map {
+                    map.assign_note(note)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Release a note's channel allocation
+    ///
+    /// Call this on Note Off to free up the channel for reuse.
+    pub fn release_channel_for_note(&mut self, note: u8) {
+        if let Some(ref mut map) = self.lower_zone_map {
+            map.release_note(note);
+        }
+        if let Some(ref mut map) = self.upper_zone_map {
+            map.release_note(note);
+        }
+    }
+
+    /// Get the channel currently assigned to a note
+    ///
+    /// Returns None if the note is not currently playing or MPE is disabled.
+    pub fn get_channel_for_note(&self, note: u8) -> Option<u8> {
+        // Check lower zone first
+        if let Some(ref map) = self.lower_zone_map {
+            if let Some(ch) = map.get_channel_for_note(note) {
+                return Some(ch);
+            }
+        }
+        // Then check upper zone
+        if let Some(ref map) = self.upper_zone_map {
+            if let Some(ch) = map.get_channel_for_note(note) {
+                return Some(ch);
+            }
+        }
+        None
     }
 
     /// Reset all expression state

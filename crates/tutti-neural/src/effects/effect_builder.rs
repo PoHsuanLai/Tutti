@@ -20,6 +20,7 @@ pub(crate) struct EffectBuilder<B: Backend> {
     engine: Arc<NeuralInferenceEngine<B>>,
 
     /// Path to the loaded model
+    #[allow(dead_code)]
     model_path: String,
 
     /// Loaded model ID in the engine
@@ -112,6 +113,7 @@ mod tests {
         let backend_pool = Arc::new(BackendPool::new().unwrap());
         let cpu_device = backend_pool.cpu_device();
 
+        #[allow(clippy::arc_with_non_send_sync)] // NdArray is single-threaded by design
         let engine = Arc::new(
             NeuralInferenceEngine::<NdArray>::new(cpu_device.clone(), InferenceConfig::default())
                 .unwrap(),

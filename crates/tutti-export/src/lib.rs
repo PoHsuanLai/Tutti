@@ -89,6 +89,7 @@ pub use format::flac::export_flac;
 /// The format is determined by the file extension:
 /// - `.wav` -> WAV
 /// - `.flac` -> FLAC
+#[allow(unused_variables)]
 pub fn export_to_file(
     path: &str,
     left: &[f32],

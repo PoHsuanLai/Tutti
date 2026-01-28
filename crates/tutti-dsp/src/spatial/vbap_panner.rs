@@ -1,10 +1,46 @@
 use crate::spatial::types::ChannelLayout;
 use crate::Result;
-use tutti_core::{dsp::Signal, AudioUnit, BufferMut, BufferRef, SignalFrame};
+use std::sync::Arc;
+use tutti_core::AtomicFloat;
 use vbap::{SpeakerConfig, VBAPanner};
 
 /// Default smoothing time for position changes (50ms for smooth automation)
 const DEFAULT_POSITION_SMOOTH_TIME: f32 = 0.05;
+
+/// Simple exponential smoothing filter for real-time parameter smoothing
+/// This replaces FunDSP's Follow filter with a simpler implementation
+struct ExponentialSmoother {
+    /// Current smoothed value
+    value: f32,
+    /// Smoothing coefficient (0 = no smoothing, 1 = instant)
+    coeff: f32,
+}
+
+impl ExponentialSmoother {
+    /// Create a new smoother with smoothing time in seconds
+    /// At 48kHz, 0.05s = 2400 samples. We want to reach ~99% in that time.
+    /// tau = -1 / ln(1 - target_level), for 99% convergence: tau ≈ 4.6
+    /// coeff = 1 - exp(-1 / (time * sample_rate))
+    fn new(smooth_time: f32, sample_rate: f32) -> Self {
+        let coeff = 1.0 - (-1.0 / (smooth_time * sample_rate)).exp();
+        Self {
+            value: 0.0,
+            coeff: coeff.clamp(0.0, 1.0),
+        }
+    }
+
+    /// Process one sample (returns smoothed value)
+    fn process(&mut self, target: f32) -> f32 {
+        self.value += self.coeff * (target - self.value);
+        self.value
+    }
+
+    /// Reset to a specific value
+    #[allow(dead_code)]
+    fn reset(&mut self, value: f32) {
+        self.value = value;
+    }
+}
 
 /// Spatial audio panner using VBAP
 ///
@@ -13,34 +49,33 @@ pub struct SpatialPanner {
     panner: VBAPanner,
     layout: ChannelLayout,
     /// Target azimuth position in degrees (-180 to 180)
-    azimuth_target: Shared,
+    azimuth_target: Arc<AtomicFloat>,
     /// Target elevation position in degrees (-90 to 90)
-    elevation_target: Shared,
-    /// Azimuth smoother (follow filter)
-    azimuth_smoother: An<Follow<f32>>,
-    /// Elevation smoother (follow filter)
-    elevation_smoother: An<Follow<f32>>,
-    /// Current smoothed azimuth
-    smoothed_azimuth: f32,
-    /// Current smoothed elevation
-    smoothed_elevation: f32,
+    elevation_target: Arc<AtomicFloat>,
+    /// Azimuth smoother
+    azimuth_smoother: ExponentialSmoother,
+    /// Elevation smoother
+    elevation_smoother: ExponentialSmoother,
     /// Spread factor (0.0 = point source, 1.0 = diffuse)
     spread: f32,
+    /// Sample rate for smoothing (stored for potential runtime changes)
+    #[allow(dead_code)]
+    sample_rate: f32,
 }
 
 impl SpatialPanner {
     /// Helper to create panner with default smoothing
     fn new_with_layout(panner: VBAPanner, layout: ChannelLayout) -> Self {
+        let sample_rate = 48000.0; // Default sample rate, can be updated later
         Self {
             panner,
             layout,
-            azimuth_target: shared(0.0),
-            elevation_target: shared(0.0),
-            azimuth_smoother: follow(DEFAULT_POSITION_SMOOTH_TIME),
-            elevation_smoother: follow(DEFAULT_POSITION_SMOOTH_TIME),
-            smoothed_azimuth: 0.0,
-            smoothed_elevation: 0.0,
+            azimuth_target: Arc::new(AtomicFloat::new(0.0)),
+            elevation_target: Arc::new(AtomicFloat::new(0.0)),
+            azimuth_smoother: ExponentialSmoother::new(DEFAULT_POSITION_SMOOTH_TIME, sample_rate),
+            elevation_smoother: ExponentialSmoother::new(DEFAULT_POSITION_SMOOTH_TIME, sample_rate),
             spread: 0.0,
+            sample_rate,
         }
     }
 
@@ -170,19 +205,18 @@ impl SpatialPanner {
     /// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left, -90 = right)
     /// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
     pub fn set_position(&mut self, azimuth: f32, elevation: f32) {
-        self.azimuth_target.set_value(azimuth.clamp(-180.0, 180.0));
-        self.elevation_target
-            .set_value(elevation.clamp(-90.0, 90.0));
+        self.azimuth_target.set(azimuth.clamp(-180.0, 180.0));
+        self.elevation_target.set(elevation.clamp(-90.0, 90.0));
     }
 
-    /// Get current azimuth (smoothed value)
+    /// Get current azimuth (target value)
     pub fn azimuth(&self) -> f32 {
-        self.smoothed_azimuth
+        self.azimuth_target.get()
     }
 
-    /// Get current elevation (smoothed value)
+    /// Get current elevation (target value)
     pub fn elevation(&self) -> f32 {
-        self.smoothed_elevation
+        self.elevation_target.get()
     }
 
     /// Set spread factor (0.0 = point source, 1.0 = diffuse)
@@ -200,16 +234,15 @@ impl SpatialPanner {
     /// Returns a vector of gains, one per speaker channel.
     /// Updates smoothed position values on each call.
     pub fn compute_gains(&mut self) -> Vec<f32> {
-        self.smoothed_azimuth = self
-            .azimuth_smoother
-            .filter_mono(self.azimuth_target.value());
-        self.smoothed_elevation = self
-            .elevation_smoother
-            .filter_mono(self.elevation_target.value());
+        let target_azimuth = self.azimuth_target.get();
+        let target_elevation = self.elevation_target.get();
+
+        let smoothed_azimuth = self.azimuth_smoother.process(target_azimuth);
+        let smoothed_elevation = self.elevation_smoother.process(target_elevation);
 
         let gains_f64 = self
             .panner
-            .compute_gains(self.smoothed_azimuth as f64, self.smoothed_elevation as f64);
+            .compute_gains(smoothed_azimuth as f64, smoothed_elevation as f64);
         let mut gains: Vec<f32> = gains_f64.iter().map(|&g| g as f32).collect();
 
         // Apply spread: blend toward equal power across all speakers
@@ -285,28 +318,27 @@ impl SpatialPanner {
             let mono = (left + right) * 0.5;
             self.process_mono_into(mono, output);
         } else {
-            self.smoothed_azimuth = self
-                .azimuth_smoother
-                .filter_mono(self.azimuth_target.value());
-            self.smoothed_elevation = self
-                .elevation_smoother
-                .filter_mono(self.elevation_target.value());
+            let target_azimuth = self.azimuth_target.get();
+            let target_elevation = self.elevation_target.get();
+
+            let smoothed_azimuth = self.azimuth_smoother.process(target_azimuth);
+            let smoothed_elevation = self.elevation_smoother.process(target_elevation);
 
             // Stereo upmixing: pan L/R to offset positions
             // Width of ±15° gives good stereo imaging in surround
             let angle_offset = 15.0 * width;
 
             // Compute gains for left source (slightly left of center position)
-            let az_left = self.smoothed_azimuth + angle_offset;
+            let az_left = smoothed_azimuth + angle_offset;
             let gains_left = self
                 .panner
-                .compute_gains(az_left as f64, self.smoothed_elevation as f64);
+                .compute_gains(az_left as f64, smoothed_elevation as f64);
 
             // Compute gains for right source (slightly right of center position)
-            let az_right = self.smoothed_azimuth - angle_offset;
+            let az_right = smoothed_azimuth - angle_offset;
             let gains_right = self
                 .panner
-                .compute_gains(az_right as f64, self.smoothed_elevation as f64);
+                .compute_gains(az_right as f64, smoothed_elevation as f64);
 
             // Mix both into output
             for (i, out) in output.iter_mut().enumerate() {

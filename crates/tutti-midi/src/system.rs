@@ -6,7 +6,7 @@
 //! use tutti_midi::{MidiSystem, MpeMode, MpeZoneConfig};
 //!
 //! // Create MIDI system with I/O and MPE
-//! let midi = MidiSystem::builder()
+//! let midi = MidiSystem::new()
 //!     .io()
 //!     .mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
 //!     .build()?;
@@ -41,6 +41,8 @@ use crate::output::{MidiOutputManager, MidiOutputMessage};
 
 #[cfg(feature = "mpe")]
 use crate::mpe::{MpeMode, MpeProcessor, PerNoteExpression};
+#[cfg(feature = "mpe")]
+use parking_lot::RwLock;
 
 #[cfg(feature = "midi2")]
 use crate::midi2::Midi2Event;
@@ -64,8 +66,13 @@ struct MidiSystemInner {
     input_manager: Option<Arc<MidiInputManager>>,
     #[cfg(feature = "midi-io")]
     output_manager: Option<Arc<MidiOutputManager>>,
+    /// MPE processor with interior mutability for channel allocation
+    ///
+    /// Uses RwLock because:
+    /// - Reading expression state (audio thread) is lock-free via atomics in PerNoteExpression
+    /// - Channel allocation (outgoing MPE) requires mutation and is not time-critical
     #[cfg(feature = "mpe")]
-    mpe_processor: Option<Arc<MpeProcessor>>,
+    mpe_processor: Option<Arc<RwLock<MpeProcessor>>>,
     cc_manager: Option<Arc<crate::cc_manager::CCMappingManager>>,
     output_collector: Option<Arc<crate::output_collector::MidiOutputAggregator>>,
 }
@@ -76,7 +83,7 @@ impl MidiSystem {
     /// # Example
     ///
     /// ```ignore
-    /// let midi = MidiSystem::builder()
+    /// let midi = MidiSystem::new()
     ///     .io()
     ///     .build()?;
     /// ```
@@ -353,7 +360,10 @@ impl MidiSystem {
     /// Get the shared per-note expression state (for synth voices)
     #[cfg(feature = "mpe")]
     pub fn expression(&self) -> Option<Arc<PerNoteExpression>> {
-        self.inner.mpe_processor.as_ref().map(|p| p.expression())
+        self.inner
+            .mpe_processor
+            .as_ref()
+            .map(|p| p.read().expression())
     }
 
     /// Check if MPE is enabled
@@ -362,7 +372,7 @@ impl MidiSystem {
         self.inner
             .mpe_processor
             .as_ref()
-            .map(|p| !matches!(p.mode(), MpeMode::Disabled))
+            .map(|p| !matches!(p.read().mode(), MpeMode::Disabled))
             .unwrap_or(false)
     }
 
@@ -372,6 +382,33 @@ impl MidiSystem {
     #[cfg(feature = "midi2")]
     pub fn midi2(&self) -> Midi2Handle {
         Midi2Handle
+    }
+
+    /// Push a MIDI 2.0 event programmatically to a specific input port
+    ///
+    /// This allows sequencers, AI, tests, etc. to inject MIDI 2.0 events
+    /// into the processing pipeline without hardware.
+    ///
+    /// * `port_index` - The input port index to push to
+    /// * `event` - The MIDI 2.0 event to inject
+    #[cfg(feature = "midi2")]
+    pub fn push_midi2_event(&self, port_index: usize, event: Midi2Event) -> bool {
+        let unified = crate::event::UnifiedMidiEvent::V2(event);
+        self.inner
+            .port_manager
+            .push_unified_event(port_index, unified)
+    }
+
+    /// Push a unified MIDI event (1.0 or 2.0) programmatically to a specific input port
+    #[cfg(feature = "midi2")]
+    pub fn push_unified_event(
+        &self,
+        port_index: usize,
+        event: crate::event::UnifiedMidiEvent,
+    ) -> bool {
+        self.inner
+            .port_manager
+            .push_unified_event(port_index, event)
     }
 
     // ==================== Advanced: Direct Access ====================
@@ -460,17 +497,24 @@ impl MidiSystemBuilder {
     pub fn build(self) -> Result<MidiSystem> {
         let port_manager = Arc::new(MidiPortManager::new(256));
 
+        // Create MPE processor before input manager so it can be passed in
+        #[cfg(feature = "mpe")]
+        let mpe_processor = self
+            .mpe_mode
+            .map(|mode| Arc::new(RwLock::new(MpeProcessor::new(mode))));
+
         #[cfg(feature = "midi-io")]
         let (input_manager, output_manager) = if self.enable_io {
-            let input = MidiInputManager::new(port_manager.clone());
+            let input = MidiInputManager::new(
+                port_manager.clone(),
+                #[cfg(feature = "mpe")]
+                mpe_processor.clone(),
+            );
             let output = MidiOutputManager::new();
             (Some(Arc::new(input)), Some(Arc::new(output)))
         } else {
             (None, None)
         };
-
-        #[cfg(feature = "mpe")]
-        let mpe_processor = self.mpe_mode.map(|mode| Arc::new(MpeProcessor::new(mode)));
 
         let cc_manager = if self.enable_cc_mapping {
             Some(Arc::new(crate::cc_manager::CCMappingManager::new()))
@@ -509,14 +553,14 @@ impl MidiSystemBuilder {
 /// Handle for MPE functionality
 #[cfg(feature = "mpe")]
 pub struct MpeHandle {
-    processor: Option<Arc<MpeProcessor>>,
+    processor: Option<Arc<RwLock<MpeProcessor>>>,
 }
 
 #[cfg(feature = "mpe")]
 impl MpeHandle {
     /// Get the shared per-note expression state
     pub fn expression(&self) -> Option<Arc<PerNoteExpression>> {
-        self.processor.as_ref().map(|p| p.expression())
+        self.processor.as_ref().map(|p| p.read().expression())
     }
 
     /// Get pitch bend for a note (combined per-note + global)
@@ -526,7 +570,7 @@ impl MpeHandle {
     pub fn pitch_bend(&self, note: u8) -> f32 {
         self.processor
             .as_ref()
-            .map(|p| p.expression().get_pitch_bend(note))
+            .map(|p| p.read().expression().get_pitch_bend(note))
             .unwrap_or(0.0)
     }
 
@@ -535,7 +579,7 @@ impl MpeHandle {
     pub fn pitch_bend_per_note(&self, note: u8) -> f32 {
         self.processor
             .as_ref()
-            .map(|p| p.expression().get_pitch_bend_per_note(note))
+            .map(|p| p.read().expression().get_pitch_bend_per_note(note))
             .unwrap_or(0.0)
     }
 
@@ -544,7 +588,7 @@ impl MpeHandle {
     pub fn pitch_bend_global(&self) -> f32 {
         self.processor
             .as_ref()
-            .map(|p| p.expression().get_pitch_bend_global())
+            .map(|p| p.read().expression().get_pitch_bend_global())
             .unwrap_or(0.0)
     }
 
@@ -555,7 +599,7 @@ impl MpeHandle {
     pub fn pressure(&self, note: u8) -> f32 {
         self.processor
             .as_ref()
-            .map(|p| p.expression().get_pressure(note))
+            .map(|p| p.read().expression().get_pressure(note))
             .unwrap_or(0.0)
     }
 
@@ -564,7 +608,7 @@ impl MpeHandle {
     pub fn pressure_per_note(&self, note: u8) -> f32 {
         self.processor
             .as_ref()
-            .map(|p| p.expression().get_pressure_per_note(note))
+            .map(|p| p.read().expression().get_pressure_per_note(note))
             .unwrap_or(0.0)
     }
 
@@ -575,7 +619,7 @@ impl MpeHandle {
     pub fn slide(&self, note: u8) -> f32 {
         self.processor
             .as_ref()
-            .map(|p| p.expression().get_slide(note))
+            .map(|p| p.read().expression().get_slide(note))
             .unwrap_or(0.5)
     }
 
@@ -584,28 +628,90 @@ impl MpeHandle {
     pub fn is_note_active(&self, note: u8) -> bool {
         self.processor
             .as_ref()
-            .map(|p| p.expression().is_active(note))
+            .map(|p| p.read().expression().is_active(note))
             .unwrap_or(false)
     }
 
     /// Get the current MPE mode
-    pub fn mode(&self) -> Option<&MpeMode> {
-        self.processor.as_ref().map(|p| p.mode())
+    pub fn mode(&self) -> MpeMode {
+        self.processor
+            .as_ref()
+            .map(|p| p.read().mode().clone())
+            .unwrap_or(MpeMode::Disabled)
     }
 
     /// Check if MPE is enabled
     pub fn is_enabled(&self) -> bool {
         self.processor
             .as_ref()
-            .map(|p| !matches!(p.mode(), MpeMode::Disabled))
+            .map(|p| !matches!(p.read().mode(), MpeMode::Disabled))
             .unwrap_or(false)
+    }
+
+    // ========================================================================
+    // Incoming: Process unified MIDI events
+    // ========================================================================
+
+    /// Process a unified MIDI event (MIDI 1.0 or 2.0)
+    ///
+    /// Dispatches to the appropriate handler based on the event type.
+    /// This allows external callers to feed events into the MPE processor.
+    #[cfg(feature = "midi2")]
+    pub fn process_event(&self, event: &crate::UnifiedMidiEvent) {
+        if let Some(ref p) = self.processor {
+            p.write().process_unified(event);
+        }
+    }
+
+    // ========================================================================
+    // Outgoing MPE: Send notes with automatic channel allocation
+    // ========================================================================
+
+    /// Allocate a channel for outgoing MPE note
+    ///
+    /// Call this before sending a Note On to allocate an MPE channel.
+    /// Returns the channel to use, or None if MPE is disabled.
+    ///
+    /// # Example
+    /// ```ignore
+    /// if let Some(channel) = midi.mpe().allocate_channel(60) {
+    ///     midi.send_note_on(channel, 60, 100)?;
+    /// }
+    /// ```
+    pub fn allocate_channel(&self, note: u8) -> Option<u8> {
+        self.processor
+            .as_ref()
+            .and_then(|p| p.write().allocate_channel_for_note(note))
+    }
+
+    /// Release a channel after Note Off
+    ///
+    /// Frees the channel for reuse by other notes.
+    pub fn release_channel(&self, note: u8) {
+        if let Some(ref p) = self.processor {
+            p.write().release_channel_for_note(note);
+        }
+    }
+
+    /// Get the channel currently assigned to a note
+    ///
+    /// Returns None if the note is not currently playing or MPE is disabled.
+    pub fn get_channel(&self, note: u8) -> Option<u8> {
+        self.processor
+            .as_ref()
+            .and_then(|p| p.read().get_channel_for_note(note))
     }
 
     /// Check if using lower zone
     pub fn has_lower_zone(&self) -> bool {
         self.processor
             .as_ref()
-            .map(|p| matches!(p.mode(), MpeMode::LowerZone(_) | MpeMode::DualZone { .. }))
+            .map(|p| {
+                matches!(
+                    p.read().mode(),
+                    MpeMode::LowerZone(_) | MpeMode::DualZone { .. }
+                )
+            })
             .unwrap_or(false)
     }
 
@@ -613,8 +719,23 @@ impl MpeHandle {
     pub fn has_upper_zone(&self) -> bool {
         self.processor
             .as_ref()
-            .map(|p| matches!(p.mode(), MpeMode::UpperZone(_) | MpeMode::DualZone { .. }))
+            .map(|p| {
+                matches!(
+                    p.read().mode(),
+                    MpeMode::UpperZone(_) | MpeMode::DualZone { .. }
+                )
+            })
             .unwrap_or(false)
+    }
+
+    /// Reset all MPE state
+    ///
+    /// Clears all channel allocations and resets expression values.
+    /// Call this when stopping playback or changing MPE configuration.
+    pub fn reset(&self) {
+        if let Some(ref p) = self.processor {
+            p.write().reset();
+        }
     }
 }
 
@@ -806,7 +927,7 @@ mod tests {
     fn test_mpe_builder() {
         use crate::mpe::MpeZoneConfig;
 
-        let midi = MidiSystem::builder()
+        let midi = MidiSystem::new()
             .mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
             .build()
             .unwrap();

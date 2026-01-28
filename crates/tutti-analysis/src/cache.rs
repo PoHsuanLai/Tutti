@@ -137,7 +137,7 @@ impl ThumbnailCache {
         if let Some(ref disk_path) = self.disk_path {
             if let Ok(entries) = fs::read_dir(disk_path) {
                 for entry in entries.flatten() {
-                    if entry.path().extension().map_or(false, |e| e == "thumb") {
+                    if entry.path().extension().is_some_and(|e| e == "thumb") {
                         let _ = fs::remove_file(entry.path());
                     }
                 }

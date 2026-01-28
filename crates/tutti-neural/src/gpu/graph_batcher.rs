@@ -48,6 +48,7 @@ impl<B: Backend> GraphAwareBatcher<B> {
     }
 
     /// Get count of pending requests
+    #[allow(dead_code)]
     pub fn pending_count(&self) -> usize {
         self.pending_requests.values().map(|v| v.len()).sum()
     }
@@ -72,7 +73,7 @@ impl<B: Backend> GraphAwareBatcher<B> {
         let start = std::time::Instant::now();
 
         // Process each model's batch according to strategy
-        for (model_id, _node_ids) in &strategy.model_batches {
+        for model_id in strategy.model_batches.keys() {
             let model_key = model_id.as_u64();
             if let Some(requests) = self.pending_requests.remove(&model_key) {
                 if requests.is_empty() {
@@ -218,6 +219,7 @@ mod tests {
         let engine: NeuralInferenceEngine<TestBackend> =
             NeuralInferenceEngine::new(device, config).unwrap();
 
+        #[allow(clippy::arc_with_non_send_sync)] // NdArray is single-threaded by design
         let batcher = GraphAwareBatcher::new(Arc::new(engine));
 
         assert!(!batcher.has_pending());

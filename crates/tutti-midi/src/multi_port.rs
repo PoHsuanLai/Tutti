@@ -232,6 +232,55 @@ impl MidiPortManager {
             .get(port_index)
             .map(|port| port.input_producer_handle())
     }
+
+    /// Get a lock-free unified input producer handle for a port.
+    #[cfg(feature = "midi2")]
+    pub fn get_unified_input_producer_handle(
+        &self,
+        port_index: usize,
+    ) -> Option<super::async_port::UnifiedInputProducerHandle> {
+        let input_ports = self.input_ports.load();
+        input_ports
+            .get(port_index)
+            .map(|port| port.unified_input_producer_handle())
+    }
+
+    /// Read unified input from all active ports. RT-safe (lock-free).
+    #[cfg(feature = "midi2")]
+    pub fn cycle_start_read_all_unified_inputs(
+        &self,
+        _nframes: usize,
+    ) -> Vec<(usize, crate::event::UnifiedMidiEvent)> {
+        let mut all_events = Vec::new();
+        let input_ports = self.input_ports.load();
+
+        for (port_index, port) in input_ports.iter().enumerate() {
+            if !port.is_active() {
+                continue;
+            }
+            let events = port.cycle_start_read_unified_input();
+            for event in events {
+                all_events.push((port_index, event));
+            }
+        }
+        all_events
+    }
+
+    /// Push a unified MIDI event to a specific input port.
+    #[cfg(feature = "midi2")]
+    pub fn push_unified_event(
+        &self,
+        port_index: usize,
+        event: crate::event::UnifiedMidiEvent,
+    ) -> bool {
+        let input_ports = self.input_ports.load();
+        if let Some(port) = input_ports.get(port_index) {
+            let handle = port.unified_input_producer_handle();
+            handle.push(event)
+        } else {
+            false
+        }
+    }
 }
 
 impl Default for MidiPortManager {

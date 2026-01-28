@@ -46,6 +46,40 @@ impl InputProducerHandle {
     }
 }
 
+/// Lock-free producer handle for unified MIDI input (MIDI 1.0 or 2.0).
+///
+/// # Safety
+/// This handle must only be used from a single thread.
+/// SPSC ring buffers require exactly one producer - concurrent pushes are undefined behavior.
+#[cfg(feature = "midi2")]
+pub struct UnifiedInputProducerHandle {
+    producer: *mut ringbuf::HeapProd<crate::event::UnifiedMidiEvent>,
+}
+
+#[cfg(feature = "midi2")]
+// SAFETY: UnifiedInputProducerHandle is Send because the underlying HeapProd is Send.
+// It's used to transfer ownership from the port creator to the caller's thread.
+unsafe impl Send for UnifiedInputProducerHandle {}
+
+#[cfg(feature = "midi2")]
+// SAFETY: UnifiedInputProducerHandle is Sync because we document that only one thread
+// may call push() at a time. This is the SPSC invariant.
+unsafe impl Sync for UnifiedInputProducerHandle {}
+
+#[cfg(feature = "midi2")]
+impl UnifiedInputProducerHandle {
+    /// Push a unified MIDI event to the input buffer (lock-free).
+    ///
+    /// # Safety
+    /// Must only be called from a single thread (SPSC invariant).
+    #[inline]
+    pub fn push(&self, event: crate::event::UnifiedMidiEvent) -> bool {
+        // SAFETY: We have exclusive access as the single producer (SPSC invariant).
+        let prod = unsafe { &mut *self.producer };
+        prod.try_push(event).is_ok()
+    }
+}
+
 /// Lock-free MIDI port using SPSC ring buffers.
 ///
 /// Uses UnsafeCell for zero-overhead access on both producer and consumer sides.
@@ -57,6 +91,10 @@ pub struct AsyncMidiPort {
     input_producer: UnsafeCell<ringbuf::HeapProd<MidiEvent>>,
     output_producer: UnsafeCell<ringbuf::HeapProd<MidiEvent>>,
     output_consumer: UnsafeCell<ringbuf::HeapCons<MidiEvent>>,
+    #[cfg(feature = "midi2")]
+    unified_input_consumer: UnsafeCell<ringbuf::HeapCons<crate::event::UnifiedMidiEvent>>,
+    #[cfg(feature = "midi2")]
+    unified_input_producer: UnsafeCell<ringbuf::HeapProd<crate::event::UnifiedMidiEvent>>,
 }
 
 impl AsyncMidiPort {
@@ -67,6 +105,11 @@ impl AsyncMidiPort {
         let output_rb = HeapRb::<MidiEvent>::new(fifo_size);
         let (output_producer, output_consumer) = output_rb.split();
 
+        #[cfg(feature = "midi2")]
+        let unified_rb = HeapRb::<crate::event::UnifiedMidiEvent>::new(fifo_size);
+        #[cfg(feature = "midi2")]
+        let (unified_input_producer, unified_input_consumer) = unified_rb.split();
+
         Self {
             name,
             active: std::sync::atomic::AtomicBool::new(true),
@@ -74,6 +117,10 @@ impl AsyncMidiPort {
             input_producer: UnsafeCell::new(input_producer),
             output_producer: UnsafeCell::new(output_producer),
             output_consumer: UnsafeCell::new(output_consumer),
+            #[cfg(feature = "midi2")]
+            unified_input_consumer: UnsafeCell::new(unified_input_consumer),
+            #[cfg(feature = "midi2")]
+            unified_input_producer: UnsafeCell::new(unified_input_producer),
         }
     }
 
@@ -105,11 +152,33 @@ impl AsyncMidiPort {
         }
     }
 
+    /// Get a lock-free producer handle for unified MIDI input.
+    ///
+    /// # Safety
+    /// The returned handle must only be used from a single thread (SPSC invariant).
+    #[cfg(feature = "midi2")]
+    pub fn unified_input_producer_handle(&self) -> UnifiedInputProducerHandle {
+        UnifiedInputProducerHandle {
+            producer: self.unified_input_producer.get(),
+        }
+    }
+
     // ==================== RT Thread Methods ====================
 
     pub fn cycle_start_read_input(&self, _nframes: usize) -> Vec<MidiEvent> {
         let mut events = Vec::new();
         let consumer = unsafe { &mut *self.input_consumer.get() };
+        while let Some(event) = consumer.try_pop() {
+            events.push(event);
+        }
+        events
+    }
+
+    /// Read all pending unified MIDI events from the input buffer. RT-safe (lock-free).
+    #[cfg(feature = "midi2")]
+    pub fn cycle_start_read_unified_input(&self) -> Vec<crate::event::UnifiedMidiEvent> {
+        let mut events = Vec::new();
+        let consumer = unsafe { &mut *self.unified_input_consumer.get() };
         while let Some(event) = consumer.try_pop() {
             events.push(event);
         }
@@ -136,6 +205,8 @@ impl AsyncMidiPort {
 // 2. input_consumer: Only accessed by audio thread (single consumer)
 // 3. output_producer: Only accessed by audio thread (single producer)
 // 4. output_consumer: Only accessed by output thread (single consumer)
+// 5. unified_input_producer: Only accessed by the programmatic input thread (single producer)
+// 6. unified_input_consumer: Only accessed by audio thread (single consumer)
 // Each buffer has exactly one producer and one consumer, never accessed concurrently.
 unsafe impl Sync for AsyncMidiPort {}
 

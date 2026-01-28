@@ -109,17 +109,9 @@ impl SyncEffectBuilder {
             // Main loop: handle build requests
             // Effect inference happens inside the NeuralEffectNode's channels.
             // The builder only needs to create new instances on demand.
-            loop {
-                match build_rx.recv() {
-                    Ok(request) => {
-                        if let Ok(unit) = builder.build_effect() {
-                            let _ = request.response_tx.send(unit);
-                        }
-                    }
-                    Err(_) => {
-                        // All senders dropped — shut down
-                        break;
-                    }
+            while let Ok(request) = build_rx.recv() {
+                if let Ok(unit) = builder.build_effect() {
+                    let _ = request.response_tx.send(unit);
                 }
             }
         });

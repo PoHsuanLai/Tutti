@@ -49,12 +49,12 @@ engine.transport().play();
 ## Features
 
 - `default` - Core audio engine only
-- `full` - Everything enabled
+- `full` - Everything enabled (excludes `neural`)
 - `midi` - MIDI subsystem
 - `sampler` - Sample playback and recording
 - `soundfont` - SoundFont support (requires `sampler`)
 - `plugin` - Plugin hosting (VST2/VST3/CLAP)
-- `neural` - Neural audio processing
+- `neural` - Neural audio processing (GPU synthesis and effects)
 - `analysis` - Audio analysis tools
 - `export` - Offline rendering
 - `spatial-audio` - VBAP and binaural panning

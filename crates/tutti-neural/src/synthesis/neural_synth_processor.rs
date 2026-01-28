@@ -118,7 +118,7 @@ impl AudioUnit for NeuralSynth {
 
     fn get_id(&self) -> u64 {
         // Use track_id as part of unique identifier
-        self.track_id as u64
+        self.track_id
     }
 
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {

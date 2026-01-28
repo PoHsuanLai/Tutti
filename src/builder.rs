@@ -4,13 +4,13 @@ use crate::core::TuttiSystemBuilder;
 use crate::{Result, TuttiEngine};
 
 #[cfg(feature = "midi")]
-use crate::midi::{MidiSystem, MidiSystemBuilder};
+use crate::midi::MidiSystem;
 
 #[cfg(feature = "sampler")]
-use crate::sampler::{SamplerSystem, SamplerSystemBuilder};
+use crate::sampler::SamplerSystem;
 
 #[cfg(feature = "neural")]
-use crate::neural::{NeuralSystem, NeuralSystemBuilder};
+use crate::neural::NeuralSystem;
 
 /// Builder for TuttiEngine
 ///
@@ -119,26 +119,39 @@ impl TuttiEngineBuilder {
 
         let core = core_builder.build()?;
 
-        let _sample_rate = self.sample_rate.unwrap_or_else(|| core.sample_rate());
+        #[cfg(feature = "sampler")]
+        let sample_rate = self.sample_rate.unwrap_or_else(|| core.sample_rate());
 
         // Build optional subsystems
         #[cfg(feature = "midi")]
         let midi = if self.enable_midi {
-            Some(MidiSystem::builder().build()?)
+            Some(
+                MidiSystem::new()
+                    .build()
+                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+            )
         } else {
             None
         };
 
         #[cfg(feature = "sampler")]
         let sampler = if self.enable_sampler {
-            Some(SamplerSystem::builder(sample_rate).build()?)
+            Some(
+                SamplerSystem::new(sample_rate)
+                    .build()
+                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+            )
         } else {
             None
         };
 
         #[cfg(feature = "neural")]
         let neural = if self.enable_neural {
-            Some(NeuralSystem::builder().build()?)
+            Some(
+                NeuralSystem::new()
+                    .build()
+                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+            )
         } else {
             None
         };

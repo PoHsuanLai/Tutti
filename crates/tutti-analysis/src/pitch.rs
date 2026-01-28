@@ -12,7 +12,7 @@
 //! autocorrelation-based pitch detector. This implementation includes
 //! all 6 steps from the original paper:
 //!
-//! 1. **Difference function** - d(τ) = Σ(x[j] - x[j+τ])²
+//! 1. **Difference function** - d(τ) = Σ(x\[j\] - x\[j+τ\])²
 //! 2. **Cumulative mean normalized difference** - d'(τ)
 //! 3. **Absolute threshold** - Find first τ where d'(τ) < threshold
 //! 4. **Parabolic interpolation** - Sub-sample accuracy

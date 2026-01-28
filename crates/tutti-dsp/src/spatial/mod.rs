@@ -69,4 +69,5 @@ pub use vbap_panner::SpatialPanner;
 
 // Re-export vbap types for advanced usage
 #[cfg(feature = "spatial-audio")]
+#[allow(unused_imports)] // These are public API exports for library users
 pub use vbap::{SpeakerConfig, SpeakerConfigBuilder, VBAPanner};

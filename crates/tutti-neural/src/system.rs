@@ -97,6 +97,7 @@ impl NeuralSystem {
                 let device = pool.cpu_device().clone();
                 let engine =
                     crate::gpu::NeuralInferenceEngine::<NdArray>::new(device, inference_config)?;
+                #[allow(clippy::arc_with_non_send_sync)] // NdArray is single-threaded by design
                 Ok(Arc::new(engine))
             },
             path,
@@ -130,6 +131,7 @@ impl NeuralSystem {
                 let device = pool.cpu_device().clone();
                 let engine =
                     crate::gpu::NeuralInferenceEngine::<NdArray>::new(device, inference_config)?;
+                #[allow(clippy::arc_with_non_send_sync)] // NdArray is single-threaded by design
                 Ok(Arc::new(engine))
             },
             path,

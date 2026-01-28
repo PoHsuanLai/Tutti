@@ -19,7 +19,7 @@ midi-msg = { version = "0.8", default-features = false }
 # ML/GPU framework
 burn = { git = "https://github.com/tracel-ai/burn", default-features = false, features = ["wgpu", "ndarray", "fusion", "autodiff", "std"] }
 burn-import = { git = "https://github.com/tracel-ai/burn", default-features = false, features = ["safetensors"], optional = true }
-wgpu = "26"  # Match Bevy 0.17's wgpu version
+wgpu = "28"  # Match Burn's wgpu version (via cubecl-wgpu)
 
 # Lock-free data structures
 crossbeam-channel = "0.5.15"

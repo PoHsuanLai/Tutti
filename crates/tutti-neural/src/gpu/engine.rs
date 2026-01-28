@@ -185,7 +185,7 @@ impl<B: Backend> NeuralInferenceEngine<B> {
     /// Load a neural model from file
     ///
     /// Supports ONNX, Burn MPK, and SafeTensors formats.
-    pub fn load_model(&self, path: &str, model_type: ModelType) -> Result<NeuralModelId>
+    pub fn load_model(&self, path: &str, _model_type: ModelType) -> Result<NeuralModelId>
     where
         B::FloatElem: burn::serde::de::DeserializeOwned,
     {
@@ -520,7 +520,7 @@ impl<B: Backend> NeuralInferenceEngine<B> {
         if batched {
             stats.batch_hit_rate = alpha + (1.0 - alpha) * stats.batch_hit_rate;
         } else {
-            stats.batch_hit_rate = (1.0 - alpha) * stats.batch_hit_rate;
+            stats.batch_hit_rate *= 1.0 - alpha;
         }
     }
 }

@@ -167,13 +167,12 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
 
         // Concatenate and project
         let combined = Tensor::cat(vec![harmonics, filters], 1);
-        let output = self.output_proj.forward(combined);
 
         // CubeCL fusion optimizations applied:
         // - Linear operations batched
         // - ReLU fused with preceding ops
         // - Reduced memory transfers
-        output
+        self.output_proj.forward(combined)
     }
 }
 

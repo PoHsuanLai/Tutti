@@ -24,9 +24,9 @@
 //! binaural.set_position(90.0, 0.0); // Hard left
 //! ```
 
-use crate::{AudioUnit, BufferMut, BufferRef, Result};
-use fundsp::signal::SignalFrame;
+use crate::{AudioUnit, Result};
 use std::sync::atomic::{AtomicU32, Ordering};
+use tutti_core::{BufferMut, BufferRef, SignalFrame};
 
 use super::binaural_panner::BinauralPanner;
 use super::vbap_panner::SpatialPanner;

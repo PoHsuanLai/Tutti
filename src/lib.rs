@@ -120,8 +120,12 @@ pub use tutti_sampler as sampler;
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::{
     AudioInput, AudioInputBackend, SamplerSystem, SamplerSystemBuilder, SamplerUnit,
-    StreamingSamplerUnit, TimeStretchParams, TimeStretchUnit,
+    StreamingSamplerUnit, TimeStretchUnit,
 };
+
+// Time stretch types from sampler subcrate
+#[cfg(feature = "sampler")]
+pub use tutti_sampler::time_stretch::TimeStretchParams;
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;

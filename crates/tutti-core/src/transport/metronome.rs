@@ -137,18 +137,13 @@ impl Metronome {
 }
 
 /// Metronome state for integration with audio backend
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum MetronomeMode {
+    #[default]
     Off,
     PrerollOnly,
     RecordingOnly,
     Always,
-}
-
-impl Default for MetronomeMode {
-    fn default() -> Self {
-        Self::Off
-    }
 }
 
 impl From<u8> for MetronomeMode {

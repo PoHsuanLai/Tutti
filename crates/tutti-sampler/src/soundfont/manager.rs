@@ -1,12 +1,12 @@
 //! SoundFont file management and loading
 
 use crate::error::{Error, Result};
-use crate::{AtomicUsize, Ordering};
 use dashmap::DashMap;
 use rustysynth::{SoundFont, SynthesizerSettings};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Handle to a loaded SoundFont

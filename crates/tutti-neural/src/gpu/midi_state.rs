@@ -112,18 +112,15 @@ impl MidiState {
 
     fn apply_cc(&mut self, control: midi_msg::ControlChange) {
         use midi_msg::ControlChange;
-        match control {
-            ControlChange::CC { control: cc, value } => {
-                let norm = value as f32 / 127.0;
-                match cc {
-                    1 => self.mod_wheel = norm,
-                    11 => self.expression = norm,
-                    64 => self.sustain = value >= 64,
-                    74 => self.brightness = norm,
-                    _ => {}
-                }
+        if let ControlChange::CC { control: cc, value } = control {
+            let norm = value as f32 / 127.0;
+            match cc {
+                1 => self.mod_wheel = norm,
+                11 => self.expression = norm,
+                64 => self.sustain = value >= 64,
+                74 => self.brightness = norm,
+                _ => {}
             }
-            _ => {}
         }
     }
 
