@@ -202,15 +202,13 @@ impl SharedAudioBuffer {
             .write(true)
             .create(true)
             .truncate(true)
-            .open(&path)
-            .context("Failed to create shared memory file")?;
+            .open(&path)?;
 
         // Set file size
-        file.set_len(size as u64)
-            .context("Failed to set file size")?;
+        file.set_len(size as u64)?;
 
         // Memory map it
-        let mmap = unsafe { MmapMut::map_mut(&file) }.context("Failed to create memory map")?;
+        let mmap = unsafe { MmapMut::map_mut(&file) }?;
 
         Ok(mmap)
     }
