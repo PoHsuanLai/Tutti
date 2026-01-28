@@ -15,14 +15,14 @@ use clap_sys::events::{
     CLAP_TRANSPORT_HAS_TIME_SIGNATURE, CLAP_TRANSPORT_IS_LOOP_ACTIVE, CLAP_TRANSPORT_IS_PLAYING,
     CLAP_TRANSPORT_IS_RECORDING,
 };
+#[cfg(all(feature = "clap", target_os = "macos"))]
+use clap_sys::ext::gui::CLAP_WINDOW_API_COCOA;
 #[cfg(all(feature = "clap", target_os = "windows"))]
 use clap_sys::ext::gui::CLAP_WINDOW_API_WIN32;
 #[cfg(all(feature = "clap", target_os = "linux"))]
 use clap_sys::ext::gui::CLAP_WINDOW_API_X11;
 #[cfg(feature = "clap")]
 use clap_sys::ext::gui::{clap_plugin_gui, clap_window, clap_window_handle, CLAP_EXT_GUI};
-#[cfg(all(feature = "clap", target_os = "macos"))]
-use clap_sys::ext::gui::CLAP_WINDOW_API_COCOA;
 #[cfg(feature = "clap")]
 use clap_sys::ext::params::{clap_plugin_params, CLAP_EXT_PARAMS};
 #[cfg(feature = "clap")]
