@@ -41,9 +41,9 @@ pub fn register_neural_model<P: AsRef<Path>>(
 
     registry.register(model_name, move |_params| {
         // Convert PathBuf to &str
-        let path_str = path_buf
-            .to_str()
-            .ok_or_else(|| NodeRegistryError::ConstructionFailed("Invalid UTF-8 in path".to_string()))?;
+        let path_str = path_buf.to_str().ok_or_else(|| {
+            NodeRegistryError::ConstructionFailed("Invalid UTF-8 in path".to_string())
+        })?;
 
         // Load neural model and build voice
         let model = neural.load_synth_model(path_str)?;
@@ -81,8 +81,8 @@ pub fn register_neural_directory<P: AsRef<Path>>(
     for entry in std::fs::read_dir(dir_path)
         .map_err(|e| NeuralError::InvalidPath(format!("Failed to read directory: {}", e)))?
     {
-        let entry = entry
-            .map_err(|e| NeuralError::InvalidPath(format!("Failed to read entry: {}", e)))?;
+        let entry =
+            entry.map_err(|e| NeuralError::InvalidPath(format!("Failed to read entry: {}", e)))?;
         let path = entry.path();
 
         if is_neural_model_file(&path) {
@@ -129,11 +129,20 @@ pub fn register_neural_synth_models<P: AsRef<Path>>(
 
     // If it's a directory, scan it
     if model_path.is_dir() {
-        registered.extend(register_neural_directory(registry, neural_system, model_path)?);
+        registered.extend(register_neural_directory(
+            registry,
+            neural_system,
+            model_path,
+        )?);
     } else {
         // Single model file
         if let Some(name) = model_path.file_stem().and_then(|s| s.to_str()) {
-            register_neural_model(registry, neural_system, format!("synth_{}", name), model_path)?;
+            register_neural_model(
+                registry,
+                neural_system,
+                format!("synth_{}", name),
+                model_path,
+            )?;
             registered.push(format!("synth_{}", name));
         }
     }
@@ -165,11 +174,20 @@ pub fn register_neural_effects<P: AsRef<Path>>(
 
     // If it's a directory, scan it
     if effects_path.is_dir() {
-        registered.extend(register_neural_directory(registry, neural_system, effects_path)?);
+        registered.extend(register_neural_directory(
+            registry,
+            neural_system,
+            effects_path,
+        )?);
     } else {
         // Single effect file
         if let Some(name) = effects_path.file_stem().and_then(|s| s.to_str()) {
-            register_neural_model(registry, neural_system, format!("fx_{}", name), effects_path)?;
+            register_neural_model(
+                registry,
+                neural_system,
+                format!("fx_{}", name),
+                effects_path,
+            )?;
             registered.push(format!("fx_{}", name));
         }
     }

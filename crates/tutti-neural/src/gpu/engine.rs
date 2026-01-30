@@ -564,7 +564,11 @@ mod tests {
 
         // Build features from MidiState (the new pattern)
         let mut state = MidiState::default();
-        state.apply(&tutti_midi::MidiEvent::note_on(0, 0, 60, 100));
+        let event = tutti_midi::MidiEvent::note_on_builder(60, 100)
+            .channel(0)
+            .offset(0)
+            .build();
+        state.apply(&event);
         let features = state.to_features();
 
         let tensor = engine.features_to_tensor(&features);

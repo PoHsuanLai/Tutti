@@ -31,18 +31,34 @@ Umbrella crate that coordinates multiple audio subsystems:
 ```rust
 use tutti::prelude::*;
 
-// Create engine (capabilities depend on enabled features)
-let engine = TuttiEngine::builder()
-    .sample_rate(44100.0)
-    .build()?;
+let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+let registry = NodeRegistry::default();
 
-// Build audio graph
+// Build audio graph with macros
 engine.graph(|net| {
-    let osc = net.add(Box::new(sine_hz(440.0)));
-    net.pipe_output(osc);
+    // Create nodes from registry
+    let sine = registry.create("sine", &params! {
+        "frequency" => 440.0
+    }).unwrap();
+
+    let filter = registry.create("lowpass", &params! {
+        "cutoff" => 2000.0,
+        "q" => 1.0
+    }).unwrap();
+
+    let reverb = registry.create("reverb_stereo", &params! {
+        "room_size" => 0.8,
+        "time" => 3.0
+    }).unwrap();
+
+    // Chain nodes: sine → filter → reverb → output
+    let sine_id = net.add(sine);
+    let filter_id = net.add(filter);
+    let reverb_id = net.add(reverb);
+
+    chain!(net, sine_id, filter_id, reverb_id => output);
 });
 
-// Control transport
 engine.transport().play();
 ```
 
@@ -61,22 +77,36 @@ engine.transport().play();
 
 ## Architecture
 
-Tutti uses a modular architecture where each subsystem is an independent crate:
-
-```
-TuttiEngine
-├── Core (always present)
-│   ├── Audio graph (FunDSP Net)
-│   ├── Transport
-│   ├── Metering
-│   └── PDC
-├── MIDI (optional)
-├── Sampler (optional)
-├── Neural (optional)
-└── ... other subsystems
-```
+Tutti uses a modular architecture where each subsystem is an independent crate. The `NodeRegistry` provides dynamic node creation from plugins, neural models, and builtin DSP nodes.
 
 ## Examples
+
+### NodeRegistry - Plugins and Neural Models
+
+```rust
+use tutti::prelude::*;
+
+let registry = NodeRegistry::default();
+let neural = NeuralSystem::builder().sample_rate(44100.0).build()?;
+
+// Register plugins and neural models
+register_plugin_directory(&registry, tokio_handle, "path/to/plugins")?;
+register_neural_model(&registry, &neural, "my_synth", "model.mpk")?;
+
+// Create nodes dynamically by name
+let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+engine.graph(|net| {
+    let synth = registry.create("my_synth", &params! {}).unwrap();
+    let reverb = registry.create("reverb_plugin", &params! {
+        "room_size" => 0.9
+    }).unwrap();
+
+    let synth_id = net.add(synth);
+    let reverb_id = net.add(reverb);
+
+    chain!(net, synth_id, reverb_id => output);
+});
+```
 
 ### With MIDI and Sampler
 
@@ -117,6 +147,23 @@ system.graph(|net| {
 use tutti_midi::MidiSystem;
 
 let midi = MidiSystem::new().build()?;
+```
+
+## Testing
+
+See [TESTING.md](TESTING.md) for setup instructions.
+
+Quick examples:
+
+```bash
+# Plugin loading (see example docs for setup)
+cargo run --example plugin_loading --features plugin
+
+# Neural models (run assets/models/create_test_model.py first)
+cargo run --example neural_models --features neural
+
+# MIDI synthesizer
+cargo run --example midi_synth --features "midi,synth"
 ```
 
 ## License

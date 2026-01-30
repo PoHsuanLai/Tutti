@@ -178,14 +178,21 @@ pub use tutti_export::{AudioFormat, ExportOptions, OfflineRenderer};
 pub use tutti_plugin as plugin;
 
 #[cfg(feature = "plugin")]
-pub use tutti_plugin::{BridgeConfig, PluginClient};
+pub use tutti_plugin::{
+    register_all_system_plugins, register_plugin, register_plugin_directory, BridgeConfig,
+    PluginClient,
+};
 
 // Neural audio
 #[cfg(feature = "neural")]
 pub use tutti_neural as neural;
 
 #[cfg(feature = "neural")]
-pub use tutti_neural::{NeuralSystem, NeuralSystemBuilder};
+pub use tutti_neural::{
+    register_all_neural_models, register_neural_directory, register_neural_effects,
+    register_neural_model, register_neural_synth_models, NeuralModelMetadata, NeuralModelType,
+    NeuralSystem, NeuralSystemBuilder,
+};
 
 /// Full FunDSP prelude - oscillators, filters, effects, and more.
 ///
@@ -246,4 +253,17 @@ pub mod prelude {
     // Neural (optional)
     #[cfg(feature = "neural")]
     pub use crate::neural::NeuralSystem;
+
+    // Plugin registration (optional)
+    #[cfg(feature = "plugin")]
+    pub use crate::plugin::{
+        register_all_system_plugins, register_plugin, register_plugin_directory,
+    };
+
+    // Neural registration (optional)
+    #[cfg(feature = "neural")]
+    pub use crate::neural::{
+        register_all_neural_models, register_neural_directory, register_neural_effects,
+        register_neural_model, register_neural_synth_models,
+    };
 }

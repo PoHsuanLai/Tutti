@@ -1,10 +1,16 @@
 //! Plugin Loading Example
 //!
 //! Loads VST3/CLAP plugins and plays audio through them.
+//!
+//! ## Setup
+//!
+//! Download free plugins and place in `assets/plugins/`:
+//! - Dragonfly Room Reverb: https://github.com/michaelwillis/dragonfly-reverb/releases
+//! - Surge XT: https://github.com/surge-synthesizer/releases-xt/releases
 
-use tutti::prelude::*;
 use std::path::PathBuf;
 use std::time::Duration;
+use tutti::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
@@ -31,22 +37,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
     engine.graph(|net| {
-        let sine = registry.create("sine", &params! { "frequency" => 440.0 }).unwrap();
+        let sine = registry
+            .create("sine", &params! { "frequency" => 440.0 })
+            .unwrap();
         let sine_id = net.add(sine);
 
         // Try plugin reverb, fallback to builtin
         let reverb_id = ["DragonflyRoomReverb", "ValhallaFreqEcho", "CloudReverb"]
             .iter()
             .find_map(|name| {
-                registry.create(name, &params! { "sample_rate" => 44100.0 })
+                registry
+                    .create(name, &params! { "sample_rate" => 44100.0 })
                     .ok()
                     .map(|r| net.add(r))
             })
             .unwrap_or_else(|| {
-                let r = registry.create("reverb_stereo", &params! {
-                    "room_size" => 0.8,
-                    "time" => 3.0
-                }).unwrap();
+                let r = registry
+                    .create(
+                        "reverb_stereo",
+                        &params! {
+                            "room_size" => 0.8,
+                            "time" => 3.0
+                        },
+                    )
+                    .unwrap();
                 net.add(r)
             });
 

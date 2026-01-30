@@ -39,12 +39,13 @@ assets/plugins/
 └── OTT.vst3/
 ```
 
-## For Examples
+## Usage
 
-The `plugin_registry_working.rs` example will:
-1. Look for plugins in this directory first
+The `plugin_loading.rs` example will:
+1. Scan for plugins in this directory
 2. Fall back to system plugin directories
-3. Show API usage even if no plugins found
+3. Register plugins with NodeRegistry
+4. Create audio nodes from registered plugins
 
 ## Note
 

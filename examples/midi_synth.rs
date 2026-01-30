@@ -2,8 +2,8 @@
 //!
 //! Demonstrates polyphonic synthesis.
 
-use tutti::prelude::*;
 use std::time::Duration;
+use tutti::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;

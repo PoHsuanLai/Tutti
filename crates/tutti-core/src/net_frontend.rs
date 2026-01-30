@@ -696,7 +696,7 @@ impl TuttiNet {
             name: self
                 .node_tags
                 .get(&id)
-                .map(|s| s.clone())
+                .cloned()
                 .unwrap_or_else(|| format!("Node {:?}", id)),
             inputs: unit.inputs(),
             outputs: unit.outputs(),

@@ -55,6 +55,7 @@ fundsp = { git = "https://github.com/PoHsuanLai/fundsp.git", default-features = 
 
 [dev-dependencies]
 approx = "0.5"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
 
 # Example-specific feature requirements
 [[example]]
@@ -62,11 +63,13 @@ name = "midi_synth"
 required-features = ["midi", "synth"]
 
 [[example]]
-name = "neural_synth"
+name = "neural_models"
 required-features = ["neural"]
 
 [[example]]
-name = "plugin_host"
+name = "plugin_loading"
 required-features = ["plugin"]
 
-# recording example now works by default (sampler & export are always included)
+[[example]]
+name = "neural_model_save_load"
+required-features = ["neural"]

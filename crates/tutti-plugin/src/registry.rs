@@ -98,8 +98,8 @@ pub fn register_plugin_directory<P: AsRef<Path>>(
     for entry in std::fs::read_dir(dir_path)
         .map_err(|e| BridgeError::LoadFailed(format!("Failed to read directory: {}", e)))?
     {
-        let entry = entry
-            .map_err(|e| BridgeError::LoadFailed(format!("Failed to read entry: {}", e)))?;
+        let entry =
+            entry.map_err(|e| BridgeError::LoadFailed(format!("Failed to read entry: {}", e)))?;
         let path = entry.path();
 
         if is_plugin_file(&path) {

@@ -113,9 +113,7 @@ pub use server::PluginServer;
 pub use shared_memory::SharedAudioBuffer;
 
 // Registry functions
-pub use registry::{
-    register_all_system_plugins, register_plugin, register_plugin_directory,
-};
+pub use registry::{register_all_system_plugins, register_plugin, register_plugin_directory};
 
 #[cfg(feature = "vst2")]
 pub use registry::register_system_vst2_plugins;

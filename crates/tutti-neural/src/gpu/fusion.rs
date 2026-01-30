@@ -205,4 +205,48 @@ mod tests {
         // Check output shape [batch_size=4, output=2]
         assert_eq!(output.shape().dims, [4, 2]);
     }
+
+    #[test]
+    fn test_save_and_load_mpk() {
+        use burn::record::{BinFileRecorder, FullPrecisionSettings, Recorder};
+        use std::fs;
+
+        let device = NdArrayDevice::default();
+
+        // Create a model with random weights
+        let model: FusedNeuralSynthModel<TestBackend> = FusedNeuralSynthModel::new(&device);
+
+        // Save to .mpk file
+        let temp_dir = std::env::temp_dir();
+        let model_path = temp_dir.join("test_model.mpk");
+
+        let recorder = BinFileRecorder::<FullPrecisionSettings>::default();
+        let record = model.clone().into_record();
+        recorder
+            .record(record, model_path.clone())
+            .expect("Failed to save model");
+
+        // Load from .mpk file
+        let loaded_model = FusedNeuralSynthModel::load_from_file(&model_path, &device)
+            .expect("Failed to load model");
+
+        // Test that loaded model produces output
+        let input = Tensor::<TestBackend, 2>::ones([2, 128], &device);
+        let output = loaded_model.forward(input);
+        assert_eq!(output.shape().dims, [2, 2]);
+
+        // Cleanup
+        let _ = fs::remove_file(model_path);
+    }
+
+    #[test]
+    fn test_onnx_error_message() {
+        let device = NdArrayDevice::default();
+        let result = FusedNeuralSynthModel::<TestBackend>::load_from_file("fake.onnx", &device);
+
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err();
+        assert!(err_msg.contains("burn-import"));
+        assert!(err_msg.contains("ONNX"));
+    }
 }
