@@ -354,7 +354,7 @@ mod tests {
         assert_eq!(config.source, RecordingSource::AudioInput);
         assert_eq!(config.mode, RecordingMode::Overdub);
         assert!(config.quantize.is_some());
-        assert_eq!(config.metronome, true);
+        assert!(config.metronome);
         assert_eq!(config.preroll_beats, 1.0);
         assert_eq!(config.punch_in, Some(4.0));
         assert_eq!(config.punch_out, Some(8.0));

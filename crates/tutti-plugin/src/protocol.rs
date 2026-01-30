@@ -407,9 +407,15 @@ mod tests {
     fn test_midi_message_serialization() {
         // Create MIDI events
         let midi_events = vec![
-            MidiEvent::note_on(0, 0, 60, 100),
-            MidiEvent::note_on(128, 0, 64, 100),
-            MidiEvent::control_change(256, 0, 7, 64),
+            MidiEvent::note_on_builder(60, 100)
+                .channel(0)
+                .offset(0)
+                .build(),
+            MidiEvent::note_on_builder(64, 100)
+                .channel(0)
+                .offset(128)
+                .build(),
+            MidiEvent::cc_builder(7, 64).channel(0).offset(256).build(),
         ];
 
         let msg = HostMessage::ProcessAudioMidi {
@@ -451,8 +457,14 @@ mod tests {
     #[test]
     fn test_midi_output_response_serialization() {
         let midi_output = vec![
-            MidiEvent::note_off(512, 0, 60, 0),
-            MidiEvent::note_off(640, 0, 64, 0),
+            MidiEvent::note_off_builder(60)
+                .channel(0)
+                .offset(512)
+                .build(),
+            MidiEvent::note_off_builder(64)
+                .channel(0)
+                .offset(640)
+                .build(),
         ];
 
         let msg = BridgeMessage::AudioProcessedMidi {

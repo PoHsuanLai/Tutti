@@ -19,7 +19,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let outs = <PluginClient as AudioUnit>::outputs(&client);
     println!("VST3 plugin loaded ({} in, {} out)", ins, outs);
 
-    let midi = vec![MidiEvent::note_on(0, 60, 100, 0)];
+    let midi = vec![MidiEvent::note_on_builder(60, 100)
+        .channel(0)
+        .offset(0)
+        .build()];
     client.queue_midi(&midi);
 
     for _ in 0..1000 {

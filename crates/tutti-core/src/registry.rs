@@ -407,9 +407,7 @@ mod tests {
         let registry = NodeRegistry::new();
 
         // Register a simple node
-        registry.register("test", |_params| {
-            Ok(Box::new(fundsp::prelude::pass::<f32>()))
-        });
+        registry.register("test", |_params| Ok(Box::new(fundsp::prelude::pass())));
 
         assert!(registry.has_type("test"));
         assert!(!registry.has_type("nonexistent"));
