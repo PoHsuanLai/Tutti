@@ -9,6 +9,7 @@ members = [
     "crates/tutti-neural",
     "crates/tutti-analysis",
     "crates/tutti-export",
+    "crates/fundsp-tutti",
 ]
 resolver = "2"
 
@@ -21,6 +22,13 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/PoHsuanLai/Tutti"
 keywords = ["audio", "dsp", "midi", "synthesis", "real-time"]
 categories = ["multimedia::audio", "multimedia"]
+exclude = [
+    "assets/models/*.onnx",
+    "assets/models/*.onnx.data",
+    "assets/plugins/*",
+    ".github/",
+    "TESTING.md",
+]
 
 [features]
 # Default: Core DAW functionality (export, sampler, analysis, spatial audio always included)
@@ -38,20 +46,17 @@ neural = ["dep:tutti-neural", "tutti-core/neural"]
 
 [dependencies]
 # Core subsystems (always included)
-tutti-core = { path = "crates/tutti-core", default-features = false }
-tutti-dsp = { path = "crates/tutti-dsp", default-features = false }
-tutti-sampler = { path = "crates/tutti-sampler", default-features = false }
-tutti-analysis = { path = "crates/tutti-analysis" }
-tutti-export = { path = "crates/tutti-export", default-features = false }
+tutti-core = { version = "0.0.1", path = "crates/tutti-core", default-features = false }
+tutti-dsp = { version = "0.0.1", path = "crates/tutti-dsp", default-features = false }
+tutti-sampler = { version = "0.0.1", path = "crates/tutti-sampler", default-features = false }
+tutti-analysis = { version = "0.0.1", path = "crates/tutti-analysis" }
+tutti-export = { version = "0.0.1", path = "crates/tutti-export", default-features = false }
 
 # Optional subsystems (heavy/complex dependencies)
-tutti-midi = { path = "crates/tutti-midi", optional = true, default-features = false }
-tutti-synth = { path = "crates/tutti-synth", optional = true, default-features = false }
-tutti-plugin = { path = "crates/tutti-plugin", optional = true }
-tutti-neural = { path = "crates/tutti-neural", optional = true }
-
-# FunDSP for DSP toolkit (fork with as_any methods for downcasting)
-fundsp = { git = "https://github.com/PoHsuanLai/fundsp.git", default-features = false, features = ["std"] }
+tutti-midi = { version = "0.0.1", path = "crates/tutti-midi", optional = true, default-features = false }
+tutti-synth = { version = "0.0.1", path = "crates/tutti-synth", optional = true, default-features = false }
+tutti-plugin = { version = "0.0.1", path = "crates/tutti-plugin", optional = true }
+tutti-neural = { version = "0.0.1", path = "crates/tutti-neural", optional = true }
 
 [dev-dependencies]
 approx = "0.5"

@@ -57,7 +57,7 @@ macro_rules! chain {
 macro_rules! mix {
     // 2 sources
     ($net:expr, $s1:expr, $s2:expr) => {{
-        use fundsp::prelude::*;
+        use $crate::dsp::*;
         let mixer = $net.add(Box::new(join::<typenum::U2>()));
         $net.connect_ports($s1, 0, mixer, 0);
         $net.connect_ports($s2, 0, mixer, 1);
@@ -66,7 +66,7 @@ macro_rules! mix {
 
     // 3 sources
     ($net:expr, $s1:expr, $s2:expr, $s3:expr) => {{
-        use fundsp::prelude::*;
+        use $crate::dsp::*;
         let mixer = $net.add(Box::new(join::<typenum::U3>()));
         $net.connect_ports($s1, 0, mixer, 0);
         $net.connect_ports($s2, 0, mixer, 1);
@@ -76,7 +76,7 @@ macro_rules! mix {
 
     // 4 sources
     ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr) => {{
-        use fundsp::prelude::*;
+        use $crate::dsp::*;
         let mixer = $net.add(Box::new(join::<typenum::U4>()));
         $net.connect_ports($s1, 0, mixer, 0);
         $net.connect_ports($s2, 0, mixer, 1);
@@ -87,7 +87,7 @@ macro_rules! mix {
 
     // 5 sources
     ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr) => {{
-        use fundsp::prelude::*;
+        use $crate::dsp::*;
         let mixer = $net.add(Box::new(join::<typenum::U5>()));
         $net.connect_ports($s1, 0, mixer, 0);
         $net.connect_ports($s2, 0, mixer, 1);
@@ -99,7 +99,7 @@ macro_rules! mix {
 
     // 6 sources
     ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr, $s6:expr) => {{
-        use fundsp::prelude::*;
+        use $crate::dsp::*;
         let mixer = $net.add(Box::new(join::<typenum::U6>()));
         $net.connect_ports($s1, 0, mixer, 0);
         $net.connect_ports($s2, 0, mixer, 1);
@@ -112,7 +112,7 @@ macro_rules! mix {
 
     // 7 sources
     ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr, $s6:expr, $s7:expr) => {{
-        use fundsp::prelude::*;
+        use $crate::dsp::*;
         let mixer = $net.add(Box::new(join::<typenum::U7>()));
         $net.connect_ports($s1, 0, mixer, 0);
         $net.connect_ports($s2, 0, mixer, 1);
@@ -126,7 +126,7 @@ macro_rules! mix {
 
     // 8 sources
     ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr, $s6:expr, $s7:expr, $s8:expr) => {{
-        use fundsp::prelude::*;
+        use $crate::dsp::*;
         let mixer = $net.add(Box::new(join::<typenum::U8>()));
         $net.connect_ports($s1, 0, mixer, 0);
         $net.connect_ports($s2, 0, mixer, 1);

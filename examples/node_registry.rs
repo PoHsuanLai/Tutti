@@ -40,7 +40,7 @@ fn main() -> tutti::Result<()> {
 
     // Register a custom node type
     registry.register("custom_oscillator", |params| {
-        use fundsp::prelude::*;
+        use tutti::dsp::*;
         let freq = get_param_or(params, "frequency", 440.0, |v| v.as_f32());
         let detune = get_param_or(params, "detune", 5.0, |v| v.as_f32());
         Ok(Box::new(

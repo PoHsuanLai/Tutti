@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a simple chord with sine waves
     engine.graph(|net| {
-        use fundsp::prelude::*;
+        use tutti::dsp::*;
 
         // C major chord: C-E-G (261.63, 329.63, 392.00 Hz)
         let c = sine_hz::<f32>(261.63) * 0.2;

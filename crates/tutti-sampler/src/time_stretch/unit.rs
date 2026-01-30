@@ -88,12 +88,12 @@ impl TimeStretchUnit {
     /// Range: 0.25 to 4.0
     pub fn set_stretch_factor(&self, factor: f32) {
         let clamped = factor.clamp(0.25, 4.0);
-        self.stretch_factor.store(clamped);
+        self.stretch_factor.set(clamped);
     }
 
     /// Get the current stretch factor
     pub fn stretch_factor(&self) -> f32 {
-        self.stretch_factor.load()
+        self.stretch_factor.get()
     }
 
     /// Get a clone of the stretch factor Arc for external control
@@ -111,12 +111,12 @@ impl TimeStretchUnit {
     /// Range: -2400 to +2400 (±2 octaves)
     pub fn set_pitch_cents(&self, cents: f32) {
         let clamped = cents.clamp(-2400.0, 2400.0);
-        self.pitch_cents.store(clamped);
+        self.pitch_cents.set(clamped);
     }
 
     /// Get the current pitch shift in cents
     pub fn pitch_cents(&self) -> f32 {
-        self.pitch_cents.load()
+        self.pitch_cents.get()
     }
 
     /// Get a clone of the pitch cents Arc for external control
@@ -143,8 +143,8 @@ impl TimeStretchUnit {
         if !self.enabled {
             return false;
         }
-        let stretch = self.stretch_factor.load();
-        let pitch = self.pitch_cents.load();
+        let stretch = self.stretch_factor.get();
+        let pitch = self.pitch_cents.get();
         (stretch - 1.0).abs() > 0.001 || pitch.abs() > 0.5
     }
 
@@ -171,7 +171,7 @@ impl TimeStretchUnit {
     /// Calculate pitch shift ratio from cents
     #[inline]
     fn pitch_ratio(&self) -> f32 {
-        2.0_f32.powf(self.pitch_cents.load() / 1200.0)
+        2.0_f32.powf(self.pitch_cents.get() / 1200.0)
     }
 }
 
@@ -181,8 +181,8 @@ impl Clone for TimeStretchUnit {
             source: self.source.clone(),
             processor_left: self.processor_left.clone(),
             processor_right: self.processor_right.clone(),
-            stretch_factor: Arc::new(AtomicF32::new(self.stretch_factor.load())),
-            pitch_cents: Arc::new(AtomicF32::new(self.pitch_cents.load())),
+            stretch_factor: Arc::new(AtomicF32::new(self.stretch_factor.get())),
+            pitch_cents: Arc::new(AtomicF32::new(self.pitch_cents.get())),
             enabled: self.enabled,
             _algorithm: self._algorithm,
             sample_rate: self.sample_rate,
@@ -235,7 +235,7 @@ impl AudioUnit for TimeStretchUnit {
         }
 
         // Get parameters
-        let stretch = self.stretch_factor.load();
+        let stretch = self.stretch_factor.get();
         let pitch_ratio = self.pitch_ratio();
 
         // Push source output to processors
@@ -299,7 +299,7 @@ impl AudioUnit for TimeStretchUnit {
         }
 
         // Get parameters
-        let stretch = self.stretch_factor.load();
+        let stretch = self.stretch_factor.get();
         let pitch_ratio = self.pitch_ratio();
 
         // Push all source samples to processors
@@ -501,8 +501,8 @@ mod tests {
         let pitch_arc = unit.pitch_cents_arc();
 
         // Modify through Arc
-        stretch_arc.store(1.5);
-        pitch_arc.store(-100.0);
+        stretch_arc.set(1.5);
+        pitch_arc.set(-100.0);
 
         // Verify changes visible through unit
         assert!((unit.stretch_factor() - 1.5).abs() < 0.001);

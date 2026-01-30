@@ -14,7 +14,6 @@ tutti-core = { path = "../tutti-core" }
 
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
 
 # Audio
 cpal = "0.15"
@@ -24,7 +23,6 @@ audio-automation = { git = "https://github.com/PoHsuanLai/audio-automation.git" 
 ringbuf = "0.4"
 crossbeam-channel = "0.5"
 dashmap = "6.1"
-atomic_float = "1.1"
 arc-swap = "1.7"
 parking_lot = "0.12"
 smallvec = "1.13"
@@ -39,3 +37,4 @@ insta = { version = "1.41", features = ["yaml"] }
 approx = "0.5"
 tempfile = "3.8"
 rand = "0.8"
+serde_json = "1"

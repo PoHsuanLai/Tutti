@@ -211,7 +211,7 @@ pub use tutti_neural::{
 ///
 /// See FunDSP documentation for full list: <https://docs.rs/fundsp>
 pub mod dsp {
-    pub use fundsp::prelude::*;
+    pub use tutti_core::dsp::*;
 }
 
 mod builder;

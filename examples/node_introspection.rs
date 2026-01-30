@@ -17,7 +17,7 @@ fn main() -> tutti::Result<()> {
 
     // Build a simple graph with tags
     engine.graph(|net| {
-        use fundsp::prelude::*;
+        use tutti::dsp::*;
 
         // Add nodes with descriptive tags
         let osc1 = net.add_tagged(Box::new(sine_hz::<f32>(220.0) * 0.3), "bass_oscillator");

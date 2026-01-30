@@ -1,48 +1,7 @@
 //! Time-stretching types and parameters.
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
-/// Lock-free atomic f32 for real-time parameter updates.
-#[derive(Debug)]
-pub struct AtomicF32(AtomicU32);
-
-impl AtomicF32 {
-    /// Create a new AtomicF32 with the given initial value
-    #[inline]
-    pub const fn new(value: f32) -> Self {
-        Self(AtomicU32::new(value.to_bits()))
-    }
-
-    /// Load the current value
-    #[inline]
-    pub fn load(&self) -> f32 {
-        f32::from_bits(self.0.load(Ordering::Relaxed))
-    }
-
-    /// Store a new value
-    #[inline]
-    pub fn store(&self, value: f32) {
-        self.0.store(value.to_bits(), Ordering::Relaxed);
-    }
-
-    /// Atomically swap the value and return the old one
-    #[inline]
-    pub fn swap(&self, value: f32) -> f32 {
-        f32::from_bits(self.0.swap(value.to_bits(), Ordering::Relaxed))
-    }
-}
-
-impl Default for AtomicF32 {
-    fn default() -> Self {
-        Self::new(0.0)
-    }
-}
-
-impl Clone for AtomicF32 {
-    fn clone(&self) -> Self {
-        Self::new(self.load())
-    }
-}
+/// Re-export AtomicFloat from tutti-core as AtomicF32 for backwards compatibility.
+pub type AtomicF32 = tutti_core::AtomicFloat;
 
 /// Time-stretch and pitch-shift parameters
 ///
@@ -209,26 +168,6 @@ impl FftSize {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_atomic_f32() {
-        let atomic = AtomicF32::new(1.0);
-        assert!((atomic.load() - 1.0).abs() < 0.0001);
-
-        atomic.store(2.5);
-        assert!((atomic.load() - 2.5).abs() < 0.0001);
-
-        let old = atomic.swap(3.0);
-        assert!((old - 2.5).abs() < 0.0001);
-        assert!((atomic.load() - 3.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_atomic_f32_clone() {
-        let a = AtomicF32::new(42.0);
-        let b = a.clone();
-        assert!((b.load() - 42.0).abs() < 0.0001);
-    }
 
     #[test]
     fn test_params_default() {

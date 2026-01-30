@@ -85,7 +85,7 @@ jobs:
           sudo apt-get install -y libasound2-dev pkg-config
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings -A dead_code
+        run: cargo clippy --workspace --all-targets --exclude fundsp-tutti -- -D warnings -A dead_code
 
   fmt:
     name: Format
@@ -138,4 +138,4 @@ jobs:
         uses: taiki-e/install-action@cargo-hack
 
       - name: Check feature combinations
-        run: cargo hack check --feature-powerset --no-dev-deps
+        run: cargo hack check --feature-powerset --no-dev-deps --exclude fundsp-tutti
