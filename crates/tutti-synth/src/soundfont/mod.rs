@@ -10,7 +10,7 @@ mod manager;
 mod synthesizer;
 
 #[cfg(feature = "soundfont")]
-mod fundsp_adapter;
+mod unit;
 
 #[cfg(feature = "soundfont")]
 pub use manager::{SoundFontHandle, SoundFontManager};
@@ -19,7 +19,7 @@ pub use manager::{SoundFontHandle, SoundFontManager};
 pub use synthesizer::SoundFontSynth;
 
 #[cfg(feature = "soundfont")]
-pub use fundsp_adapter::RustySynthUnit;
+pub use unit::SoundFontUnit;
 
 // Stub types when soundfont feature is disabled
 #[cfg(not(feature = "soundfont"))]

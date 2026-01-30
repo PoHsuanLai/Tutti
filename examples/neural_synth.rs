@@ -2,15 +2,8 @@
 //!
 //! Demonstrates: Neural audio processing, GPU acceleration, DDSP synthesis
 //!
-//! Run with: cargo run --example neural_synth --features=neural
+//! Run with: cargo run --example neural_synth
 
-#[cfg(not(feature = "neural"))]
-fn main() {
-    eprintln!("This example requires the 'neural' feature.");
-    eprintln!("Run with: cargo run --example neural_synth --features=neural");
-}
-
-#[cfg(feature = "neural")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use tutti::prelude::*;
 

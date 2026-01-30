@@ -6,7 +6,7 @@
 //! use tutti_midi::{MidiSystem, MpeMode, MpeZoneConfig};
 //!
 //! // Create MIDI system with I/O and MPE
-//! let midi = MidiSystem::new()
+//! let midi = MidiSystem::builder()
 //!     .io()
 //!     .mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
 //!     .build()?;
@@ -83,12 +83,11 @@ impl MidiSystem {
     /// # Example
     ///
     /// ```ignore
-    /// let midi = MidiSystem::new()
+    /// let midi = MidiSystem::builder()
     ///     .io()
     ///     .build()?;
     /// ```
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> MidiSystemBuilder {
+    pub fn builder() -> MidiSystemBuilder {
         MidiSystemBuilder::default()
     }
 
@@ -893,7 +892,7 @@ mod tests {
 
     #[test]
     fn test_midi_system_creation() {
-        let midi = MidiSystem::new().build().unwrap();
+        let midi = MidiSystem::builder().build().unwrap();
 
         let port_id = midi.create_input_port("Test");
         assert_eq!(port_id, 0);
@@ -905,7 +904,7 @@ mod tests {
 
     #[test]
     fn test_event_creation() {
-        let midi = MidiSystem::new().build().unwrap();
+        let midi = MidiSystem::builder().build().unwrap();
 
         let event = midi.note_on(0, 60, 100);
         assert!(event.is_note_on());
@@ -914,7 +913,7 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        let midi = MidiSystem::new().build().unwrap();
+        let midi = MidiSystem::builder().build().unwrap();
         let midi2 = midi.clone();
 
         midi.create_input_port("Port1");
@@ -927,7 +926,7 @@ mod tests {
     fn test_mpe_builder() {
         use crate::mpe::MpeZoneConfig;
 
-        let midi = MidiSystem::new()
+        let midi = MidiSystem::builder()
             .mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
             .build()
             .unwrap();

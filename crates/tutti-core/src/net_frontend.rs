@@ -27,6 +27,10 @@ pub struct TuttiNet {
     #[cfg(feature = "midi")]
     midi_connections: Vec<MidiConnection>,
 
+    /// MIDI event registry for routing events to nodes
+    #[cfg(feature = "midi")]
+    midi_registry: crate::midi_registry::MidiRegistry,
+
     #[cfg(feature = "neural")]
     neural_manager: SharedNeuralNodeManager,
 
@@ -50,6 +54,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
+                midi_registry: crate::midi_registry::MidiRegistry::new(),
             },
             backend,
         )
@@ -80,6 +85,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
+                midi_registry: crate::midi_registry::MidiRegistry::new(),
                 neural_manager: registry.clone(),
                 batching_strategy: None,
             },
@@ -103,6 +109,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
+                midi_registry: crate::midi_registry::MidiRegistry::new(),
             },
             backend,
         )
@@ -139,6 +146,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
+                midi_registry: crate::midi_registry::MidiRegistry::new(),
                 neural_manager: registry.clone(),
                 batching_strategy: None,
             },
@@ -282,6 +290,29 @@ impl TuttiNet {
         &self.midi_connections
     }
 
+    /// Queue MIDI events to be sent to a node
+    ///
+    /// Events are stored in the MIDI registry and can be polled by nodes
+    /// during their `process()` call using their AudioUnit::get_id().
+    ///
+    /// # Arguments
+    /// * `node` - The node ID to send MIDI to
+    /// * `events` - Slice of MIDI events to queue
+    #[cfg(feature = "midi")]
+    pub fn queue_midi(&mut self, node: NodeId, events: &[crate::midi::MidiEvent]) {
+        // Get the AudioUnit ID for this node
+        let unit_id = self.net.node(node).get_id();
+        self.midi_registry.queue(unit_id, events);
+    }
+
+    /// Get a reference to the MIDI registry
+    ///
+    /// Nodes can use this to poll for MIDI events during processing.
+    #[cfg(feature = "midi")]
+    pub fn midi_registry(&self) -> &crate::midi_registry::MidiRegistry {
+        &self.midi_registry
+    }
+
     // ==================== MIDI Routing ====================
     //
     // MIDI routing is done directly via the `inner_mut()` API due to Rust borrow
@@ -319,12 +350,38 @@ impl TuttiNet {
     // Wrapping this in a function causes the borrow checker to conservatively
     // assume the trait object reference could escape.
 
-    #[cfg(not(feature = "neural"))]
+    #[cfg(all(not(feature = "neural"), not(feature = "midi")))]
     pub fn commit(&mut self) {
         self.net.commit();
     }
 
-    #[cfg(feature = "neural")]
+    #[cfg(all(not(feature = "neural"), feature = "midi"))]
+    pub fn commit(&mut self) {
+        self.net.commit();
+    }
+
+    #[cfg(all(feature = "neural", not(feature = "midi")))]
+    pub fn commit(&mut self) {
+        self.net.commit();
+
+        if !self.neural_manager.is_empty() {
+            let analyzer = GraphAnalyzer::new(&self.net, &self.neural_manager);
+            self.batching_strategy = Some(analyzer.analyze());
+
+            if let Some(ref strategy) = self.batching_strategy {
+                tracing::debug!(
+                    "Batching strategy: {} models, {} parallel groups, efficiency: {:.1}x",
+                    strategy.model_count(),
+                    strategy.parallel_group_count(),
+                    strategy.batch_efficiency()
+                );
+            }
+        } else {
+            self.batching_strategy = None;
+        }
+    }
+
+    #[cfg(all(feature = "neural", feature = "midi"))]
     pub fn commit(&mut self) {
         self.net.commit();
 
@@ -476,6 +533,7 @@ impl Default for TuttiNet {
         Self {
             net: Net::new(0, 2),
             midi_connections: Vec::new(),
+            midi_registry: crate::midi_registry::MidiRegistry::new(),
         }
     }
 }
@@ -497,6 +555,7 @@ impl Default for TuttiNet {
         Self {
             net: Net::new(0, 2),
             midi_connections: Vec::new(),
+            midi_registry: crate::midi_registry::MidiRegistry::new(),
             neural_manager: Arc::new(NeuralNodeManager::new()),
             batching_strategy: None,
         }

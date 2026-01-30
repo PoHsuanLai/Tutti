@@ -24,9 +24,81 @@ impl MidiEvent {
         }
     }
 
-    /// Create a note on event
+    /// Create a builder for note-on events
+    ///
+    /// # Example
+    /// ```ignore
+    /// let event = MidiEvent::note_on_builder(60, 100)
+    ///     .channel(5)
+    ///     .offset(480)
+    ///     .build();
+    /// ```
     #[inline]
-    pub fn note_on(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
+    pub fn note_on_builder(note: u8, velocity: u8) -> MidiEventBuilder {
+        MidiEventBuilder {
+            frame_offset: 0,
+            channel: 0,
+            msg: ChannelVoiceMsg::NoteOn { note, velocity },
+        }
+    }
+
+    /// Create a builder for note-off events
+    #[inline]
+    pub fn note_off_builder(note: u8) -> MidiEventBuilder {
+        MidiEventBuilder {
+            frame_offset: 0,
+            channel: 0,
+            msg: ChannelVoiceMsg::NoteOff { note, velocity: 0 },
+        }
+    }
+
+    /// Create a builder for control change events
+    #[inline]
+    pub fn cc_builder(control: u8, value: u8) -> MidiEventBuilder {
+        MidiEventBuilder {
+            frame_offset: 0,
+            channel: 0,
+            msg: ChannelVoiceMsg::ControlChange {
+                control: midi_msg::ControlChange::CC { control, value },
+            },
+        }
+    }
+
+    /// Create a builder for pitch bend events
+    #[inline]
+    pub fn bend_builder(bend: u16) -> MidiEventBuilder {
+        MidiEventBuilder {
+            frame_offset: 0,
+            channel: 0,
+            msg: ChannelVoiceMsg::PitchBend { bend },
+        }
+    }
+
+    /// Create a builder for program change events
+    #[inline]
+    pub fn program_builder(program: u8) -> MidiEventBuilder {
+        MidiEventBuilder {
+            frame_offset: 0,
+            channel: 0,
+            msg: ChannelVoiceMsg::ProgramChange { program },
+        }
+    }
+
+    /// Create a builder for aftertouch events
+    #[inline]
+    pub fn aftertouch_builder(pressure: u8) -> MidiEventBuilder {
+        MidiEventBuilder {
+            frame_offset: 0,
+            channel: 0,
+            msg: ChannelVoiceMsg::ChannelPressure { pressure },
+        }
+    }
+
+    /// Create a note on event
+    ///
+    /// Internal use only. Public API should use `MidiEvent::note_on_builder()`
+    #[inline]
+    pub(crate) fn note_on(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
         Self {
             frame_offset,
             channel: Channel::from_u8(channel),
@@ -35,8 +107,10 @@ impl MidiEvent {
     }
 
     /// Create a note off event
+    ///
+    /// Internal use only. Public API should use `MidiEvent::note_off_builder()`
     #[inline]
-    pub fn note_off(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
+    pub(crate) fn note_off(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
         Self {
             frame_offset,
             channel: Channel::from_u8(channel),
@@ -45,8 +119,10 @@ impl MidiEvent {
     }
 
     /// Create a control change event
+    ///
+    /// Internal use only. Public API should use `MidiEvent::cc_builder()`
     #[inline]
-    pub fn control_change(frame_offset: usize, channel: u8, cc: u8, value: u8) -> Self {
+    pub(crate) fn control_change(frame_offset: usize, channel: u8, cc: u8, value: u8) -> Self {
         Self {
             frame_offset,
             channel: Channel::from_u8(channel),
@@ -57,8 +133,10 @@ impl MidiEvent {
     }
 
     /// Create a pitch bend event
+    ///
+    /// Internal use only. Public API should use `MidiEvent::bend_builder()`
     #[inline]
-    pub fn pitch_bend(frame_offset: usize, channel: u8, bend: u16) -> Self {
+    pub(crate) fn pitch_bend(frame_offset: usize, channel: u8, bend: u16) -> Self {
         Self {
             frame_offset,
             channel: Channel::from_u8(channel),
@@ -67,8 +145,10 @@ impl MidiEvent {
     }
 
     /// Create a channel aftertouch event
+    ///
+    /// Internal use only. Public API should use `MidiEvent::aftertouch_builder()`
     #[inline]
-    pub fn aftertouch(frame_offset: usize, channel: u8, pressure: u8) -> Self {
+    pub(crate) fn aftertouch(frame_offset: usize, channel: u8, pressure: u8) -> Self {
         Self {
             frame_offset,
             channel: Channel::from_u8(channel),
@@ -76,19 +156,16 @@ impl MidiEvent {
         }
     }
 
-    /// Create a program change event
-    #[inline]
-    pub fn program_change(frame_offset: usize, channel: u8, program: u8) -> Self {
-        Self {
-            frame_offset,
-            channel: Channel::from_u8(channel),
-            msg: ChannelVoiceMsg::ProgramChange { program },
-        }
-    }
-
     /// Create a poly aftertouch event
+    ///
+    /// Internal use only. Public API should use builder pattern
     #[inline]
-    pub fn poly_aftertouch(frame_offset: usize, channel: u8, note: u8, pressure: u8) -> Self {
+    pub(crate) fn poly_aftertouch(
+        frame_offset: usize,
+        channel: u8,
+        note: u8,
+        pressure: u8,
+    ) -> Self {
         Self {
             frame_offset,
             channel: Channel::from_u8(channel),
@@ -408,6 +485,62 @@ impl From<super::midi2::Midi2Event> for UnifiedMidiEvent {
     }
 }
 
+/// Builder for MIDI events with fluent API.
+///
+/// Allows setting channel and frame offset while providing sensible defaults.
+///
+/// # Example
+/// ```ignore
+/// use tutti_midi::MidiEvent;
+///
+/// // Simple case (defaults: channel=0, offset=0)
+/// let event = MidiEvent::note(60, 100).build();
+///
+/// // With channel
+/// let event = MidiEvent::note(60, 100).channel(5).build();
+///
+/// // With timing
+/// let event = MidiEvent::note(60, 100).offset(480).build();
+///
+/// // Both
+/// let event = MidiEvent::note(60, 100)
+///     .channel(5)
+///     .offset(480)
+///     .build();
+/// ```
+#[derive(Clone, Copy, Debug)]
+pub struct MidiEventBuilder {
+    frame_offset: usize,
+    channel: u8,
+    msg: ChannelVoiceMsg,
+}
+
+impl MidiEventBuilder {
+    /// Set the MIDI channel (0-15)
+    #[inline]
+    pub fn channel(mut self, channel: u8) -> Self {
+        self.channel = channel;
+        self
+    }
+
+    /// Set the frame offset (sample-accurate timing)
+    #[inline]
+    pub fn offset(mut self, frame_offset: usize) -> Self {
+        self.frame_offset = frame_offset;
+        self
+    }
+
+    /// Build the final MidiEvent
+    #[inline]
+    pub fn build(self) -> MidiEvent {
+        MidiEvent {
+            frame_offset: self.frame_offset,
+            channel: Channel::from_u8(self.channel),
+            msg: self.msg,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -486,6 +619,72 @@ mod tests {
         let back = raw.to_midi_event().unwrap();
         assert_eq!(back.channel, event.channel);
         assert_eq!(back.msg, event.msg);
+    }
+
+    #[test]
+    fn test_builder_simple() {
+        let event = MidiEvent::note_on_builder(60, 100).build();
+        assert_eq!(event.note(), Some(60));
+        assert_eq!(event.velocity(), Some(100));
+        assert_eq!(event.channel_num(), 0);
+        assert_eq!(event.frame_offset, 0);
+    }
+
+    #[test]
+    fn test_builder_with_channel() {
+        let event = MidiEvent::note_on_builder(64, 80).channel(5).build();
+        assert_eq!(event.note(), Some(64));
+        assert_eq!(event.velocity(), Some(80));
+        assert_eq!(event.channel_num(), 5);
+        assert_eq!(event.frame_offset, 0);
+    }
+
+    #[test]
+    fn test_builder_with_offset() {
+        let event = MidiEvent::note_on_builder(67, 120).offset(480).build();
+        assert_eq!(event.note(), Some(67));
+        assert_eq!(event.velocity(), Some(120));
+        assert_eq!(event.channel_num(), 0);
+        assert_eq!(event.frame_offset, 480);
+    }
+
+    #[test]
+    fn test_builder_with_both() {
+        let event = MidiEvent::note_on_builder(71, 90)
+            .channel(3)
+            .offset(960)
+            .build();
+        assert_eq!(event.note(), Some(71));
+        assert_eq!(event.velocity(), Some(90));
+        assert_eq!(event.channel_num(), 3);
+        assert_eq!(event.frame_offset, 960);
+    }
+
+    #[test]
+    fn test_builder_cc() {
+        let event = MidiEvent::cc_builder(7, 127).channel(2).build();
+        assert_eq!(event.channel_num(), 2);
+        match event.msg {
+            ChannelVoiceMsg::ControlChange { control } => match control {
+                midi_msg::ControlChange::CC { control: cc, value } => {
+                    assert_eq!(cc, 7);
+                    assert_eq!(value, 127);
+                }
+                _ => panic!("Expected CC"),
+            },
+            _ => panic!("Expected ControlChange"),
+        }
+    }
+
+    #[test]
+    fn test_builder_pitch_bend() {
+        let event = MidiEvent::bend_builder(8192).build();
+        match event.msg {
+            ChannelVoiceMsg::PitchBend { bend } => {
+                assert_eq!(bend, 8192);
+            }
+            _ => panic!("Expected PitchBend"),
+        }
     }
 
     #[cfg(feature = "midi2")]

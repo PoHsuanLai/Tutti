@@ -220,6 +220,14 @@ impl AudioUnit for EnvelopeFollowerNode {
         ENVELOPE_FOLLOWER_ID
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
         let mut output = SignalFrame::new(1);
         if let Signal::Value(val) = input.at(0) {

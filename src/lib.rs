@@ -8,6 +8,7 @@
 //! - **tutti-core** - Audio graph runtime (Net, Transport, Metering, PDC)
 //! - **tutti-midi** - MIDI subsystem (I/O, MPE, MIDI 2.0, CC mapping)
 //! - **tutti-sampler** - Sample playback (Butler, streaming, recording, time-stretch)
+//! - **tutti-synth** - Software synthesizers (SoundFont, polyphonic synth, wavetable)
 //! - **tutti-dsp** - DSP nodes (LFO, dynamics, envelope follower, spatial audio)
 //! - **tutti-plugin** - Plugin hosting (VST2, VST3, CLAP)
 //! - **tutti-neural** - Neural audio (GPU synthesis and effects)
@@ -113,19 +114,29 @@ pub use tutti_midi as midi;
 #[cfg(feature = "midi")]
 pub use tutti_midi::{MidiEvent, MidiSystem, MidiSystemBuilder, PortInfo, RawMidiEvent};
 
-// Sampler subsystem
-#[cfg(feature = "sampler")]
+#[cfg(feature = "midi")]
+pub use tutti_core::{AsMidiAudioUnit, MidiAudioUnit, MidiRegistry};
+
+// Sampler subsystem (always included)
 pub use tutti_sampler as sampler;
 
-#[cfg(feature = "sampler")]
 pub use tutti_sampler::{
     AudioInput, AudioInputBackend, SamplerSystem, SamplerSystemBuilder, SamplerUnit,
     StreamingSamplerUnit, TimeStretchUnit,
 };
 
 // Time stretch types from sampler subcrate
-#[cfg(feature = "sampler")]
 pub use tutti_sampler::time_stretch::TimeStretchParams;
+
+// Synth subsystem
+#[cfg(feature = "synth")]
+pub use tutti_synth as synth;
+
+#[cfg(feature = "synth")]
+pub use tutti_synth::{Envelope, PolySynth, Waveform};
+
+#[cfg(feature = "soundfont")]
+pub use tutti_synth::{SoundFontManager, SoundFontSynth, SoundFontUnit};
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
@@ -135,23 +146,19 @@ pub use tutti_dsp::{
     SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate,
 };
 
-#[cfg(feature = "spatial-audio")]
+// Spatial audio (always included)
 pub use tutti_dsp::{BinauralPanner, BinauralPannerNode, SpatialPanner, SpatialPannerNode};
 
-// Analysis tools
-#[cfg(feature = "analysis")]
+// Analysis tools (always included)
 pub use tutti_analysis as analysis;
 
-#[cfg(feature = "analysis")]
 pub use tutti_analysis::{
     CorrelationMeter, PitchDetector, PitchResult, StereoAnalysis, Transient, TransientDetector,
 };
 
-// Export
-#[cfg(feature = "export")]
+// Export (always included)
 pub use tutti_export as export;
 
-#[cfg(feature = "export")]
 pub use tutti_export::{AudioFormat, ExportOptions, OfflineRenderer};
 
 // Plugin hosting
@@ -208,15 +215,14 @@ pub mod prelude {
     // Transport
     pub use crate::core::TransportManager;
 
-    // MIDI
+    // MIDI (optional)
     #[cfg(feature = "midi")]
     pub use crate::midi::{MidiEvent, MidiSystem};
 
-    // Sampler
-    #[cfg(feature = "sampler")]
+    // Sampler (always included)
     pub use crate::sampler::{SamplerSystem, SamplerUnit};
 
-    // Neural
+    // Neural (optional)
     #[cfg(feature = "neural")]
     pub use crate::neural::NeuralSystem;
 }

@@ -256,6 +256,14 @@ impl AudioUnit for SamplerUnit {
         Arc::as_ptr(&self.wave) as *const () as usize as u64
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         // Sampler outputs signal, doesn't route
         SignalFrame::new(2)
@@ -411,6 +419,14 @@ mod streaming {
 
         fn get_id(&self) -> u64 {
             Arc::as_ptr(&self.consumer) as *const () as usize as u64
+        }
+
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
         }
 
         fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {

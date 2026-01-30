@@ -6,7 +6,6 @@ use crate::{Result, TuttiEngine};
 #[cfg(feature = "midi")]
 use crate::midi::MidiSystem;
 
-#[cfg(feature = "sampler")]
 use crate::sampler::SamplerSystem;
 
 #[cfg(feature = "neural")]
@@ -33,7 +32,6 @@ pub struct TuttiEngineBuilder {
     #[cfg(feature = "midi")]
     enable_midi: bool,
 
-    #[cfg(feature = "sampler")]
     enable_sampler: bool,
 
     #[cfg(feature = "neural")]
@@ -51,7 +49,6 @@ impl Default for TuttiEngineBuilder {
             #[cfg(feature = "midi")]
             enable_midi: false,
 
-            #[cfg(feature = "sampler")]
             enable_sampler: false,
 
             #[cfg(feature = "neural")]
@@ -93,7 +90,6 @@ impl TuttiEngineBuilder {
     }
 
     /// Enable sampler subsystem
-    #[cfg(feature = "sampler")]
     pub fn sampler(mut self) -> Self {
         self.enable_sampler = true;
         self
@@ -119,14 +115,13 @@ impl TuttiEngineBuilder {
 
         let core = core_builder.build()?;
 
-        #[cfg(feature = "sampler")]
         let sample_rate = self.sample_rate.unwrap_or_else(|| core.sample_rate());
 
         // Build optional subsystems
         #[cfg(feature = "midi")]
         let midi = if self.enable_midi {
             Some(
-                MidiSystem::new()
+                MidiSystem::builder()
                     .build()
                     .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
             )
@@ -134,10 +129,9 @@ impl TuttiEngineBuilder {
             None
         };
 
-        #[cfg(feature = "sampler")]
         let sampler = if self.enable_sampler {
             Some(
-                SamplerSystem::new(sample_rate)
+                SamplerSystem::builder(sample_rate)
                     .build()
                     .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
             )
@@ -148,7 +142,7 @@ impl TuttiEngineBuilder {
         #[cfg(feature = "neural")]
         let neural = if self.enable_neural {
             Some(
-                NeuralSystem::new()
+                NeuralSystem::builder()
                     .build()
                     .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
             )
@@ -160,7 +154,6 @@ impl TuttiEngineBuilder {
             core,
             #[cfg(feature = "midi")]
             midi,
-            #[cfg(feature = "sampler")]
             sampler,
             #[cfg(feature = "neural")]
             neural,

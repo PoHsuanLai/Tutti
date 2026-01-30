@@ -3,6 +3,7 @@ members = [
     "crates/tutti-core",
     "crates/tutti-midi",
     "crates/tutti-sampler",
+    "crates/tutti-synth",
     "crates/tutti-dsp",
     "crates/tutti-plugin",
     "crates/tutti-neural",
@@ -22,70 +23,50 @@ keywords = ["audio", "dsp", "midi", "synthesis", "real-time"]
 categories = ["multimedia::audio", "multimedia"]
 
 [features]
-# Default: just core audio engine
+# Default: Core DAW functionality (export, sampler, analysis, spatial audio always included)
 default = []
 
 # Full feature set (everything enabled)
-full = [
-    "midi",
-    "sampler",
-    "soundfont",
-    "plugin",
-    "neural",
-    "analysis",
-    "export",
-    "spatial-audio",
-]
+full = ["midi", "synth", "soundfont", "plugin", "neural"]
 
-# MIDI subsystem
-midi = ["dep:tutti-midi"]
-
-# Sampler subsystem
-sampler = ["dep:tutti-sampler"]
-soundfont = ["sampler", "tutti-sampler/soundfont"]
-
-# DSP features
-spatial-audio = ["tutti-dsp/spatial-audio"]
-
-# Analysis tools
-analysis = ["dep:tutti-analysis"]
-
-# Export
-export = ["dep:tutti-export"]
-
-# Plugin hosting
+# Optional subsystems (heavy/complex dependencies)
+midi = ["dep:tutti-midi", "tutti-core/midi", "tutti-synth?/midi"]
+synth = ["dep:tutti-synth"]
+soundfont = ["synth", "tutti-synth/soundfont", "tutti-synth/midi"]
 plugin = ["dep:tutti-plugin"]
-
-# Neural audio
 neural = ["dep:tutti-neural", "tutti-core/neural"]
 
-# Legacy compatibility (for existing dependents - to be removed)
-minimal = []
-standard = ["midi", "sampler"]
-wasm = []
-gpu = ["neural"]
-audio-input = ["sampler"]
-butler = ["sampler"]
-recording = ["sampler"]
-midi-io = ["midi"]
-
 [dependencies]
-# Core audio graph runtime (always included)
+# Core subsystems (always included)
 tutti-core = { path = "crates/tutti-core", default-features = false }
-
-# DSP nodes (always included for basic effects)
 tutti-dsp = { path = "crates/tutti-dsp", default-features = false }
+tutti-sampler = { path = "crates/tutti-sampler", default-features = false }
+tutti-analysis = { path = "crates/tutti-analysis" }
+tutti-export = { path = "crates/tutti-export", default-features = false }
 
-# Optional subsystems
+# Optional subsystems (heavy/complex dependencies)
 tutti-midi = { path = "crates/tutti-midi", optional = true, default-features = false }
-tutti-sampler = { path = "crates/tutti-sampler", optional = true, default-features = false }
-tutti-analysis = { path = "crates/tutti-analysis", optional = true }
-tutti-export = { path = "crates/tutti-export", optional = true, default-features = false }
+tutti-synth = { path = "crates/tutti-synth", optional = true, default-features = false }
 tutti-plugin = { path = "crates/tutti-plugin", optional = true }
 tutti-neural = { path = "crates/tutti-neural", optional = true }
 
-# FunDSP for DSP toolkit
+# FunDSP for DSP toolkit (fork with as_any methods for downcasting)
 fundsp = { git = "https://github.com/PoHsuanLai/fundsp.git", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 approx = "0.5"
+
+# Example-specific feature requirements
+[[example]]
+name = "midi_synth"
+required-features = ["midi", "synth"]
+
+[[example]]
+name = "neural_synth"
+required-features = ["neural"]
+
+[[example]]
+name = "plugin_host"
+required-features = ["plugin"]
+
+# recording example now works by default (sampler & export are always included)

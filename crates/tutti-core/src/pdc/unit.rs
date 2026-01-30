@@ -109,6 +109,14 @@ impl AudioUnit for PdcDelayUnit {
         0x5044434445_u64 // "PDCDE" in hex
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         SignalFrame::new(2)
     }

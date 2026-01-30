@@ -50,7 +50,10 @@ pub struct SidechainCompressor {
 }
 
 impl SidechainCompressor {
-    pub fn new(threshold_db: f32, ratio: f32, attack: f32, release: f32) -> Self {
+    /// Create a new compressor with default settings
+    ///
+    /// Internal use only. Public API should use `SidechainCompressor::builder()`
+    pub(crate) fn new(threshold_db: f32, ratio: f32, attack: f32, release: f32) -> Self {
         Self {
             threshold_db: Arc::new(AtomicFloat::new(threshold_db)),
             ratio: Arc::new(AtomicFloat::new(ratio.max(1.0))),
@@ -67,6 +70,23 @@ impl SidechainCompressor {
             last_attack: attack,
             last_release: release,
         }
+    }
+
+    /// Create a builder for configuring a compressor
+    ///
+    /// # Example
+    /// ```ignore
+    /// let comp = SidechainCompressor::builder()
+    ///     .threshold_db(-20.0)
+    ///     .ratio(4.0)
+    ///     .attack_seconds(0.001)
+    ///     .release_seconds(0.05)
+    ///     .soft_knee_db(6.0)
+    ///     .makeup_gain_db(3.0)
+    ///     .build();
+    /// ```
+    pub fn builder() -> SidechainCompressorBuilder {
+        SidechainCompressorBuilder::default()
     }
 
     pub fn with_soft_knee(mut self, knee_db: f32) -> Self {
@@ -206,6 +226,121 @@ impl SidechainCompressor {
     }
 }
 
+/// Builder for configuring a SidechainCompressor with fluent API.
+///
+/// Provides clear parameter names and units, with sensible defaults.
+///
+/// # Example
+/// ```ignore
+/// use tutti_dsp::dynamics::SidechainCompressor;
+///
+/// let comp = SidechainCompressor::builder()
+///     .threshold_db(-20.0)
+///     .ratio(4.0)
+///     .attack_seconds(0.001)
+///     .release_seconds(0.05)
+///     .soft_knee_db(6.0)
+///     .makeup_gain_db(3.0)
+///     .build();
+/// ```
+#[derive(Clone, Debug)]
+pub struct SidechainCompressorBuilder {
+    threshold_db: f32,
+    ratio: f32,
+    attack_seconds: f32,
+    release_seconds: f32,
+    makeup_db: f32,
+    knee_db: f32,
+}
+
+impl Default for SidechainCompressorBuilder {
+    fn default() -> Self {
+        Self {
+            threshold_db: -20.0,
+            ratio: 4.0,
+            attack_seconds: 0.005,
+            release_seconds: 0.1,
+            makeup_db: 0.0,
+            knee_db: 0.0,
+        }
+    }
+}
+
+impl SidechainCompressorBuilder {
+    /// Set the threshold in decibels
+    ///
+    /// Compression begins when the signal exceeds this level.
+    /// Typical range: -60.0 to 0.0 dB
+    pub fn threshold_db(mut self, db: f32) -> Self {
+        self.threshold_db = db;
+        self
+    }
+
+    /// Set the compression ratio
+    ///
+    /// Ratio of input to output above threshold.
+    /// - 1.0 = no compression
+    /// - 2.0 = 2:1 compression
+    /// - 4.0 = 4:1 compression
+    /// - 10.0+ = limiting
+    ///
+    /// Must be >= 1.0
+    pub fn ratio(mut self, ratio: f32) -> Self {
+        self.ratio = ratio.max(1.0);
+        self
+    }
+
+    /// Set the attack time in seconds
+    ///
+    /// How quickly the compressor responds to signals above threshold.
+    /// Typical range: 0.0001 to 0.1 seconds
+    pub fn attack_seconds(mut self, seconds: f32) -> Self {
+        self.attack_seconds = seconds.max(0.0);
+        self
+    }
+
+    /// Set the release time in seconds
+    ///
+    /// How quickly the compressor returns to normal after signal drops below threshold.
+    /// Typical range: 0.01 to 1.0 seconds
+    pub fn release_seconds(mut self, seconds: f32) -> Self {
+        self.release_seconds = seconds.max(0.0);
+        self
+    }
+
+    /// Set soft knee width in decibels
+    ///
+    /// Creates a gradual transition around the threshold.
+    /// - 0.0 = hard knee (instant compression)
+    /// - 6.0 = moderate soft knee
+    /// - 12.0+ = very soft knee
+    pub fn soft_knee_db(mut self, db: f32) -> Self {
+        self.knee_db = db.max(0.0);
+        self
+    }
+
+    /// Set makeup gain in decibels
+    ///
+    /// Compensates for gain reduction.
+    /// Typical range: 0.0 to 20.0 dB
+    pub fn makeup_gain_db(mut self, db: f32) -> Self {
+        self.makeup_db = db;
+        self
+    }
+
+    /// Build the configured SidechainCompressor
+    pub fn build(self) -> SidechainCompressor {
+        SidechainCompressor::new(
+            self.threshold_db,
+            self.ratio,
+            self.attack_seconds,
+            self.release_seconds,
+        )
+        .with_soft_knee(self.knee_db)
+        .with_makeup(self.makeup_db)
+    }
+}
+
 impl AudioUnit for SidechainCompressor {
     fn inputs(&self) -> usize {
         2 // audio + sidechain
@@ -253,6 +388,14 @@ impl AudioUnit for SidechainCompressor {
     fn get_id(&self) -> u64 {
         const SIDECHAIN_COMPRESSOR_ID: u64 = 0x5343_434F_4D50; // "SCCOMP"
         SIDECHAIN_COMPRESSOR_ID
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
@@ -515,6 +658,14 @@ impl AudioUnit for StereoSidechainCompressor {
         STEREO_SC_COMP_ID
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
         let mut output = SignalFrame::new(2);
         output.set(0, input.at(0));
@@ -588,7 +739,10 @@ pub struct SidechainGate {
 }
 
 impl SidechainGate {
-    pub fn new(threshold_db: f32, attack: f32, hold: f32, release: f32) -> Self {
+    /// Create a new gate with default settings
+    ///
+    /// Internal use only. Public API should use `SidechainGate::builder()`
+    pub(crate) fn new(threshold_db: f32, attack: f32, hold: f32, release: f32) -> Self {
         Self {
             threshold_db: Arc::new(AtomicFloat::new(threshold_db)),
             attack: Arc::new(AtomicFloat::new(attack)),
@@ -608,6 +762,22 @@ impl SidechainGate {
             last_release: release,
             last_hold: hold,
         }
+    }
+
+    /// Create a builder for configuring a gate
+    ///
+    /// # Example
+    /// ```ignore
+    /// let gate = SidechainGate::builder()
+    ///     .threshold_db(-30.0)
+    ///     .attack_seconds(0.001)
+    ///     .hold_seconds(0.01)
+    ///     .release_seconds(0.1)
+    ///     .range_db(-60.0)
+    ///     .build();
+    /// ```
+    pub fn builder() -> SidechainGateBuilder {
+        SidechainGateBuilder::default()
     }
 
     pub fn with_range(mut self, range_db: f32) -> Self {
@@ -695,6 +865,106 @@ impl SidechainGate {
     }
 }
 
+/// Builder for configuring a SidechainGate with fluent API.
+///
+/// Provides clear parameter names and units, with sensible defaults.
+///
+/// # Example
+/// ```ignore
+/// use tutti_dsp::dynamics::SidechainGate;
+///
+/// let gate = SidechainGate::builder()
+///     .threshold_db(-30.0)
+///     .attack_seconds(0.001)
+///     .hold_seconds(0.01)
+///     .release_seconds(0.1)
+///     .range_db(-60.0)
+///     .build();
+/// ```
+#[derive(Clone, Debug)]
+pub struct SidechainGateBuilder {
+    threshold_db: f32,
+    attack_seconds: f32,
+    hold_seconds: f32,
+    release_seconds: f32,
+    range_db: f32,
+}
+
+impl Default for SidechainGateBuilder {
+    fn default() -> Self {
+        Self {
+            threshold_db: -30.0,
+            attack_seconds: 0.001,
+            hold_seconds: 0.01,
+            release_seconds: 0.1,
+            range_db: -80.0,
+        }
+    }
+}
+
+impl SidechainGateBuilder {
+    /// Set the threshold in decibels
+    ///
+    /// Gate opens when the signal exceeds this level.
+    /// Typical range: -60.0 to -10.0 dB
+    pub fn threshold_db(mut self, db: f32) -> Self {
+        self.threshold_db = db;
+        self
+    }
+
+    /// Set the attack time in seconds
+    ///
+    /// How quickly the gate opens when signal exceeds threshold.
+    /// Typical range: 0.0001 to 0.01 seconds
+    pub fn attack_seconds(mut self, seconds: f32) -> Self {
+        self.attack_seconds = seconds.max(0.0);
+        self
+    }
+
+    /// Set the hold time in seconds
+    ///
+    /// How long the gate stays open after signal drops below threshold.
+    /// Prevents rapid opening/closing (chattering).
+    /// Typical range: 0.001 to 0.1 seconds
+    pub fn hold_seconds(mut self, seconds: f32) -> Self {
+        self.hold_seconds = seconds.max(0.0);
+        self
+    }
+
+    /// Set the release time in seconds
+    ///
+    /// How quickly the gate closes after the hold period.
+    /// Typical range: 0.01 to 1.0 seconds
+    pub fn release_seconds(mut self, seconds: f32) -> Self {
+        self.release_seconds = seconds.max(0.0);
+        self
+    }
+
+    /// Set the range (depth) in decibels
+    ///
+    /// Maximum attenuation when gate is closed.
+    /// - 0.0 = no attenuation (gate has no effect)
+    /// - -20.0 = 20dB reduction when closed
+    /// - -80.0 = near full mute when closed
+    ///
+    /// Must be <= 0.0
+    pub fn range_db(mut self, db: f32) -> Self {
+        self.range_db = db.min(0.0);
+        self
+    }
+
+    /// Build the configured SidechainGate
+    pub fn build(self) -> SidechainGate {
+        SidechainGate::new(
+            self.threshold_db,
+            self.attack_seconds,
+            self.hold_seconds,
+            self.release_seconds,
+        )
+        .with_range(self.range_db)
+    }
+}
+
 impl AudioUnit for SidechainGate {
     fn inputs(&self) -> usize {
         2 // audio + sidechain
@@ -746,6 +1016,13 @@ impl AudioUnit for SidechainGate {
         SIDECHAIN_GATE_ID
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
         let mut output = SignalFrame::new(1);
         output.set(0, input.at(0));
@@ -978,6 +1255,14 @@ impl AudioUnit for StereoSidechainGate {
         STEREO_SC_GATE_ID
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
         let mut output = SignalFrame::new(2);
         output.set(0, input.at(0));
@@ -1134,5 +1419,74 @@ mod tests {
         assert!((amplitude_to_db(0.5) - (-6.02)).abs() < 0.1);
         assert!((db_to_amplitude(0.0) - 1.0).abs() < 0.001);
         assert!((db_to_amplitude(-6.0) - 0.501).abs() < 0.01);
+    }
+
+    // Builder tests
+    #[test]
+    fn test_compressor_builder_defaults() {
+        let comp = SidechainCompressor::builder().build();
+        assert_eq!(comp.inputs(), 2);
+        assert_eq!(comp.outputs(), 1);
+    }
+
+    #[test]
+    fn test_compressor_builder_custom() {
+        let comp = SidechainCompressor::builder()
+            .threshold_db(-12.0)
+            .ratio(8.0)
+            .attack_seconds(0.002)
+            .release_seconds(0.2)
+            .soft_knee_db(3.0)
+            .makeup_gain_db(6.0)
+            .build();
+
+        assert_eq!(comp.threshold().get(), -12.0);
+        assert_eq!(comp.ratio().get(), 8.0);
+        assert_eq!(comp.attack_time().get(), 0.002);
+        assert_eq!(comp.release_time().get(), 0.2);
+        assert_eq!(comp.knee_width().get(), 3.0);
+        assert_eq!(comp.makeup_gain().get(), 6.0);
+    }
+
+    #[test]
+    fn test_compressor_builder_validates_ratio() {
+        let comp = SidechainCompressor::builder()
+            .ratio(0.5) // Invalid, should be clamped to 1.0
+            .build();
+
+        assert_eq!(comp.ratio().get(), 1.0);
+    }
+
+    #[test]
+    fn test_gate_builder_defaults() {
+        let gate = SidechainGate::builder().build();
+        assert_eq!(gate.inputs(), 2);
+        assert_eq!(gate.outputs(), 1);
+    }
+
+    #[test]
+    fn test_gate_builder_custom() {
+        let gate = SidechainGate::builder()
+            .threshold_db(-25.0)
+            .attack_seconds(0.0005)
+            .hold_seconds(0.02)
+            .release_seconds(0.15)
+            .range_db(-40.0)
+            .build();
+
+        assert_eq!(gate.threshold().get(), -25.0);
+        assert_eq!(gate.attack_time().get(), 0.0005);
+        assert_eq!(gate.hold_time().get(), 0.02);
+        assert_eq!(gate.release_time().get(), 0.15);
+        assert_eq!(gate.range().get(), -40.0);
+    }
+
+    #[test]
+    fn test_gate_builder_validates_range() {
+        let gate = SidechainGate::builder()
+            .range_db(10.0) // Invalid, should be clamped to 0.0
+            .build();
+
+        assert_eq!(gate.range().get(), 0.0);
     }
 }

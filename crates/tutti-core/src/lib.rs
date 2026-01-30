@@ -43,7 +43,13 @@ pub use net_frontend::TuttiNet;
 
 // MIDI support (requires "midi" feature)
 #[cfg(feature = "midi")]
+pub mod midi_registry;
+
+#[cfg(feature = "midi")]
 pub use midi::{AsMidiAudioUnit, MidiAudioUnit, MidiEvent};
+
+#[cfg(feature = "midi")]
+pub use midi_registry::MidiRegistry;
 
 // DSP units (PDC is the only one in tutti-core, other DSP nodes are in tutti-dsp)
 pub use pdc::PdcDelayUnit;

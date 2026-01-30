@@ -161,17 +161,6 @@ mod tests {
     }
 
     #[test]
-    fn test_program_change_serialization() {
-        let event = MidiEvent::program_change(0, 3, 42);
-        let serialized = bincode::serialize(&event).unwrap();
-        let deserialized: MidiEvent = bincode::deserialize(&serialized).unwrap();
-
-        assert_eq!(event.frame_offset, deserialized.frame_offset);
-        assert_eq!(event.channel, deserialized.channel);
-        assert_eq!(event.msg, deserialized.msg);
-    }
-
-    #[test]
     fn test_roundtrip_multiple_events() {
         let events = vec![
             MidiEvent::note_on(0, 0, 60, 100),

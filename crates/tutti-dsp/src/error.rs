@@ -7,7 +7,6 @@ pub enum Error {
     InvalidChannelCount(String),
     InvalidSpeakerConfig(String),
     InvalidParameter(String),
-    #[cfg(feature = "spatial-audio")]
     VBAPError(String),
 }
 
@@ -17,7 +16,6 @@ impl fmt::Display for Error {
             Error::InvalidChannelCount(msg) => write!(f, "Invalid channel count: {}", msg),
             Error::InvalidSpeakerConfig(msg) => write!(f, "Invalid speaker configuration: {}", msg),
             Error::InvalidParameter(msg) => write!(f, "Invalid parameter: {}", msg),
-            #[cfg(feature = "spatial-audio")]
             Error::VBAPError(msg) => write!(f, "VBAP error: {}", msg),
         }
     }
@@ -25,8 +23,7 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-// Convert VBAP errors to our error type (only when spatial-audio feature is enabled)
-#[cfg(feature = "spatial-audio")]
+// Convert VBAP errors to our error type
 impl From<vbap::VBAPError> for Error {
     fn from(err: vbap::VBAPError) -> Self {
         Error::VBAPError(err.to_string())

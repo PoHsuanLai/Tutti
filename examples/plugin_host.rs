@@ -2,15 +2,8 @@
 //!
 //! Demonstrates: Plugin discovery, loading, parameter control
 //!
-//! Run with: cargo run --example plugin_host --features=plugin
+//! Run with: cargo run --example plugin_host
 
-#[cfg(not(feature = "plugin"))]
-fn main() {
-    eprintln!("This example requires the 'plugin' feature.");
-    eprintln!("Run with: cargo run --example plugin_host --features=plugin");
-}
-
-#[cfg(feature = "plugin")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use tutti::prelude::*;
 

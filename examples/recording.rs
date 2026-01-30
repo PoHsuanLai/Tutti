@@ -2,18 +2,11 @@
 //!
 //! Demonstrates: Audio recording, transport control, file export
 //!
-//! Run with: cargo run --example recording --features=butler,recording,export
+//! Run with: cargo run --example recording
 
-#[cfg(not(all(feature = "butler", feature = "recording", feature = "export")))]
-fn main() {
-    eprintln!("This example requires the 'butler', 'recording', and 'export' features.");
-    eprintln!("Run with: cargo run --example recording --features=butler,recording,export");
-}
-
-#[cfg(all(feature = "butler", feature = "recording", feature = "export"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use tutti::prelude::*;
     use std::time::Duration;
+    use tutti::prelude::*;
 
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 

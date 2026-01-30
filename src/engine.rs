@@ -6,8 +6,9 @@ use std::sync::Arc;
 
 #[cfg(feature = "midi")]
 use crate::midi::MidiSystem;
+#[cfg(feature = "midi")]
+use crate::{MidiEvent, NodeId};
 
-#[cfg(feature = "sampler")]
 use crate::sampler::SamplerSystem;
 
 #[cfg(feature = "neural")]
@@ -44,8 +45,7 @@ pub struct TuttiEngine {
     #[cfg(feature = "midi")]
     midi: Option<MidiSystem>,
 
-    /// Sampler subsystem (optional)
-    #[cfg(feature = "sampler")]
+    /// Sampler subsystem (always present)
     sampler: Option<SamplerSystem>,
 
     /// Neural subsystem (optional)
@@ -126,8 +126,21 @@ impl TuttiEngine {
         self.midi.as_ref()
     }
 
+    /// Queue MIDI events to a specific node
+    ///
+    /// Events are queued and will be delivered to the node before the next audio callback.
+    ///
+    /// # Arguments
+    /// * `node` - The node ID to send MIDI to
+    /// * `events` - Slice of MIDI events to queue
+    #[cfg(feature = "midi")]
+    pub fn queue_midi(&self, node: NodeId, events: &[MidiEvent]) {
+        self.graph(|net| {
+            net.queue_midi(node, events);
+        })
+    }
+
     /// Get the sampler subsystem (if enabled)
-    #[cfg(feature = "sampler")]
     pub fn sampler(&self) -> Option<&SamplerSystem> {
         self.sampler.as_ref()
     }
@@ -142,14 +155,13 @@ impl TuttiEngine {
     pub(crate) fn from_parts(
         core: TuttiSystem,
         #[cfg(feature = "midi")] midi: Option<MidiSystem>,
-        #[cfg(feature = "sampler")] sampler: Option<SamplerSystem>,
+        sampler: Option<SamplerSystem>,
         #[cfg(feature = "neural")] neural: Option<NeuralSystem>,
     ) -> Self {
         Self {
             core,
             #[cfg(feature = "midi")]
             midi,
-            #[cfg(feature = "sampler")]
             sampler,
             #[cfg(feature = "neural")]
             neural,

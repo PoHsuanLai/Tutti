@@ -22,8 +22,7 @@ pub struct SamplerSystem {
 
 impl SamplerSystem {
     /// Create a new sampler system builder.
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new(sample_rate: f64) -> SamplerSystemBuilder {
+    pub fn builder(sample_rate: f64) -> SamplerSystemBuilder {
         SamplerSystemBuilder { sample_rate }
     }
 

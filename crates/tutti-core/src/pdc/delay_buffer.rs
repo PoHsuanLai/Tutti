@@ -116,9 +116,6 @@ impl DelayBuffer {
     }
 }
 
-unsafe impl Send for DelayBuffer {}
-unsafe impl Sync for DelayBuffer {}
-
 #[cfg(test)]
 mod tests {
     use super::*;

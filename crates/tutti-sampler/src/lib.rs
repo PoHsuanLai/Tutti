@@ -48,6 +48,3 @@ pub mod butler;
 pub mod recording;
 pub mod sampler;
 pub mod time_stretch;
-
-#[cfg(feature = "soundfont")]
-pub mod soundfont;

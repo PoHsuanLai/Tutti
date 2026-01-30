@@ -48,26 +48,19 @@
 //! - **Surround sound**: Use `SpatialPannerNode` for 5.1/7.1/Atmos speaker setups
 //! - **Headphones 3D**: Use `BinauralPannerNode` for immersive headphone audio
 
-// Export common types (always available for type definitions)
+// Export common types
 pub mod types;
 pub use types::ChannelLayout;
 
-// Export spatial panners (only with feature flag)
-#[cfg(feature = "spatial-audio")]
+// Export spatial panners (always included)
 mod binaural_panner;
-#[cfg(feature = "spatial-audio")]
 mod nodes;
-#[cfg(feature = "spatial-audio")]
 mod vbap_panner;
 
-#[cfg(feature = "spatial-audio")]
 pub use binaural_panner::BinauralPanner;
-#[cfg(feature = "spatial-audio")]
 pub use nodes::{BinauralPannerNode, SpatialPannerNode};
-#[cfg(feature = "spatial-audio")]
 pub use vbap_panner::SpatialPanner;
 
 // Re-export vbap types for advanced usage
-#[cfg(feature = "spatial-audio")]
 #[allow(unused_imports)] // These are public API exports for library users
 pub use vbap::{SpeakerConfig, SpeakerConfigBuilder, VBAPanner};

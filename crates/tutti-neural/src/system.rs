@@ -70,8 +70,7 @@ struct NeuralSystemInner {
 
 impl NeuralSystem {
     /// Create a builder for configuring the neural system.
-    #[allow(clippy::new_ret_no_self)]
-    pub fn new() -> NeuralSystemBuilder {
+    pub fn builder() -> NeuralSystemBuilder {
         NeuralSystemBuilder::default()
     }
 
@@ -369,13 +368,13 @@ mod tests {
 
     #[test]
     fn test_neural_system_creation() {
-        let neural = NeuralSystem::new().build();
+        let neural = NeuralSystem::builder().build();
         assert!(neural.is_ok());
     }
 
     #[test]
     fn test_builder_defaults() {
-        let neural = NeuralSystem::new().build().unwrap();
+        let neural = NeuralSystem::builder().build().unwrap();
 
         assert_eq!(neural.sample_rate(), 44100.0);
         assert_eq!(neural.buffer_size(), 512);
@@ -383,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_builder_custom_config() {
-        let neural = NeuralSystem::new()
+        let neural = NeuralSystem::builder()
             .sample_rate(48000.0)
             .buffer_size(256)
             .inference_config(InferenceConfig {
@@ -400,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        let neural = NeuralSystem::new().build().unwrap();
+        let neural = NeuralSystem::builder().build().unwrap();
         let neural2 = neural.clone();
 
         // Both share the same backend pool
@@ -409,7 +408,7 @@ mod tests {
 
     #[test]
     fn test_sub_handles() {
-        let neural = NeuralSystem::new().build().unwrap();
+        let neural = NeuralSystem::builder().build().unwrap();
 
         let _synth = neural.synth();
         let _effects = neural.effects();
@@ -429,7 +428,7 @@ mod tests {
 
     #[test]
     fn test_synth_handle_missing_model() {
-        let neural = NeuralSystem::new().build().unwrap();
+        let neural = NeuralSystem::builder().build().unwrap();
         let model = NeuralModel {
             id: NeuralModelId::new(),
             name: "nonexistent".to_string(),
@@ -442,7 +441,7 @@ mod tests {
 
     #[test]
     fn test_effect_handle_missing_model() {
-        let neural = NeuralSystem::new().build().unwrap();
+        let neural = NeuralSystem::builder().build().unwrap();
         let model = NeuralModel {
             id: NeuralModelId::new(),
             name: "nonexistent".to_string(),

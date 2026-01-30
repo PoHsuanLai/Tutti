@@ -282,6 +282,14 @@ impl AudioUnit for SpatialPannerNode {
         0x5041_4E00 | (self.num_outputs as u64) // "PAN\0" + channels
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
         // Signal routing: stereo input distributes to all outputs
         let mut output = SignalFrame::new(self.num_outputs);
@@ -468,6 +476,14 @@ impl AudioUnit for BinauralPannerNode {
 
     fn get_id(&self) -> u64 {
         0x4249_4E00 // "BIN\0" - Binaural
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {

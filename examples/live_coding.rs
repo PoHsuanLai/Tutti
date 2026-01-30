@@ -4,8 +4,8 @@
 //!
 //! Run with: cargo run --example live_coding
 
-use tutti::prelude::*;
 use std::io::{self, Write};
+use tutti::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;

@@ -304,6 +304,14 @@ impl AudioUnit for TransportClock {
         TRANSPORT_CLOCK_ID
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         // Transport clock outputs a value signal (beat position)
         let mut output = SignalFrame::new(1);
@@ -500,6 +508,14 @@ impl AudioUnit for AutomationReaderInput {
     fn get_id(&self) -> u64 {
         const AUTOMATION_INPUT_ID: u64 = 0x_4155_544F_494E_5054; // "AUTOINPT"
         AUTOMATION_INPUT_ID
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
     }
 
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {

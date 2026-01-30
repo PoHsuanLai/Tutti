@@ -10,7 +10,7 @@
 //! use tutti_sampler::SamplerSystem;
 //!
 //! // Create sampler system (provides Butler)
-//! let sampler = SamplerSystem::new(44100.0).build();
+//! let sampler = SamplerSystem::builder(44100.0).build();
 //! let exporter = ButlerExporter::new(&sampler);
 //!
 //! // Export with progress callback

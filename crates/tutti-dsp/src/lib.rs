@@ -75,7 +75,6 @@ pub use dynamics::{
 };
 pub use envelope_follower::{EnvelopeFollowerNode, EnvelopeMode};
 pub use lfo::{LfoMode, LfoNode, LfoShape};
-pub use spatial::ChannelLayout;
-
-#[cfg(feature = "spatial-audio")]
-pub use spatial::{BinauralPanner, BinauralPannerNode, SpatialPanner, SpatialPannerNode};
+pub use spatial::{
+    BinauralPanner, BinauralPannerNode, ChannelLayout, SpatialPanner, SpatialPannerNode,
+};

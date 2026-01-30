@@ -312,6 +312,14 @@ impl AudioUnit for TimeStretchUnit {
         self.source.get_id() ^ TIME_STRETCH_MARKER
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, input: &SignalFrame, frequency: f64) -> SignalFrame {
         self.source.route(input, frequency)
     }
@@ -358,6 +366,12 @@ mod tests {
         }
         fn get_id(&self) -> u64 {
             12345
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
         }
         fn route(&mut self, _: &SignalFrame, _: f64) -> SignalFrame {
             SignalFrame::new(2)

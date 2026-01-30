@@ -137,6 +137,14 @@ impl AudioUnit for AudioInputBackend {
         AUDIO_INPUT_BACKEND_ID
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         let mut output = SignalFrame::new(2);
         output.set(0, Signal::Latency(0.0));

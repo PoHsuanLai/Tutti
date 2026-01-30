@@ -9,12 +9,25 @@ pub struct AudioEngineConfig {
     pub output_device_index: Option<usize>,
 }
 
+/// Wrapper to hold a `cpal::Stream` in a `Send` context.
+///
+/// `cpal::Stream` is `!Send` due to platform internals (`*mut ()`, non-Send closures).
+/// This is safe because `AudioEngine` is only accessed behind a `Mutex` in `TuttiSystem`,
+/// ensuring single-threaded access. The stream is never moved across threads directly —
+/// it lives for the lifetime of the engine and is dropped when the engine stops.
+struct StreamHandle(#[allow(dead_code)] cpal::Stream);
+
+// SAFETY: The stream is only accessed behind a Mutex<AudioEngine> in TuttiSystem,
+// so it's never concurrently accessed. It stays on the thread that created it
+// until AudioEngine is dropped.
+unsafe impl Send for StreamHandle {}
+
 pub struct AudioEngine {
     sample_rate: f64,
     channels: usize,
     is_running: bool,
     output_device_index: Option<usize>,
-    _stream_handle: Option<()>,
+    _stream: Option<StreamHandle>,
 }
 
 impl AudioEngine {
@@ -27,7 +40,7 @@ impl AudioEngine {
             channels: output_config.channels() as usize,
             is_running: false,
             output_device_index: config.output_device_index,
-            _stream_handle: None,
+            _stream: None,
         })
     }
 
@@ -53,8 +66,7 @@ impl AudioEngine {
 
         stream.play()?;
 
-        std::mem::forget(stream);
-        self._stream_handle = Some(());
+        self._stream = Some(StreamHandle(stream));
         self.is_running = true;
 
         Ok(())

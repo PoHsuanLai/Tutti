@@ -4,8 +4,8 @@
 //!
 //! Run with: cargo run --example sequencer
 
-use tutti::prelude::*;
 use std::time::{Duration, Instant};
+use tutti::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
@@ -13,13 +13,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Pattern: 4/4 beat with kick, snare, hi-hat
     // K = Kick (110Hz), S = Snare (200Hz), H = Hi-hat (8000Hz noise)
     let pattern = [
-        (0.0, 'K'),  // Beat 1
+        (0.0, 'K'), // Beat 1
         (0.25, 'H'),
-        (0.5, 'S'),  // Beat 2
+        (0.5, 'S'), // Beat 2
         (0.75, 'H'),
-        (1.0, 'K'),  // Beat 3
+        (1.0, 'K'), // Beat 3
         (1.25, 'H'),
-        (1.5, 'S'),  // Beat 4
+        (1.5, 'S'), // Beat 4
         (1.75, 'H'),
     ];
 
