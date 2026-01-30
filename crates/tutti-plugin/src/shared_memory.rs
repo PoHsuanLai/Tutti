@@ -7,6 +7,8 @@ use crate::error::{BridgeError, Result};
 use memmap2::MmapMut;
 use std::cell::UnsafeCell;
 use std::fs::OpenOptions;
+
+#[cfg(unix)]
 use std::path::PathBuf;
 
 /// Shared audio buffer in memory
@@ -188,12 +190,9 @@ impl SharedAudioBuffer {
 
     #[cfg(windows)]
     fn create_windows(name: &str, size: usize) -> Result<MmapMut> {
-        use std::os::windows::io::AsRawHandle;
-        use std::ptr;
-
-        // Create a temporary file for memory mapping
-        // Windows shared memory uses CreateFileMapping with INVALID_HANDLE_VALUE for anonymous mapping
-        // But we want named shared memory, so we'll use a file-backed approach
+        // File-backed memory mapping for cross-platform compatibility.
+        // Windows native shared memory (CreateFileMapping with INVALID_HANDLE_VALUE)
+        // would be more efficient, but memmap2 doesn't expose that API.
         let temp_dir = std::env::temp_dir();
         let path = temp_dir.join(format!("dawai_{}", name));
 

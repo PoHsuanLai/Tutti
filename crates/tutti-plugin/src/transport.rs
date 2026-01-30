@@ -5,10 +5,12 @@
 
 use crate::error::Result;
 use crate::protocol::{BridgeMessage, HostMessage};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[cfg(unix)]
-use tokio::net::{UnixListener, UnixStream};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{UnixListener, UnixStream},
+};
 
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeServer, ServerOptions};
@@ -56,7 +58,7 @@ impl MessageTransport {
         Ok(Self::WindowsClient(client))
     }
 
-    /// Get mutable reference to the underlying I/O stream
+    /// Get mutable reference to the underlying I/O stream (Unix only)
     #[cfg(unix)]
     fn stream_mut(&mut self) -> &mut UnixStream {
         match self {
@@ -64,29 +66,11 @@ impl MessageTransport {
         }
     }
 
-    /// Get mutable reference to the underlying I/O stream (Windows)
-    #[cfg(windows)]
-    fn stream_mut(&mut self) -> &mut dyn tokio::io::AsyncWrite {
-        match self {
-            Self::WindowsClient(c) => c,
-            Self::WindowsServer(s) => s,
-        }
-    }
-
-    /// Get mutable reference for reading
+    /// Get mutable reference for reading (Unix only)
     #[cfg(unix)]
     fn read_stream_mut(&mut self) -> &mut UnixStream {
         match self {
             Self::Unix(s) => s,
-        }
-    }
-
-    /// Get mutable reference for reading (Windows)
-    #[cfg(windows)]
-    fn read_stream_mut(&mut self) -> &mut dyn tokio::io::AsyncRead {
-        match self {
-            Self::WindowsClient(c) => c,
-            Self::WindowsServer(s) => s,
         }
     }
 
@@ -135,18 +119,18 @@ impl MessageTransport {
         #[cfg(windows)]
         {
             use tokio::io::AsyncReadExt;
-            let (len, data) = match self {
+            let data = match self {
                 Self::WindowsClient(c) => {
                     let len = c.read_u32().await? as usize;
                     let mut data = vec![0u8; len];
                     c.read_exact(&mut data).await?;
-                    (len, data)
+                    data
                 }
                 Self::WindowsServer(s) => {
                     let len = s.read_u32().await? as usize;
                     let mut data = vec![0u8; len];
                     s.read_exact(&mut data).await?;
-                    (len, data)
+                    data
                 }
             };
             let msg = bincode::deserialize(&data)?;
@@ -199,18 +183,18 @@ impl MessageTransport {
         #[cfg(windows)]
         {
             use tokio::io::AsyncReadExt;
-            let (len, data) = match self {
+            let data = match self {
                 Self::WindowsClient(c) => {
                     let len = c.read_u32().await? as usize;
                     let mut data = vec![0u8; len];
                     c.read_exact(&mut data).await?;
-                    (len, data)
+                    data
                 }
                 Self::WindowsServer(s) => {
                     let len = s.read_u32().await? as usize;
                     let mut data = vec![0u8; len];
                     s.read_exact(&mut data).await?;
-                    (len, data)
+                    data
                 }
             };
             let msg = bincode::deserialize(&data)?;
