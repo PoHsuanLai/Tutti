@@ -71,6 +71,10 @@ pub enum Error {
     /// Failed to receive a response from the inference thread
     #[error("Inference thread recv failed")]
     InferenceThreadRecv,
+
+    /// Invalid file path
+    #[error("Invalid path: {0}")]
+    InvalidPath(String),
 }
 
 impl From<GpuError> for Error {

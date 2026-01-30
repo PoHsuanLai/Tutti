@@ -257,6 +257,12 @@ pub enum NodeRegistryError {
 
     #[error("Node construction failed: {0}")]
     ConstructionFailed(String),
+
+    #[error("Neural error: {0}")]
+    Neural(String),
+
+    #[error("Plugin error: {0}")]
+    Plugin(String),
 }
 
 /// Helper to get a required parameter

@@ -45,9 +45,9 @@ macro_rules! chain {
     }};
 }
 
-/// Mix multiple signals into a single bus node.
+/// Mix multiple signals into a single node using fundsp's join.
 ///
-/// Creates a pass-through node and pipes all sources into it.
+/// Creates a join node that sums/averages all input signals.
 ///
 /// # Example
 /// ```ignore
@@ -55,13 +55,88 @@ macro_rules! chain {
 /// ```
 #[macro_export]
 macro_rules! mix {
-    ($net:expr, $($source:expr),+ $(,)?) => {{
+    // 2 sources
+    ($net:expr, $s1:expr, $s2:expr) => {{
         use fundsp::prelude::*;
-        let bus = $net.add(Box::new(pass()));
-        $(
-            $net.pipe($source, bus);
-        )+
-        bus
+        let mixer = $net.add(Box::new(join::<typenum::U2>()));
+        $net.connect_ports($s1, 0, mixer, 0);
+        $net.connect_ports($s2, 0, mixer, 1);
+        mixer
+    }};
+
+    // 3 sources
+    ($net:expr, $s1:expr, $s2:expr, $s3:expr) => {{
+        use fundsp::prelude::*;
+        let mixer = $net.add(Box::new(join::<typenum::U3>()));
+        $net.connect_ports($s1, 0, mixer, 0);
+        $net.connect_ports($s2, 0, mixer, 1);
+        $net.connect_ports($s3, 0, mixer, 2);
+        mixer
+    }};
+
+    // 4 sources
+    ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr) => {{
+        use fundsp::prelude::*;
+        let mixer = $net.add(Box::new(join::<typenum::U4>()));
+        $net.connect_ports($s1, 0, mixer, 0);
+        $net.connect_ports($s2, 0, mixer, 1);
+        $net.connect_ports($s3, 0, mixer, 2);
+        $net.connect_ports($s4, 0, mixer, 3);
+        mixer
+    }};
+
+    // 5 sources
+    ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr) => {{
+        use fundsp::prelude::*;
+        let mixer = $net.add(Box::new(join::<typenum::U5>()));
+        $net.connect_ports($s1, 0, mixer, 0);
+        $net.connect_ports($s2, 0, mixer, 1);
+        $net.connect_ports($s3, 0, mixer, 2);
+        $net.connect_ports($s4, 0, mixer, 3);
+        $net.connect_ports($s5, 0, mixer, 4);
+        mixer
+    }};
+
+    // 6 sources
+    ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr, $s6:expr) => {{
+        use fundsp::prelude::*;
+        let mixer = $net.add(Box::new(join::<typenum::U6>()));
+        $net.connect_ports($s1, 0, mixer, 0);
+        $net.connect_ports($s2, 0, mixer, 1);
+        $net.connect_ports($s3, 0, mixer, 2);
+        $net.connect_ports($s4, 0, mixer, 3);
+        $net.connect_ports($s5, 0, mixer, 4);
+        $net.connect_ports($s6, 0, mixer, 5);
+        mixer
+    }};
+
+    // 7 sources
+    ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr, $s6:expr, $s7:expr) => {{
+        use fundsp::prelude::*;
+        let mixer = $net.add(Box::new(join::<typenum::U7>()));
+        $net.connect_ports($s1, 0, mixer, 0);
+        $net.connect_ports($s2, 0, mixer, 1);
+        $net.connect_ports($s3, 0, mixer, 2);
+        $net.connect_ports($s4, 0, mixer, 3);
+        $net.connect_ports($s5, 0, mixer, 4);
+        $net.connect_ports($s6, 0, mixer, 5);
+        $net.connect_ports($s7, 0, mixer, 6);
+        mixer
+    }};
+
+    // 8 sources
+    ($net:expr, $s1:expr, $s2:expr, $s3:expr, $s4:expr, $s5:expr, $s6:expr, $s7:expr, $s8:expr) => {{
+        use fundsp::prelude::*;
+        let mixer = $net.add(Box::new(join::<typenum::U8>()));
+        $net.connect_ports($s1, 0, mixer, 0);
+        $net.connect_ports($s2, 0, mixer, 1);
+        $net.connect_ports($s3, 0, mixer, 2);
+        $net.connect_ports($s4, 0, mixer, 3);
+        $net.connect_ports($s5, 0, mixer, 4);
+        $net.connect_ports($s6, 0, mixer, 5);
+        $net.connect_ports($s7, 0, mixer, 6);
+        $net.connect_ports($s8, 0, mixer, 7);
+        mixer
     }};
 }
 

@@ -65,6 +65,14 @@ pub use tutti_core::neural::{BatchingStrategy, NeuralNodeManager};
 pub use tutti_core::AudioUnit;
 
 pub mod model;
+pub mod registry;
+
+// Registry functions
+pub use registry::{
+    register_all_neural_models, register_neural_directory, register_neural_effects,
+    register_neural_model, register_neural_synth_models, ModelType as NeuralModelType,
+    NeuralModelMetadata,
+};
 
 pub(crate) mod backend;
 pub(crate) mod effects;

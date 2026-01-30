@@ -88,6 +88,7 @@ pub mod error;
 pub mod lockfree_bridge;
 pub mod metadata;
 pub mod protocol;
+pub mod registry;
 pub mod server;
 pub mod shared_memory;
 pub mod transport;
@@ -110,3 +111,17 @@ pub use error::{BridgeError, Result};
 pub use protocol::{BridgeConfig, BridgeMessage, HostMessage, SharedBuffer};
 pub use server::PluginServer;
 pub use shared_memory::SharedAudioBuffer;
+
+// Registry functions
+pub use registry::{
+    register_all_system_plugins, register_plugin, register_plugin_directory,
+};
+
+#[cfg(feature = "vst2")]
+pub use registry::register_system_vst2_plugins;
+
+#[cfg(feature = "vst3")]
+pub use registry::register_system_vst3_plugins;
+
+#[cfg(feature = "clap")]
+pub use registry::register_system_clap_plugins;
