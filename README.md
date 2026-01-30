@@ -1,17 +1,17 @@
 <div align="center">
   <img src="logo/logo.png" alt="Tutti Logo" width="200"/>
-
-  # Tutti
-
-  [![Crates.io](https://img.shields.io/crates/v/tutti.svg)](https://crates.io/crates/tutti)
-  [![Documentation](https://docs.rs/tutti/badge.svg)](https://docs.rs/tutti)
-  [![License](https://img.shields.io/crates/l/tutti.svg)](https://github.com/PoHsuanLai/Tutti#license)
-  [![CI](https://github.com/PoHsuanLai/tutti/workflows/CI/badge.svg)](https://github.com/PoHsuanLai/Tutti/actions)
-
-  A real-time audio engine for DAW applications in Rust. Tutti provides an audio graph runtime, MIDI processing, sample playback, plugin hosting, and neural audio synthesis.
-
-  For audio UI components, see [Armas](https://github.com/PoHsuanLai/Armas).
 </div>
+
+# Tutti
+
+[![Crates.io](https://img.shields.io/crates/v/tutti.svg)](https://crates.io/crates/tutti)
+[![Documentation](https://docs.rs/tutti/badge.svg)](https://docs.rs/tutti)
+[![License](https://img.shields.io/crates/l/tutti.svg)](https://github.com/PoHsuanLai/Tutti#license)
+[![CI](https://github.com/PoHsuanLai/tutti/workflows/CI/badge.svg)](https://github.com/PoHsuanLai/Tutti/actions)
+
+A real-time audio engine for DAW applications in Rust. Tutti provides an audio graph runtime, MIDI processing, sample playback, plugin hosting, and neural audio synthesis.
+
+For audio UI components, see [Armas](https://github.com/PoHsuanLai/Armas).
 
 ## Overview
 
