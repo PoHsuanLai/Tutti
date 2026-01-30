@@ -124,7 +124,7 @@ jobs:
           sudo apt-get install -y libasound2-dev pkg-config
 
       - name: Check documentation
-        run: cargo doc --workspace --no-deps --all-features --exclude fundsp-tutti --exclude rustysynth-tutti --exclude tutti-neural
+        run: cargo doc --workspace --no-deps --all-features --exclude fundsp-tutti --exclude rustysynth-tutti
         env:
           RUSTDOCFLAGS: -D warnings
 

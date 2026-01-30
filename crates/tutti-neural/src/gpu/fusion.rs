@@ -64,7 +64,7 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
         match ext {
             "onnx" => Self::load_from_onnx(path, device),
             "mpk" => Self::load_from_burn_mpk(path, device),
-            "safetensors" => Self::load_from_safetensors(path, device),
+            "safetensors" => Err("SafeTensors support disabled (burn-import 0.20 has compilation issues). Use .mpk format instead.".to_string()),
             _ => Err(format!("Unsupported model format: .{}", ext)),
         }
     }
@@ -122,27 +122,11 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
     /// - etc.
     ///
     /// If the model was exported from PyTorch, use key remapping to adapt names.
-    #[cfg(feature = "safetensors")]
-    fn load_from_safetensors(path: &std::path::Path, device: &B::Device) -> Result<Self, String> {
-        use burn::record::{FullPrecisionSettings, Recorder};
-        use burn_import::safetensors::{LoadArgs, SafetensorsFileRecorder};
-
-        let recorder = SafetensorsFileRecorder::<FullPrecisionSettings>::default();
-        let args = LoadArgs::new(path.to_path_buf());
-
-        let record = recorder
-            .load(args, device)
-            .map_err(|e| format!("Failed to load SafeTensors model: {:?}", e))?;
-
-        let model = Self::new(device).load_record(record);
-        Ok(model)
-    }
-
-    /// Load from SafeTensors format (stub when feature is disabled)
-    #[cfg(not(feature = "safetensors"))]
+    // SafeTensors loading disabled due to burn-import 0.20 compilation issues
+    // TODO: Re-enable when burn-import 0.21+ is available
     fn load_from_safetensors(_path: &std::path::Path, _device: &B::Device) -> Result<Self, String> {
-        Err("SafeTensors loading requires the 'safetensors' feature. \
-             Enable it in Cargo.toml: tutti-neural = { features = [\"safetensors\"] }"
+        Err("SafeTensors support temporarily disabled (burn-import 0.20 has compilation issues). \
+             Use .mpk format instead. Convert with: burn-import onnx <model.onnx> --out-type burn <model.mpk>"
             .to_string())
     }
 

@@ -18,7 +18,8 @@ midi-msg = { version = "0.8", default-features = false }
 
 # ML/GPU framework (using stable crates.io version)
 burn = { version = "0.20", default-features = false, features = ["wgpu", "ndarray", "fusion", "autodiff", "std"] }
-burn-import = { version = "0.20", default-features = false, features = ["onnx-ir"], optional = true }
+# burn-import removed: 0.20 has safetensors compilation errors
+# TODO: Re-add when burn-import 0.21+ is available with working safetensors support
 wgpu = "26"  # Match burn 0.20's wgpu version (26.0.1)
 
 # Lock-free data structures
@@ -37,4 +38,6 @@ uuid = { version = "1.0", features = ["v4"] }
 
 [features]
 default = []
-safetensors = ["dep:burn-import"]
+# safetensors disabled due to burn-import 0.20 compilation errors
+# TODO: Re-enable when burn-import 0.21+ is available
+# safetensors = ["dep:burn-import"]
