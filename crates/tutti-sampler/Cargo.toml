@@ -17,7 +17,7 @@ serde = { version = "1", features = ["derive"] }
 
 # Audio
 cpal = "0.15"
-audio-automation = { git = "https://github.com/PoHsuanLai/audio-automation.git" }
+audio-automation = "0.1"
 
 # Lock-free
 ringbuf = "0.4"

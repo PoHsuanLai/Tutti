@@ -22,7 +22,7 @@ serde = { version = "1", features = ["derive"] }
 # Audio
 cpal = "0.15"
 fundsp = { package = "fundsp-tutti", version = "0.23.0", path = "../fundsp-tutti", default-features = false, features = ["std", "files"] }
-audio-automation = { git = "https://github.com/PoHsuanLai/audio-automation.git" }
+audio-automation = "0.1"
 
 # MIDI types (for trait only, no I/O dependency)
 tutti-midi = { path = "../tutti-midi", default-features = false, optional = true }

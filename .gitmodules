@@ -1,3 +1,6 @@
 [submodule "crates/fundsp-tutti"]
 	path = crates/fundsp-tutti
 	url = https://github.com/PoHsuanLai/fundsp.git
+[submodule "crates/rustysynth-tutti"]
+	path = crates/rustysynth-tutti
+	url = https://github.com/PoHsuanLai/rustysynth.git

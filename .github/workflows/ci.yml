@@ -89,7 +89,7 @@ jobs:
           sudo apt-get install -y libasound2-dev pkg-config
 
       - name: Run clippy
-        run: cargo clippy --workspace --all-targets --exclude fundsp-tutti -- -D warnings -A dead_code
+        run: cargo clippy --workspace --all-targets --exclude fundsp-tutti --exclude rustysynth-tutti -- -D warnings -A dead_code
 
   fmt:
     name: Format
@@ -124,7 +124,7 @@ jobs:
           sudo apt-get install -y libasound2-dev pkg-config
 
       - name: Check documentation
-        run: cargo doc --no-deps --all-features
+        run: cargo doc --workspace --no-deps --all-features --exclude fundsp-tutti --exclude rustysynth-tutti --exclude tutti-neural
         env:
           RUSTDOCFLAGS: -D warnings
 
@@ -148,4 +148,4 @@ jobs:
         uses: taiki-e/install-action@cargo-hack
 
       - name: Check feature combinations
-        run: cargo hack check --feature-powerset --no-dev-deps --exclude fundsp-tutti
+        run: cargo hack check --feature-powerset --no-dev-deps --exclude fundsp-tutti --exclude rustysynth-tutti

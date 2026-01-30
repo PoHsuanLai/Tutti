@@ -10,6 +10,7 @@ members = [
     "crates/tutti-analysis",
     "crates/tutti-export",
     "crates/fundsp-tutti",
+    "crates/rustysynth-tutti/rustysynth",
 ]
 resolver = "2"
 
