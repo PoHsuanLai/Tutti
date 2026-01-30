@@ -1,6 +1,7 @@
 use fundsp::net::{Net, NodeId, Source};
 use fundsp::prelude::AudioUnit;
 use fundsp::realnet::NetBackend;
+use std::collections::HashMap;
 
 #[cfg(feature = "neural")]
 use std::sync::Arc;
@@ -10,12 +11,124 @@ use crate::neural::{
     BatchingStrategy, GraphAnalyzer, NeuralNodeInfo, NeuralNodeManager, SharedNeuralNodeManager,
 };
 
+/// Chain multiple nodes together in a linear signal flow.
+///
+/// Use `=> output` to pipe the last node to output.
+///
+/// # Example
+/// ```ignore
+/// chain!(net, sine_id, filter_id, gain_id, reverb_id => output);
+/// let last = chain!(net, sine_id, filter_id); // Returns filter_id
+/// ```
+#[macro_export]
+macro_rules! chain {
+    // Chain with => output at the end
+    ($net:expr, $first:expr, $second:expr => output) => {{
+        $net.pipe($first, $second);
+        $net.pipe_output($second);
+    }};
+
+    ($net:expr, $first:expr, $second:expr, $($rest:expr),+ => output) => {{
+        $net.pipe($first, $second);
+        chain!($net, $second, $($rest),+ => output);
+    }};
+
+    // Chain without output (returns last node)
+    ($net:expr, $first:expr, $second:expr) => {{
+        $net.pipe($first, $second);
+        $second
+    }};
+
+    ($net:expr, $first:expr, $second:expr, $($rest:expr),+) => {{
+        $net.pipe($first, $second);
+        chain!($net, $second, $($rest),+)
+    }};
+}
+
+/// Mix multiple signals into a single bus node.
+///
+/// Creates a pass-through node and pipes all sources into it.
+///
+/// # Example
+/// ```ignore
+/// let mixed = mix!(net, osc1, osc2, osc3);
+/// ```
+#[macro_export]
+macro_rules! mix {
+    ($net:expr, $($source:expr),+ $(,)?) => {{
+        use fundsp::prelude::*;
+        let bus = $net.add(Box::new(pass()));
+        $(
+            $net.pipe($source, bus);
+        )+
+        bus
+    }};
+}
+
+/// Split a signal to multiple destinations (fan-out).
+///
+/// # Example
+/// ```ignore
+/// split!(net, reverb_id => output, analyzer_id);
+/// split!(net, reverb_id => output, analyzer_id, meter_id);
+/// ```
+#[macro_export]
+macro_rules! split {
+    ($net:expr, $source:expr => output $(, $dest:expr)*) => {{
+        $net.pipe_output($source);
+        $(
+            $net.pipe($source, $dest);
+        )*
+    }};
+
+    ($net:expr, $source:expr => $first_dest:expr $(, $dest:expr)*) => {{
+        $net.pipe($source, $first_dest);
+        $(
+            $net.pipe($source, $dest);
+        )*
+    }};
+}
+
 /// MIDI connection between two nodes in the graph
 #[cfg(feature = "midi")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MidiConnection {
     pub source: NodeId,
     pub dest: NodeId,
+}
+
+/// Metadata about a node in the graph
+#[derive(Debug, Clone)]
+pub struct NodeInfo {
+    /// Node ID
+    pub id: NodeId,
+
+    /// Human-readable name (from tag or generated)
+    pub name: String,
+
+    /// Number of input channels
+    pub inputs: usize,
+
+    /// Number of output channels
+    pub outputs: usize,
+
+    /// Reported latency in samples (for PDC)
+    pub latency: usize,
+
+    /// Optional user tag
+    pub tag: Option<String>,
+
+    /// Type name (from std::any::type_name)
+    pub type_name: String,
+}
+
+/// Connection between two nodes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Connection {
+    pub from_node: NodeId,
+    pub from_output: usize,
+    pub to_node: NodeId,
+    pub to_input: usize,
 }
 
 pub struct TuttiNet {
@@ -36,6 +149,9 @@ pub struct TuttiNet {
 
     #[cfg(feature = "neural")]
     batching_strategy: Option<BatchingStrategy>,
+
+    /// Optional user tags for nodes (for UI organization)
+    node_tags: HashMap<NodeId, String>,
 }
 
 impl TuttiNet {
@@ -43,7 +159,13 @@ impl TuttiNet {
     pub(crate) fn new() -> (Self, NetBackend) {
         let mut net = Net::new(0, 2);
         let backend = net.backend();
-        (Self { net }, backend)
+        (
+            Self {
+                net,
+                node_tags: HashMap::new(),
+            },
+            backend,
+        )
     }
 
     #[cfg(all(test, not(feature = "neural"), feature = "midi"))]
@@ -55,6 +177,7 @@ impl TuttiNet {
                 net,
                 midi_connections: Vec::new(),
                 midi_registry: crate::midi_registry::MidiRegistry::new(),
+                node_tags: HashMap::new(),
             },
             backend,
         )
@@ -70,6 +193,7 @@ impl TuttiNet {
                 net,
                 neural_manager: registry.clone(),
                 batching_strategy: None,
+                node_tags: HashMap::new(),
             },
             backend,
             registry,
@@ -88,6 +212,7 @@ impl TuttiNet {
                 midi_registry: crate::midi_registry::MidiRegistry::new(),
                 neural_manager: registry.clone(),
                 batching_strategy: None,
+                node_tags: HashMap::new(),
             },
             backend,
             registry,
@@ -98,7 +223,13 @@ impl TuttiNet {
     pub(crate) fn with_io(inputs: usize, outputs: usize) -> (Self, NetBackend) {
         let mut net = Net::new(inputs, outputs);
         let backend = net.backend();
-        (Self { net }, backend)
+        (
+            Self {
+                net,
+                node_tags: HashMap::new(),
+            },
+            backend,
+        )
     }
 
     #[cfg(all(not(feature = "neural"), feature = "midi"))]
@@ -110,6 +241,7 @@ impl TuttiNet {
                 net,
                 midi_connections: Vec::new(),
                 midi_registry: crate::midi_registry::MidiRegistry::new(),
+                node_tags: HashMap::new(),
             },
             backend,
         )
@@ -128,6 +260,7 @@ impl TuttiNet {
                 net,
                 neural_manager: registry.clone(),
                 batching_strategy: None,
+                node_tags: HashMap::new(),
             },
             backend,
             registry,
@@ -149,6 +282,7 @@ impl TuttiNet {
                 midi_registry: crate::midi_registry::MidiRegistry::new(),
                 neural_manager: registry.clone(),
                 batching_strategy: None,
+                node_tags: HashMap::new(),
             },
             backend,
             registry,
@@ -302,6 +436,8 @@ impl TuttiNet {
     pub fn queue_midi(&mut self, node: NodeId, events: &[crate::midi::MidiEvent]) {
         // Get the AudioUnit ID for this node
         let unit_id = self.net.node(node).get_id();
+        // Ensure the unit's channel exists (no-op if already registered)
+        self.midi_registry.register_unit(unit_id);
         self.midi_registry.queue(unit_id, events);
     }
 
@@ -469,6 +605,137 @@ impl TuttiNet {
         self.net.check();
     }
 
+    // =========================================================================
+    // Node Introspection API
+    // =========================================================================
+
+    /// Get metadata for a specific node
+    pub fn node_info(&self, id: NodeId) -> Option<NodeInfo> {
+        if !self.contains(id) {
+            return None;
+        }
+
+        let unit = self.node(id);
+        Some(NodeInfo {
+            id,
+            name: self
+                .node_tags
+                .get(&id)
+                .map(|s| s.clone())
+                .unwrap_or_else(|| format!("Node {:?}", id)),
+            inputs: unit.inputs(),
+            outputs: unit.outputs(),
+            latency: 0, // Can't call latency() on &self, would need &mut self
+            tag: self.node_tags.get(&id).cloned(),
+            type_name: std::any::type_name_of_val(unit).to_string(),
+        })
+    }
+
+    /// Iterate all nodes in the graph
+    pub fn nodes(&self) -> Vec<NodeInfo> {
+        // Collect all tagged nodes
+        let mut infos = Vec::new();
+        for node_id in self.node_tags.keys() {
+            if let Some(info) = self.node_info(*node_id) {
+                infos.push(info);
+            }
+        }
+        infos
+    }
+
+    /// Get all connections in the graph
+    ///
+    /// Note: This is a best-effort implementation. fundsp's Net doesn't
+    /// expose connection information directly, so we return an empty vector
+    /// for now. This can be improved if fundsp adds connection introspection.
+    pub fn connections(&self) -> Vec<Connection> {
+        // TODO: fundsp's Net doesn't currently expose connection information
+        // This would require changes to fundsp or maintaining our own connection list
+        Vec::new()
+    }
+
+    /// Find terminal nodes (graph outputs)
+    ///
+    /// Returns nodes that are piped to the output.
+    pub fn output_nodes(&self) -> Vec<NodeId> {
+        // TODO: fundsp doesn't expose output node information
+        // For now, return empty. This would require tracking output connections.
+        Vec::new()
+    }
+
+    // =========================================================================
+    // Node Tagging API
+    // =========================================================================
+
+    /// Add a node with a user tag
+    pub fn add_tagged(&mut self, unit: Box<dyn AudioUnit>, tag: impl Into<String>) -> NodeId {
+        let id = self.add(unit);
+        self.node_tags.insert(id, tag.into());
+        id
+    }
+
+    /// Set or update a node's tag
+    pub fn set_tag(&mut self, id: NodeId, tag: impl Into<String>) {
+        self.node_tags.insert(id, tag.into());
+    }
+
+    /// Get a node's tag
+    pub fn get_tag(&self, id: NodeId) -> Option<&str> {
+        self.node_tags.get(&id).map(|s| s.as_str())
+    }
+
+    /// Find a node by tag (first match)
+    pub fn find_by_tag(&self, tag: &str) -> Option<NodeId> {
+        self.node_tags
+            .iter()
+            .find(|(_, t)| t.as_str() == tag)
+            .map(|(id, _)| *id)
+    }
+
+    /// Find all nodes with a given tag
+    pub fn find_all_by_tag(&self, tag: &str) -> Vec<NodeId> {
+        self.node_tags
+            .iter()
+            .filter(|(_, t)| t.as_str() == tag)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
+    /// Remove a node's tag
+    pub fn remove_tag(&mut self, id: NodeId) {
+        self.node_tags.remove(&id);
+    }
+
+    /// Get mutable reference to a node with automatic downcasting
+    ///
+    /// # Example
+    /// ```ignore
+    /// engine.graph(|net| {
+    ///     if let Some(synth) = net.node_mut_typed::<PolySynth>(synth_id) {
+    ///         synth.set_waveform(Waveform::Saw);
+    ///     }
+    /// });
+    /// ```
+    pub fn node_mut_typed<T: AudioUnit + 'static>(&mut self, id: NodeId) -> Option<&mut T> {
+        let unit = self.node_mut(id);
+        <dyn AudioUnit>::as_any_mut(unit).downcast_mut::<T>()
+    }
+
+    /// Get immutable reference to a node with automatic downcasting
+    pub fn node_ref_typed<T: AudioUnit + 'static>(&self, id: NodeId) -> Option<&T> {
+        let unit = self.node(id);
+        <dyn AudioUnit>::as_any(unit).downcast_ref::<T>()
+    }
+
+    /// Try to mutate a node, calling closure if successful
+    pub fn with_node_mut<T, F, R>(&mut self, id: NodeId, f: F) -> Option<R>
+    where
+        T: AudioUnit + 'static,
+        F: FnOnce(&mut T) -> R,
+    {
+        self.node_mut_typed::<T>(id).map(f)
+    }
+
     // NOTE: Dynamics helper functions (keyed_compressor, ducker, etc.) have been moved to tutti-dsp.
     // Users should import SidechainCompressor, SidechainGate from tutti-dsp and use net.add() directly.
 
@@ -523,6 +790,7 @@ impl Default for TuttiNet {
     fn default() -> Self {
         Self {
             net: Net::new(0, 2),
+            node_tags: HashMap::new(),
         }
     }
 }
@@ -534,6 +802,7 @@ impl Default for TuttiNet {
             net: Net::new(0, 2),
             midi_connections: Vec::new(),
             midi_registry: crate::midi_registry::MidiRegistry::new(),
+            node_tags: HashMap::new(),
         }
     }
 }
@@ -545,6 +814,7 @@ impl Default for TuttiNet {
             net: Net::new(0, 2),
             neural_manager: Arc::new(NeuralNodeManager::new()),
             batching_strategy: None,
+            node_tags: HashMap::new(),
         }
     }
 }
@@ -558,6 +828,7 @@ impl Default for TuttiNet {
             midi_registry: crate::midi_registry::MidiRegistry::new(),
             neural_manager: Arc::new(NeuralNodeManager::new()),
             batching_strategy: None,
+            node_tags: HashMap::new(),
         }
     }
 }

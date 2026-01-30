@@ -51,6 +51,9 @@ pub use tutti_core as core;
 
 // Core types
 pub use tutti_core::{
+    get_param,
+    get_param_or,
+
     AtomicAmplitude,
     AtomicDouble,
     AtomicFlag,
@@ -62,6 +65,7 @@ pub use tutti_core::{
     AudioUnit,
     BufferMut,
     BufferRef,
+    Connection,
     CpuMeter,
     CpuMetrics,
 
@@ -76,7 +80,15 @@ pub use tutti_core::{
     MotionState,
     NetBackend,
 
+    NodeConstructor,
     NodeId,
+    // Node introspection
+    NodeInfo,
+    NodeParamValue,
+    NodeParams,
+    // Node registry
+    NodeRegistry,
+    NodeRegistryError,
     PdcDelayUnit,
 
     // PDC
@@ -214,6 +226,15 @@ pub mod prelude {
 
     // Transport
     pub use crate::core::TransportManager;
+
+    // Node registry and introspection
+    pub use crate::core::{
+        get_param, get_param_or, Connection, NodeConstructor, NodeInfo, NodeParamValue, NodeParams,
+        NodeRegistry, NodeRegistryError,
+    };
+
+    // Re-export macros from tutti-core
+    pub use tutti_core::{chain, mix, node, params, split};
 
     // MIDI (optional)
     #[cfg(feature = "midi")]

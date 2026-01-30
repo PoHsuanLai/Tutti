@@ -86,6 +86,14 @@ impl AudioUnit for NeuralEffectNode {
         self.model_id.as_u64()
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
         // Pass through input channels
         input.clone()

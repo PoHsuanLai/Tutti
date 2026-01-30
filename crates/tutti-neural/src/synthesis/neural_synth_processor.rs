@@ -121,6 +121,14 @@ impl AudioUnit for NeuralSynth {
         self.track_id
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         // Neural synth is a source - output stereo
         SignalFrame::new(2)

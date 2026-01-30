@@ -102,14 +102,46 @@ impl AudioEngine {
     {
         let channels = config.channels as usize;
 
+        // Pre-allocate reusable buffers outside the closure.
+        // These grow on the first callback if needed, then never reallocate.
+        let mut output_f32 = Vec::<f32>::new();
+        let mut lufs_left = Vec::<f32>::new();
+        let mut lufs_right = Vec::<f32>::new();
+
         let stream = device.build_output_stream(
             config,
             move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let frames = data.len() / channels;
-                    let mut output_f32 = vec![0.0f32; frames * 2];
 
-                    crate::callback::process_audio(&state, &mut output_f32);
+                    // Reuse pre-allocated buffer (only allocates on first call or size change)
+                    let needed = frames * 2;
+                    if output_f32.len() < needed {
+                        output_f32.resize(needed, 0.0);
+                    } else {
+                        output_f32[..needed].fill(0.0);
+                    }
+
+                    crate::callback::process_audio(&state, &mut output_f32[..needed]);
+
+                    // LUFS metering: pre-allocated buffers + non-blocking try_lock
+                    if state.metering.is_lufs_enabled() {
+                        if lufs_left.len() < frames {
+                            lufs_left.resize(frames, 0.0);
+                        }
+                        if lufs_right.len() < frames {
+                            lufs_right.resize(frames, 0.0);
+                        }
+                        for i in 0..frames {
+                            lufs_left[i] = output_f32[i * 2];
+                            lufs_right[i] = output_f32[i * 2 + 1];
+                        }
+                        // try_lock: skip this callback if UI thread is reading LUFS
+                        if let Ok(mut ebur128) = state.metering.ebur128().try_lock() {
+                            let data: [&[f32]; 2] = [&lufs_left[..frames], &lufs_right[..frames]];
+                            let _ = ebur128.add_frames_planar_f32(&data);
+                        }
+                    }
 
                     for (i, sample) in data.iter_mut().enumerate() {
                         let channel = i % channels;

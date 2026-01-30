@@ -111,7 +111,6 @@ impl BackendPool {
                     required_features: Features::empty(),
                     required_limits: Limits::default(),
                     memory_hints: Default::default(),
-                    experimental_features: wgpu::ExperimentalFeatures::disabled(),
                     trace: Default::default(),
                 })
                 .await

@@ -383,13 +383,13 @@ mod tests {
 
     #[test]
     fn test_sampler_system_creation() {
-        let sampler = SamplerSystem::new(44100.0).build().unwrap();
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
         assert_eq!(sampler.sample_rate(), 44100.0);
     }
 
     #[test]
     fn test_create_capture_session() {
-        let sampler = SamplerSystem::new(44100.0).build().unwrap();
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
         let session = sampler.create_capture("/tmp/test.wav", 44100.0, 2, None);
 
         assert!(!session.is_started());
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_stream_builder() {
-        let sampler = SamplerSystem::new(44100.0).build().unwrap();
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
 
         sampler
             .stream_file(0, "/path/to/file.wav")
@@ -413,7 +413,7 @@ mod tests {
     #[test]
     fn test_tutti_export_compatibility() {
         // Verify that the API needed by tutti-export is exposed
-        let sampler = SamplerSystem::new(44100.0).build().unwrap();
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
 
         // tutti-export needs command_sender() for direct butler communication
         let _command_sender = sampler.command_sender();
@@ -434,7 +434,7 @@ mod tests {
     #[test]
     fn test_all_managers_initialized() {
         // Verify that all managers are properly initialized
-        let sampler = SamplerSystem::new(44100.0).build().unwrap();
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
 
         // Butler thread running
         assert!(sampler.butler.is_some());

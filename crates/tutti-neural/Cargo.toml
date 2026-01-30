@@ -19,7 +19,7 @@ midi-msg = { version = "0.8", default-features = false }
 # ML/GPU framework (using stable crates.io version)
 burn = { version = "0.20", default-features = false, features = ["wgpu", "ndarray", "fusion", "autodiff", "std"] }
 burn-import = { version = "0.20", default-features = false, features = ["onnx-ir"], optional = true }
-wgpu = "28"  # Match Burn's wgpu version (via cubecl-wgpu)
+wgpu = "26"  # Match burn 0.20's wgpu version (26.0.1)
 
 # Lock-free data structures
 crossbeam-channel = "0.5.15"

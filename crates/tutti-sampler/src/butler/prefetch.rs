@@ -5,8 +5,8 @@ use ringbuf::{
     HeapCons, HeapProd, HeapRb,
 };
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use tutti_core::{AtomicU64, Ordering};
 
 use super::request::{CaptureId, RegionId};
 
@@ -87,7 +87,7 @@ unsafe impl Send for RegionBufferProducer {}
 /// Consumer side of a region buffer for audio callback.
 pub struct RegionBufferConsumer {
     cons: HeapCons<(f32, f32)>,
-    read_position: AtomicU64,
+    read_position: Arc<AtomicU64>,
     region_id: RegionId,
 }
 
@@ -132,6 +132,22 @@ impl RegionBufferConsumer {
     pub fn is_empty(&self) -> bool {
         self.cons.is_empty()
     }
+
+    /// Clear all buffered samples without processing them.
+    /// Used for loop resets — much faster than draining one-by-one.
+    pub fn clear(&mut self) {
+        let count = self.cons.occupied_len();
+        for _ in 0..count {
+            let _ = self.cons.try_pop();
+        }
+        self.read_position
+            .fetch_add(count as u64, Ordering::Relaxed);
+    }
+
+    /// Get a shared handle to the read position for lock-free access.
+    pub fn read_position_shared(&self) -> Arc<AtomicU64> {
+        Arc::clone(&self.read_position)
+    }
 }
 
 unsafe impl Send for RegionBufferConsumer {}
@@ -169,7 +185,7 @@ impl RegionBuffer {
 
         let consumer = RegionBufferConsumer {
             cons,
-            read_position: AtomicU64::new(0),
+            read_position: Arc::new(AtomicU64::new(0)),
             region_id,
         };
 

@@ -15,17 +15,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Add a lowpass filter at 800Hz
         let filtered = net.add(Box::new(lowpole_hz::<f64>(800.0)));
-        net.pipe(saw, filtered);
 
         // Convert mono to stereo for the reverb
         let stereo = net.add_split();
-        net.pipe(filtered, stereo);
 
         // Add reverb (simple FDN reverb)
         let reverb = net.add(Box::new(reverb_stereo(10.0, 2.0, 0.5)));
-        net.pipe_all(stereo, reverb);
 
-        // Output
+        // Chain everything together
+        net.pipe(saw, filtered);
+        net.pipe(filtered, stereo);
+        net.pipe_all(stereo, reverb);
         net.pipe_output(reverb);
     });
 

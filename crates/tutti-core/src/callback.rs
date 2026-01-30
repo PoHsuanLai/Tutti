@@ -82,18 +82,8 @@ fn process_audio_inner(state: &AudioCallbackState, output: &mut [f32]) {
         .sample_position
         .fetch_add(frames as u64, Ordering::Relaxed);
 
-    // Update LUFS metering
-    if state.metering.is_lufs_enabled() {
-        if let Ok(mut ebur128) = state.metering.ebur128().lock() {
-            let mut deinterleaved = vec![vec![0.0f32; frames]; 2];
-            for i in 0..frames {
-                deinterleaved[0][i] = output[i * 2];
-                deinterleaved[1][i] = output[i * 2 + 1];
-            }
-            let frames_data: Vec<&[f32]> = deinterleaved.iter().map(|v| v.as_slice()).collect();
-            let _ = ebur128.add_frames_planar_f32(&frames_data);
-        }
-    }
+    // NOTE: LUFS metering is handled in the CPAL callback closure (output/core.rs)
+    // to avoid heap allocations and Mutex locks on the RT thread.
 }
 
 #[cfg(test)]

@@ -27,8 +27,15 @@ pub struct Vst2Instance {
     #[cfg(feature = "vst2")]
     instance: vst::host::PluginInstance,
 
+    /// Kept alive for the `vst` crate's Host trait dispatch (automate, get_time_info, etc.)
     #[cfg(feature = "vst2")]
+    #[allow(dead_code)]
     host: Arc<Mutex<BridgeHost>>,
+
+    /// Shared lock-free time info — updated directly from process_with_transport,
+    /// read lock-free by the plugin via Host::get_time_info.
+    #[cfg(feature = "vst2")]
+    time_info: Arc<arc_swap::ArcSwap<Option<vst::api::TimeInfo>>>,
 
     metadata: PluginMetadata,
     sample_rate: f32,
@@ -46,8 +53,14 @@ impl Vst2Instance {
             // Create channel for parameter automation
             let (param_tx, param_rx) = crossbeam_channel::unbounded();
 
-            // Create host with parameter change sender
-            let host = Arc::new(Mutex::new(BridgeHost::new(param_tx)));
+            // Shared lock-free time info (updated by process_with_transport, read by plugin)
+            let time_info = Arc::new(arc_swap::ArcSwap::from_pointee(None));
+
+            // Create host with parameter change sender and shared time info
+            let host = Arc::new(Mutex::new(BridgeHost::new(
+                param_tx,
+                Arc::clone(&time_info),
+            )));
 
             // Load plugin (clone host since it will be moved into the loader)
             let mut loader = PluginLoader::load(path, Arc::clone(&host))
@@ -76,6 +89,7 @@ impl Vst2Instance {
             Ok(Self {
                 instance,
                 host,
+                time_info,
                 metadata,
                 sample_rate,
                 param_rx,
@@ -299,10 +313,11 @@ impl Vst2Instance {
     ) -> Vec<MidiEvent> {
         #[cfg(feature = "vst2")]
         {
-            // Update transport info in the host before processing
-            if let Ok(host) = self.host.lock() {
-                host.update_time_info(transport, buffer.sample_rate);
-            }
+            // Update transport info lock-free via ArcSwap (no host Mutex needed)
+            self.time_info.store(Arc::new(Some(build_vst2_time_info(
+                transport,
+                buffer.sample_rate,
+            ))));
 
             // Then process with MIDI as usual
             self.process_with_midi(buffer, midi_events)
@@ -446,10 +461,11 @@ impl Vst2Instance {
     ) -> Vec<MidiEvent> {
         #[cfg(feature = "vst2")]
         {
-            // Update transport info in the host before processing
-            if let Ok(host) = self.host.lock() {
-                host.update_time_info(transport, buffer.sample_rate);
-            }
+            // Update transport info lock-free via ArcSwap (no host Mutex needed)
+            self.time_info.store(Arc::new(Some(build_vst2_time_info(
+                transport,
+                buffer.sample_rate,
+            ))));
 
             self.process_with_midi_f64(buffer, midi_events)
         }
@@ -802,60 +818,64 @@ impl Vst2Instance {
     }
 }
 
+/// Build VST2 TimeInfo from transport state.
+#[cfg(feature = "vst2")]
+fn build_vst2_time_info(
+    transport: &crate::protocol::TransportInfo,
+    sample_rate: f32,
+) -> vst::api::TimeInfo {
+    let mut flags = 0i32;
+
+    if transport.playing {
+        flags |= 1 << 1; // kVstTransportPlaying
+    }
+    if transport.recording {
+        flags |= 1 << 6; // kVstTransportRecording
+    }
+    if transport.cycle_active {
+        flags |= 1 << 2; // kVstTransportCycleActive
+    }
+
+    // Always valid fields
+    flags |= 1 << 0; // kVstTransportChanged
+    flags |= 1 << 9; // kVstTempoValid
+    flags |= 1 << 10; // kVstTimeSigValid
+    flags |= 1 << 11; // kVstPpqPosValid
+    flags |= 1 << 13; // kVstBarsValid
+
+    vst::api::TimeInfo {
+        sample_rate: sample_rate as f64,
+        sample_pos: transport.position_samples as f64,
+        ppq_pos: transport.position_quarters,
+        tempo: transport.tempo,
+        bar_start_pos: transport.bar_position_quarters,
+        cycle_start_pos: transport.cycle_start_quarters,
+        cycle_end_pos: transport.cycle_end_quarters,
+        time_sig_numerator: transport.time_sig_numerator,
+        time_sig_denominator: transport.time_sig_denominator,
+        flags,
+        ..Default::default()
+    }
+}
+
 /// Host implementation for VST2 plugins
 #[cfg(feature = "vst2")]
 struct BridgeHost {
     /// Channel for sending parameter changes to main thread
     param_tx: crossbeam_channel::Sender<ParameterChange>,
-    /// Current transport/timing information
-    time_info: Arc<Mutex<Option<vst::api::TimeInfo>>>,
+    /// Lock-free transport/timing information (shared with Vst2Instance)
+    time_info: Arc<arc_swap::ArcSwap<Option<vst::api::TimeInfo>>>,
 }
 
 #[cfg(feature = "vst2")]
 impl BridgeHost {
-    fn new(param_tx: crossbeam_channel::Sender<ParameterChange>) -> Self {
+    fn new(
+        param_tx: crossbeam_channel::Sender<ParameterChange>,
+        time_info: Arc<arc_swap::ArcSwap<Option<vst::api::TimeInfo>>>,
+    ) -> Self {
         Self {
             param_tx,
-            time_info: Arc::new(Mutex::new(None)),
-        }
-    }
-
-    fn update_time_info(&self, transport: &crate::protocol::TransportInfo, sample_rate: f32) {
-        let mut flags = 0i32;
-
-        if transport.playing {
-            flags |= 1 << 1; // kVstTransportPlaying
-        }
-        if transport.recording {
-            flags |= 1 << 6; // kVstTransportRecording
-        }
-        if transport.cycle_active {
-            flags |= 1 << 2; // kVstTransportCycleActive
-        }
-
-        // Always valid fields
-        flags |= 1 << 0; // kVstTransportChanged
-        flags |= 1 << 9; // kVstTempoValid
-        flags |= 1 << 10; // kVstTimeSigValid
-        flags |= 1 << 11; // kVstPpqPosValid
-        flags |= 1 << 13; // kVstBarsValid
-
-        let time_info = vst::api::TimeInfo {
-            sample_rate: sample_rate as f64,
-            sample_pos: transport.position_samples as f64,
-            ppq_pos: transport.position_quarters,
-            tempo: transport.tempo,
-            bar_start_pos: transport.bar_position_quarters,
-            cycle_start_pos: transport.cycle_start_quarters,
-            cycle_end_pos: transport.cycle_end_quarters,
-            time_sig_numerator: transport.time_sig_numerator,
-            time_sig_denominator: transport.time_sig_denominator,
-            flags,
-            ..Default::default()
-        };
-
-        if let Ok(mut info) = self.time_info.lock() {
-            *info = Some(time_info);
+            time_info,
         }
     }
 }
@@ -877,8 +897,8 @@ impl Host for BridgeHost {
     }
 
     fn get_time_info(&self, _mask: i32) -> Option<vst::api::TimeInfo> {
-        // Return current transport/timing info if available
-        self.time_info.lock().ok().and_then(|info| *info)
+        // Lock-free read of transport info
+        **self.time_info.load()
     }
 }
 

@@ -72,6 +72,8 @@ pub struct SpatialPannerNode {
     width_atomic: AtomicU32,
     /// Sample rate
     sample_rate: f32,
+    /// Pre-allocated scratch buffer for process() output (avoids per-frame allocation)
+    scratch_output: Vec<f32>,
 }
 
 impl Clone for SpatialPannerNode {
@@ -103,6 +105,7 @@ impl Clone for SpatialPannerNode {
             spread_atomic: AtomicU32::new(self.spread_atomic.load(Ordering::Relaxed)),
             width_atomic: AtomicU32::new(self.width_atomic.load(Ordering::Relaxed)),
             sample_rate: self.sample_rate,
+            scratch_output: vec![0.0; self.num_outputs],
         }
     }
 }
@@ -148,6 +151,7 @@ impl SpatialPannerNode {
             spread_atomic: AtomicU32::new(0.0_f32.to_bits()),
             width_atomic: AtomicU32::new(1.0_f32.to_bits()),
             sample_rate: 48000.0,
+            scratch_output: vec![0.0; num_outputs],
         }
     }
 
@@ -255,8 +259,10 @@ impl AudioUnit for SpatialPannerNode {
         let width = f32::from_bits(self.width_atomic.load(Ordering::Relaxed));
         let num_outputs = self.num_outputs;
 
-        // Temporary buffer for per-sample output
-        let mut sample_output = vec![0.0f32; num_outputs];
+        // Resize scratch buffer if needed (only on first call or config change)
+        if self.scratch_output.len() < num_outputs {
+            self.scratch_output.resize(num_outputs, 0.0);
+        }
 
         for i in 0..size {
             let left = input.at_f32(0, i);
@@ -267,9 +273,9 @@ impl AudioUnit for SpatialPannerNode {
             };
 
             self.panner
-                .process_stereo_into(left, right, width, &mut sample_output);
+                .process_stereo_into(left, right, width, &mut self.scratch_output);
 
-            for (ch, &sample) in sample_output.iter().enumerate() {
+            for (ch, &sample) in self.scratch_output.iter().enumerate() {
                 if ch < num_outputs {
                     output.set_f32(ch, i, sample);
                 }

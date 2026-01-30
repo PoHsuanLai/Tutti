@@ -6,7 +6,6 @@
 //! - Polyphonic voice management
 //! - MIDI input via MidiRegistry
 
-use std::collections::HashMap;
 use tutti_core::{AudioUnit, BufferMut, BufferRef, Setting, SignalFrame};
 
 /// Oscillator waveform type
@@ -166,12 +165,16 @@ pub struct PolySynth {
     envelope: Envelope,
     sample_rate: f32,
 
-    // MIDI note tracking
-    active_notes: HashMap<u8, usize>, // note -> voice index
+    // MIDI note tracking (fixed-size array indexed by note 0-127, avoids HashMap allocations)
+    active_notes: [Option<usize>; 128],
 
     // MIDI registry for polling events
     #[cfg(feature = "midi")]
     midi_registry: Option<tutti_core::MidiRegistry>,
+
+    // Pre-allocated scratch buffer for RT-safe MIDI polling
+    #[cfg(feature = "midi")]
+    midi_buffer: Vec<tutti_core::MidiEvent>,
 }
 
 impl PolySynth {
@@ -183,10 +186,12 @@ impl PolySynth {
             waveform: Waveform::Saw,
             envelope: Envelope::default(),
             sample_rate,
-            active_notes: HashMap::new(),
+            active_notes: [None; 128],
 
             #[cfg(feature = "midi")]
             midi_registry: None,
+            #[cfg(feature = "midi")]
+            midi_buffer: Vec::new(),
         }
     }
 
@@ -208,8 +213,12 @@ impl PolySynth {
             waveform: Waveform::Saw,
             envelope: Envelope::default(),
             sample_rate,
-            active_notes: HashMap::new(),
+            active_notes: [None; 128],
             midi_registry: Some(midi_registry),
+            midi_buffer: {
+                let placeholder = tutti_core::MidiEvent::note_on_builder(0, 0).build();
+                vec![placeholder; 256]
+            },
         }
     }
 
@@ -242,20 +251,22 @@ impl PolySynth {
             self.voices[voice_idx] = Voice::new(note, velocity, self.sample_rate);
         }
 
-        self.active_notes.insert(note, voice_idx);
+        self.active_notes[note as usize] = Some(voice_idx);
     }
 
     /// Trigger a note off
     pub fn note_off(&mut self, note: u8) {
-        if let Some(&voice_idx) = self.active_notes.get(&note) {
+        if let Some(voice_idx) = self.active_notes[note as usize] {
             if voice_idx < self.voices.len() {
                 self.voices[voice_idx].release();
             }
-            self.active_notes.remove(&note);
+            self.active_notes[note as usize] = None;
         }
     }
 
-    /// Poll for MIDI events from the registry and process them
+    /// Poll for MIDI events from the registry and process them (RT-safe).
+    ///
+    /// Uses `poll_into()` with a pre-allocated buffer — zero heap allocations.
     #[cfg(feature = "midi")]
     fn poll_midi_events(&mut self) {
         use tutti_midi::RawMidiEvent;
@@ -263,10 +274,10 @@ impl PolySynth {
         // Poll events from the registry using our get_id()
         if let Some(ref registry) = self.midi_registry {
             let unit_id = self.get_id();
-            let events = registry.poll(unit_id);
+            let count = registry.poll_into(unit_id, &mut self.midi_buffer);
 
-            for event in events {
-                let raw: RawMidiEvent = event.into();
+            for i in 0..count {
+                let raw: RawMidiEvent = self.midi_buffer[i].into();
                 let status = raw.data[0];
                 let data1 = raw.data[1];
                 let data2 = raw.data[2];
@@ -294,7 +305,7 @@ impl PolySynth {
 impl AudioUnit for PolySynth {
     fn reset(&mut self) {
         self.voices.clear();
-        self.active_notes.clear();
+        self.active_notes.fill(None);
     }
 
     fn set_sample_rate(&mut self, sample_rate: f64) {

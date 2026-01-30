@@ -1,78 +1,167 @@
-//! Global MIDI event registry for routing MIDI to nodes
+//! RT-safe MIDI event registry for routing MIDI to audio graph nodes.
 //!
-//! This provides a lock-free way to send MIDI events to nodes in the audio graph
-//! without requiring trait downcasting or complex lifetime management.
+//! Uses bounded SPSC channels per unit for lock-free poll on the audio thread.
+//! The DashMap is only accessed via `get()` (read shard lock) — write locks
+//! only occur during `register_unit()` which runs at setup time, never on
+//! the audio thread.
 
+use crossbeam_channel::{Receiver, Sender};
 use dashmap::DashMap;
 use std::sync::Arc;
 
 use crate::midi::MidiEvent;
 
-/// Thread-safe registry for MIDI events destined for specific nodes.
+/// Maximum number of MIDI events buffered per unit per audio cycle.
+///
+/// 256 events covers extreme scenarios (full keyboard glissando + sustain + mod wheel).
+/// If the channel is full, `queue()` drops events (producer back-pressure).
+const EVENTS_PER_UNIT: usize = 256;
+
+/// Per-unit MIDI event slot backed by a bounded SPSC channel.
+struct MidiEventSlot {
+    tx: Sender<MidiEvent>,
+    rx: Receiver<MidiEvent>,
+}
+
+impl MidiEventSlot {
+    fn new() -> Self {
+        let (tx, rx) = crossbeam_channel::bounded(EVENTS_PER_UNIT);
+        Self { tx, rx }
+    }
+}
+
+/// RT-safe registry for MIDI events destined for specific audio graph nodes.
 ///
 /// Nodes poll this registry during their `process()` call to receive MIDI events.
-/// The registry uses AudioUnit::get_id() as the lookup key, so nodes don't need
-/// to know their NodeId.
+/// The registry uses `AudioUnit::get_id()` as the lookup key.
+///
+/// # RT Safety
+///
+/// - `poll()` / `poll_into()`: Called on the audio thread. Uses `DashMap::get()`
+///   (read shard lock — no contention with other readers) + `try_recv()` (lock-free).
+///   No heap allocations. No blocking.
+/// - `queue()`: Called from the UI/frontend thread. Uses `DashMap::get()` +
+///   `try_send()` (lock-free). Falls back to `entry()` (write lock) only if
+///   the unit was never registered — this should not happen on the audio thread path.
+/// - `register_unit()`: Called at setup time to pre-create the channel.
 #[derive(Clone)]
 pub struct MidiRegistry {
-    /// Map of AudioUnit ID -> pending MIDI events
-    events: Arc<DashMap<u64, Vec<MidiEvent>>>,
+    slots: Arc<DashMap<u64, Arc<MidiEventSlot>>>,
 }
 
 impl MidiRegistry {
-    /// Create a new empty MIDI registry
+    /// Create a new empty MIDI registry.
     pub fn new() -> Self {
         Self {
-            events: Arc::new(DashMap::new()),
+            slots: Arc::new(DashMap::new()),
         }
     }
 
-    /// Queue MIDI events for a specific audio unit
+    /// Pre-register a unit so its channel exists before audio processing starts.
     ///
-    /// Events will be available for the node to poll in the next audio cycle.
-    ///
-    /// # Arguments
-    /// * `unit_id` - The AudioUnit::get_id() value to send events to
-    /// * `events` - Slice of MIDI events to queue
-    pub fn queue(&self, unit_id: u64, events: &[MidiEvent]) {
-        self.events
+    /// Call this at setup time (not on the audio thread). If the unit is already
+    /// registered, this is a no-op.
+    pub fn register_unit(&self, unit_id: u64) {
+        self.slots
             .entry(unit_id)
-            .or_insert_with(Vec::new)
-            .extend_from_slice(events);
+            .or_insert_with(|| Arc::new(MidiEventSlot::new()));
     }
 
-    /// Poll for MIDI events for a specific audio unit
+    /// Remove a unit's channel (cleanup on teardown).
+    pub fn unregister_unit(&self, unit_id: u64) {
+        self.slots.remove(&unit_id);
+    }
+
+    /// Queue MIDI events for a specific audio unit.
     ///
-    /// This should be called from the node's `process()` method.
-    /// Returns all pending events for this node and clears them.
+    /// Called from the UI/frontend thread. Events are available to `poll()` immediately.
+    /// If the channel is full, excess events are silently dropped (back-pressure).
     ///
-    /// # Arguments
-    /// * `unit_id` - The AudioUnit::get_id() value to poll events for
+    /// If the unit has not been registered, it is auto-registered (involves a write
+    /// lock on the DashMap shard — safe on the UI thread, but avoid calling this
+    /// from the audio thread for unregistered units).
+    pub fn queue(&self, unit_id: u64, events: &[MidiEvent]) {
+        // Fast path: unit already registered (read lock only)
+        if let Some(slot) = self.slots.get(&unit_id) {
+            for &event in events {
+                // try_send is lock-free; drops event if channel full
+                let _ = slot.tx.try_send(event);
+            }
+            return;
+        }
+
+        // Slow path: auto-register (write lock — UI thread only)
+        let slot = self
+            .slots
+            .entry(unit_id)
+            .or_insert_with(|| Arc::new(MidiEventSlot::new()));
+        for &event in events {
+            let _ = slot.tx.try_send(event);
+        }
+    }
+
+    /// Poll for MIDI events (RT-safe, returns count written to buffer).
     ///
-    /// # Returns
-    /// Vector of MIDI events, or empty if none pending
+    /// Drains all pending events into the provided buffer. Returns the number
+    /// of events written. Zero allocations, no blocking.
+    ///
+    /// This is the preferred API for the audio thread.
+    pub fn poll_into(&self, unit_id: u64, buffer: &mut [MidiEvent]) -> usize {
+        let slot = match self.slots.get(&unit_id) {
+            Some(s) => s,
+            None => return 0,
+        };
+
+        let mut count = 0;
+        for slot_ref in buffer.iter_mut() {
+            match slot.rx.try_recv() {
+                Ok(event) => {
+                    *slot_ref = event;
+                    count += 1;
+                }
+                Err(_) => break,
+            }
+        }
+        count
+    }
+
+    /// Poll for MIDI events (convenience wrapper, allocates).
+    ///
+    /// Returns a `Vec` of all pending events. This allocates on every call —
+    /// prefer `poll_into()` on the audio thread with a pre-allocated buffer.
     pub fn poll(&self, unit_id: u64) -> Vec<MidiEvent> {
-        self.events
-            .remove(&unit_id)
-            .map(|(_, events)| events)
-            .unwrap_or_default()
+        let slot = match self.slots.get(&unit_id) {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        let mut events = Vec::new();
+        while let Ok(event) = slot.rx.try_recv() {
+            events.push(event);
+        }
+        events
     }
 
-    /// Check if an audio unit has pending MIDI events
+    /// Check if an audio unit has pending MIDI events.
     pub fn has_events(&self, unit_id: u64) -> bool {
-        self.events.contains_key(&unit_id)
+        self.slots
+            .get(&unit_id)
+            .map(|slot| !slot.rx.is_empty())
+            .unwrap_or(false)
     }
 
-    /// Clear all pending MIDI events
+    /// Clear all pending MIDI events across all units.
     ///
-    /// This is called when resetting the audio graph.
+    /// Called when resetting the audio graph.
     pub fn clear(&self) {
-        self.events.clear();
+        for slot in self.slots.iter() {
+            while slot.rx.try_recv().is_ok() {}
+        }
     }
 
-    /// Get the number of nodes with pending events
+    /// Get the number of units with pending events.
     pub fn pending_count(&self) -> usize {
-        self.events.len()
+        self.slots.iter().filter(|slot| !slot.rx.is_empty()).count()
     }
 }
 
@@ -86,15 +175,24 @@ impl Default for MidiRegistry {
 mod tests {
     use super::*;
 
+    fn note_on(note: u8, vel: u8) -> MidiEvent {
+        MidiEvent::note_on_builder(note, vel).build()
+    }
+
+    fn note_off(note: u8) -> MidiEvent {
+        MidiEvent::note_off_builder(note).build()
+    }
+
+    fn note_on_at(note: u8, vel: u8, offset: usize) -> MidiEvent {
+        MidiEvent::note_on_builder(note, vel).offset(offset).build()
+    }
+
     #[test]
     fn test_queue_and_poll() {
         let registry = MidiRegistry::new();
         let unit_id = 12345u64;
 
-        let events = vec![
-            MidiEvent::note_on(0, 60, 100, 0),
-            MidiEvent::note_off(0, 60, 0, 480),
-        ];
+        let events = vec![note_on(60, 100), note_off(60)];
 
         registry.queue(unit_id, &events);
         assert!(registry.has_events(unit_id));
@@ -110,8 +208,8 @@ mod tests {
         let unit1 = 111u64;
         let unit2 = 222u64;
 
-        registry.queue(unit1, &[MidiEvent::note_on(0, 60, 100, 0)]);
-        registry.queue(unit2, &[MidiEvent::note_on(0, 64, 100, 0)]);
+        registry.queue(unit1, &[note_on(60, 100)]);
+        registry.queue(unit2, &[note_on(64, 100)]);
 
         assert_eq!(registry.pending_count(), 2);
 
@@ -122,5 +220,54 @@ mod tests {
         let events2 = registry.poll(unit2);
         assert_eq!(events2.len(), 1);
         assert_eq!(registry.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_poll_into_rt_safe() {
+        let registry = MidiRegistry::new();
+        let unit_id = 42u64;
+        registry.register_unit(unit_id);
+
+        registry.queue(
+            unit_id,
+            &[note_on(60, 100), note_on(64, 100), note_on(67, 100)],
+        );
+
+        // Pre-allocated buffer (simulating audio thread usage)
+        let mut buffer = [note_on(0, 0); 16];
+        let count = registry.poll_into(unit_id, &mut buffer);
+        assert_eq!(count, 3);
+        assert!(!registry.has_events(unit_id));
+    }
+
+    #[test]
+    fn test_register_unregister() {
+        let registry = MidiRegistry::new();
+        let unit_id = 99u64;
+
+        registry.register_unit(unit_id);
+        registry.queue(unit_id, &[note_on(60, 100)]);
+        assert!(registry.has_events(unit_id));
+
+        registry.unregister_unit(unit_id);
+        // After unregister, poll returns empty
+        let events = registry.poll(unit_id);
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn test_backpressure() {
+        let registry = MidiRegistry::new();
+        let unit_id = 1u64;
+        registry.register_unit(unit_id);
+
+        // Flood with more events than channel capacity
+        let events: Vec<_> = (0..512).map(|i| note_on((i % 128) as u8, 100)).collect();
+        registry.queue(unit_id, &events);
+
+        // Should get at most EVENTS_PER_UNIT events
+        let polled = registry.poll(unit_id);
+        assert!(polled.len() <= super::EVENTS_PER_UNIT);
+        assert!(!polled.is_empty());
     }
 }

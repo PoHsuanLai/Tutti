@@ -4,6 +4,8 @@
 //! let system = TuttiSystem::builder().build()?;
 //! ```
 
+// Macros are defined in other modules and automatically available
+
 pub mod error;
 pub use error::{Error, Result};
 
@@ -39,7 +41,13 @@ pub use fundsp::wave::Wave;
 // Essential types for Net usage
 pub use fundsp::net::{NodeId, Source};
 pub use fundsp::realnet::NetBackend;
-pub use net_frontend::TuttiNet;
+pub use net_frontend::{Connection, NodeInfo, TuttiNet};
+
+// Node registry for dynamic node creation
+pub use registry::{
+    get_param, get_param_or, NodeConstructor, NodeParamValue, NodeParams, NodeRegistry,
+    NodeRegistryError,
+};
 
 // MIDI support (requires "midi" feature)
 #[cfg(feature = "midi")]
@@ -100,6 +108,7 @@ pub(crate) mod metering;
 mod net_frontend;
 pub(crate) mod output;
 pub(crate) mod pdc;
+pub mod registry;
 pub(crate) mod transport;
 
 #[cfg(feature = "midi")]

@@ -84,6 +84,8 @@ pub struct PluginClient {
     tick_f64: TickBuffer<f64>,
     midi_producer: Arc<UnsafeCell<ringbuf::HeapProd<MidiEvent>>>,
     midi_consumer: Arc<UnsafeCell<ringbuf::HeapCons<MidiEvent>>>,
+    /// Pre-allocated buffer for RT-safe MIDI event draining (avoids per-call allocation)
+    midi_drain_buffer: Vec<MidiEvent>,
 }
 
 // Safety: SPSC queues - producer and consumer never accessed concurrently
@@ -203,6 +205,7 @@ impl PluginClient {
             tick_f64: TickBuffer::new(inputs, outputs),
             midi_producer,
             midi_consumer,
+            midi_drain_buffer: Vec::with_capacity(64),
         };
 
         let handle = PluginClientHandle {
@@ -259,13 +262,12 @@ impl PluginClient {
         }
     }
 
-    fn drain_midi_events(&self) -> Vec<MidiEvent> {
+    fn drain_midi_events(&mut self) {
         let cons = unsafe { &mut *self.midi_consumer.get() };
-        let mut events = Vec::with_capacity(64);
+        self.midi_drain_buffer.clear();
         while let Some(event) = cons.try_pop() {
-            events.push(event);
+            self.midi_drain_buffer.push(event);
         }
-        events
     }
 
     fn flush_tick_f32(&mut self) {
@@ -273,6 +275,9 @@ impl PluginClient {
         if size == 0 {
             return;
         }
+
+        // Drain MIDI events before borrowing bridge (avoids borrow conflict)
+        self.drain_midi_events();
 
         let bridge = match &self.bridge {
             Some(b) => b,
@@ -332,8 +337,7 @@ impl PluginClient {
             return;
         }
 
-        let midi_events = self.drain_midi_events();
-        let success = bridge.process_rt_with_midi(size, &midi_events);
+        let success = bridge.process_rt_with_midi(size, &self.midi_drain_buffer);
 
         if success {
             match self.negotiated_format {
@@ -387,6 +391,9 @@ impl PluginClient {
         if size == 0 {
             return;
         }
+
+        // Drain MIDI events before borrowing bridge (avoids borrow conflict)
+        self.drain_midi_events();
 
         let bridge = match &self.bridge {
             Some(b) => b,
@@ -445,8 +452,7 @@ impl PluginClient {
             return;
         }
 
-        let midi_events = self.drain_midi_events();
-        let success = bridge.process_rt_with_midi(size, &midi_events);
+        let success = bridge.process_rt_with_midi(size, &self.midi_drain_buffer);
 
         if success {
             match self.negotiated_format {
@@ -548,6 +554,9 @@ impl AudioUnit for PluginClient {
     }
 
     fn process(&mut self, size: usize, input: &BufferRef, output: &mut BufferMut) {
+        // Drain MIDI events before borrowing bridge (avoids borrow conflict)
+        self.drain_midi_events();
+
         let bridge = match &self.bridge {
             Some(b) => b,
             None => {
@@ -555,8 +564,6 @@ impl AudioUnit for PluginClient {
                 return;
             }
         };
-
-        let midi_events = self.drain_midi_events();
 
         match self.negotiated_format {
             SampleFormat::Float64 => {
@@ -574,7 +581,7 @@ impl AudioUnit for PluginClient {
                     }
                 }
 
-                let success = bridge.process_rt_with_midi(size, &midi_events);
+                let success = bridge.process_rt_with_midi(size, &self.midi_drain_buffer);
 
                 if success {
                     for ch in 0..self.outputs {
@@ -611,7 +618,7 @@ impl AudioUnit for PluginClient {
                     }
                 }
 
-                let success = bridge.process_rt_with_midi(size, &midi_events);
+                let success = bridge.process_rt_with_midi(size, &self.midi_drain_buffer);
 
                 if success {
                     for ch in 0..self.outputs {
@@ -710,6 +717,9 @@ impl AudioUnit<F64> for PluginClient {
     }
 
     fn process(&mut self, size: usize, input: &BufferRef<F64>, output: &mut BufferMut<F64>) {
+        // Drain MIDI events before borrowing bridge (avoids borrow conflict)
+        self.drain_midi_events();
+
         let bridge = match &self.bridge {
             Some(b) => b,
             None => {
@@ -717,8 +727,6 @@ impl AudioUnit<F64> for PluginClient {
                 return;
             }
         };
-
-        let midi_events = self.drain_midi_events();
 
         match self.negotiated_format {
             SampleFormat::Float64 => {
@@ -736,7 +744,7 @@ impl AudioUnit<F64> for PluginClient {
                     }
                 }
 
-                let success = bridge.process_rt_with_midi(size, &midi_events);
+                let success = bridge.process_rt_with_midi(size, &self.midi_drain_buffer);
 
                 if success {
                     for ch in 0..self.outputs {
@@ -774,7 +782,7 @@ impl AudioUnit<F64> for PluginClient {
                     }
                 }
 
-                let success = bridge.process_rt_with_midi(size, &midi_events);
+                let success = bridge.process_rt_with_midi(size, &self.midi_drain_buffer);
 
                 if success {
                     for ch in 0..self.outputs {

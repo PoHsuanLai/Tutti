@@ -35,6 +35,12 @@ pub struct TimeStretchUnit {
 
     /// Intermediate buffer for source output
     source_buffer: Vec<f32>,
+
+    /// Pre-allocated scratch buffers for process() (avoids per-frame allocations)
+    scratch_left: Vec<f32>,
+    scratch_right: Vec<f32>,
+    scratch_out_left: Vec<f32>,
+    scratch_out_right: Vec<f32>,
 }
 
 impl TimeStretchUnit {
@@ -66,6 +72,10 @@ impl TimeStretchUnit {
             _algorithm: TimeStretchAlgorithm::PhaseLocked,
             sample_rate,
             source_buffer: vec![0.0; 2], // Stereo output
+            scratch_left: Vec::new(),
+            scratch_right: Vec::new(),
+            scratch_out_left: Vec::new(),
+            scratch_out_right: Vec::new(),
         }
     }
 
@@ -177,6 +187,10 @@ impl Clone for TimeStretchUnit {
             _algorithm: self._algorithm,
             sample_rate: self.sample_rate,
             source_buffer: self.source_buffer.clone(),
+            scratch_left: self.scratch_left.clone(),
+            scratch_right: self.scratch_right.clone(),
+            scratch_out_left: self.scratch_out_left.clone(),
+            scratch_out_right: self.scratch_out_right.clone(),
         }
     }
 }
@@ -249,11 +263,15 @@ impl AudioUnit for TimeStretchUnit {
     }
 
     fn process(&mut self, size: usize, input: &BufferRef, output: &mut BufferMut) {
-        // Collect source samples
-        let mut source_left = vec![0.0f32; size];
-        let mut source_right = vec![0.0f32; size];
+        // Resize scratch buffers if needed (stable after first call)
+        if self.scratch_left.len() < size {
+            self.scratch_left.resize(size, 0.0);
+            self.scratch_right.resize(size, 0.0);
+            self.scratch_out_left.resize(size, 0.0);
+            self.scratch_out_right.resize(size, 0.0);
+        }
 
-        // Process source
+        // Collect source samples
         let has_inputs = self.source.inputs() > 0;
         let mut input_sample = [0.0f32];
         for i in 0..size {
@@ -263,8 +281,8 @@ impl AudioUnit for TimeStretchUnit {
             } else {
                 self.source.tick(&[], &mut self.source_buffer);
             }
-            source_left[i] = self.source_buffer[0];
-            source_right[i] = if self.source_buffer.len() >= 2 {
+            self.scratch_left[i] = self.source_buffer[0];
+            self.scratch_right[i] = if self.source_buffer.len() >= 2 {
                 self.source_buffer[1]
             } else {
                 self.source_buffer[0]
@@ -274,8 +292,8 @@ impl AudioUnit for TimeStretchUnit {
         if !self.is_processing() {
             // Passthrough mode
             for i in 0..size {
-                output.set_f32(0, i, source_left[i]);
-                output.set_f32(1, i, source_right[i]);
+                output.set_f32(0, i, self.scratch_left[i]);
+                output.set_f32(1, i, self.scratch_right[i]);
             }
             return;
         }
@@ -285,24 +303,44 @@ impl AudioUnit for TimeStretchUnit {
         let pitch_ratio = self.pitch_ratio();
 
         // Push all source samples to processors
-        self.processor_left.push_input(&source_left);
-        self.processor_right.push_input(&source_right);
+        self.processor_left.push_input(&self.scratch_left[..size]);
+        self.processor_right.push_input(&self.scratch_right[..size]);
 
         // Process
         self.processor_left.process(stretch, pitch_ratio);
         self.processor_right.process(stretch, pitch_ratio);
 
         // Pop output
-        let mut out_left = vec![0.0f32; size];
-        let mut out_right = vec![0.0f32; size];
+        self.scratch_out_left[..size].fill(0.0);
+        self.scratch_out_right[..size].fill(0.0);
 
-        let left_count = self.processor_left.pop_output(&mut out_left);
-        let right_count = self.processor_right.pop_output(&mut out_right);
+        let left_count = self
+            .processor_left
+            .pop_output(&mut self.scratch_out_left[..size]);
+        let right_count = self
+            .processor_right
+            .pop_output(&mut self.scratch_out_right[..size]);
 
         // Write to output buffer
         for i in 0..size {
-            output.set_f32(0, i, if i < left_count { out_left[i] } else { 0.0 });
-            output.set_f32(1, i, if i < right_count { out_right[i] } else { 0.0 });
+            output.set_f32(
+                0,
+                i,
+                if i < left_count {
+                    self.scratch_out_left[i]
+                } else {
+                    0.0
+                },
+            );
+            output.set_f32(
+                1,
+                i,
+                if i < right_count {
+                    self.scratch_out_right[i]
+                } else {
+                    0.0
+                },
+            );
         }
     }
 
