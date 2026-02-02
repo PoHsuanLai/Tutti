@@ -103,6 +103,7 @@ pub use neural::{
 pub type VoiceId = u64;
 
 // Module declarations
+#[cfg(feature = "std")]
 pub(crate) mod callback;
 pub(crate) mod compat;
 pub(crate) mod lockfree;

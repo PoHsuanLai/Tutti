@@ -1,4 +1,7 @@
-use crate::compat::{any, Arc, Box, HashMap, String, ToString, Vec};
+use crate::compat::{any, Box, HashMap, String, ToString, Vec};
+
+#[cfg(feature = "neural")]
+use crate::compat::Arc;
 use fundsp::net::{Net, NodeId, Source};
 use fundsp::prelude::AudioUnit;
 use fundsp::realnet::NetBackend;

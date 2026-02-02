@@ -1,7 +1,10 @@
 //! Tutti system - unified audio engine with transport, metering, and DSP graph.
 
+#[cfg(feature = "std")]
 use crate::callback::AudioCallbackState;
-use crate::compat::{Arc, Mutex, String, Vec};
+use crate::compat::{Arc, Mutex};
+#[cfg(feature = "std")]
+use crate::compat::{String, Vec};
 use crate::error::Result;
 use crate::metering::MeteringManager;
 use crate::net_frontend::TuttiNet;
