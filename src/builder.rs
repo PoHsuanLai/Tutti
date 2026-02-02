@@ -15,15 +15,26 @@ use crate::neural::NeuralSystem;
 
 /// Builder for TuttiEngine
 ///
+/// Subsystems (sampler, neural, soundfont) are automatically enabled when their
+/// corresponding Cargo features are compiled. MIDI requires explicit opt-in via
+/// `.midi()` to connect hardware devices.
+///
 /// # Example
 ///
 /// ```ignore
 /// use tutti::prelude::*;
 ///
+/// // Enable features in Cargo.toml:
+/// // tutti = { version = "...", features = ["sampler", "neural"] }
+///
 /// let engine = TuttiEngine::builder()
 ///     .sample_rate(48000.0)
 ///     .outputs(2)
 ///     .build()?;
+///
+/// // Subsystems are ready to use
+/// let sampler = engine.sampler();
+/// let neural = engine.neural();
 /// ```
 pub struct TuttiEngineBuilder {
     sample_rate: Option<f64>,
@@ -33,12 +44,6 @@ pub struct TuttiEngineBuilder {
 
     #[cfg(feature = "midi")]
     enable_midi: bool,
-
-    #[cfg(feature = "sampler")]
-    enable_sampler: bool,
-
-    #[cfg(feature = "neural")]
-    enable_neural: bool,
 
     #[cfg(feature = "plugin")]
     plugin_runtime: Option<tokio::runtime::Handle>,
@@ -54,12 +59,6 @@ impl Default for TuttiEngineBuilder {
 
             #[cfg(feature = "midi")]
             enable_midi: false,
-
-            #[cfg(feature = "sampler")]
-            enable_sampler: false,
-
-            #[cfg(feature = "neural")]
-            enable_neural: false,
 
             #[cfg(feature = "plugin")]
             plugin_runtime: None,
@@ -96,20 +95,6 @@ impl TuttiEngineBuilder {
     #[cfg(feature = "midi")]
     pub fn midi(mut self) -> Self {
         self.enable_midi = true;
-        self
-    }
-
-    /// Enable sampler subsystem
-    #[cfg(feature = "sampler")]
-    pub fn sampler(mut self) -> Self {
-        self.enable_sampler = true;
-        self
-    }
-
-    /// Enable neural subsystem
-    #[cfg(feature = "neural")]
-    pub fn neural(mut self) -> Self {
-        self.enable_neural = true;
         self
     }
 
@@ -157,31 +142,25 @@ impl TuttiEngineBuilder {
             None
         };
 
+        // Build sampler subsystem (always enabled when feature is compiled)
         #[cfg(feature = "sampler")]
-        let sampler = if self.enable_sampler {
-            Some(
-                SamplerSystem::builder(sample_rate)
-                    .build()
-                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
-            )
-        } else {
-            None
-        };
+        let sampler = Arc::new(
+            SamplerSystem::builder(sample_rate)
+                .build()
+                .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+        );
 
+        // Build neural subsystem (always enabled when feature is compiled)
         #[cfg(feature = "neural")]
-        let neural = if self.enable_neural {
-            Some(
-                NeuralSystem::builder()
-                    .build()
-                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
-            )
-        } else {
-            None
-        };
+        let neural = Arc::new(
+            NeuralSystem::builder()
+                .build()
+                .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+        );
 
-        // SoundFont manager is always created if feature is enabled (lazy loading)
+        // Build SoundFont manager (always enabled when feature is compiled)
         #[cfg(feature = "soundfont")]
-        let soundfont_manager = Some(Arc::new(crate::synth::SoundFontSystem::new(sample_rate as u32)));
+        let soundfont = Arc::new(crate::synth::SoundFontSystem::new(sample_rate as u32));
 
         Ok(TuttiEngine::from_parts(
             core,
@@ -192,7 +171,7 @@ impl TuttiEngineBuilder {
             #[cfg(feature = "neural")]
             neural,
             #[cfg(feature = "soundfont")]
-            soundfont_manager,
+            soundfont,
             #[cfg(feature = "plugin")]
             self.plugin_runtime,
         ))

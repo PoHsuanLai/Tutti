@@ -41,6 +41,10 @@ pub use system::{CaptureSession, SamplerSystem, SamplerSystemBuilder};
 mod stream_builder;
 pub use stream_builder::{RecordBuilder, StreamBuilder};
 
+// Fluent handle
+mod handle;
+pub use handle::SamplerHandle;
+
 // DSP nodes for FunDSP graph integration
 pub use audio_input::{AudioInput, AudioInputBackend};
 pub use sampler::{SamplerUnit, StreamingSamplerUnit};

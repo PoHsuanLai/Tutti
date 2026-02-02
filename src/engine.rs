@@ -14,26 +14,36 @@ use crate::midi::{MidiHandle, MidiSystem};
 use crate::MidiEvent;
 
 #[cfg(feature = "sampler")]
-use crate::sampler::SamplerSystem;
+use crate::sampler::{SamplerHandle, SamplerSystem};
 
 #[cfg(feature = "neural")]
-use crate::neural::NeuralSystem;
+use crate::neural::{NeuralHandle, NeuralSystem};
 
 /// Main audio engine that coordinates all subsystems.
 ///
-/// TuttiEngine wraps tutti-core's TuttiSystem and optionally integrates:
-/// - MIDI subsystem (if "midi" feature enabled)
-/// - Sampler subsystem (if "sampler" feature enabled)
-/// - Neural subsystem (if "neural" feature enabled)
+/// TuttiEngine wraps tutti-core's TuttiSystem and integrates subsystems based on
+/// enabled Cargo features:
+/// - MIDI subsystem (feature "midi") - requires `.midi()` to connect hardware
+/// - Sampler subsystem (feature "sampler") - automatically initialized
+/// - Neural subsystem (feature "neural") - automatically initialized
+/// - SoundFont support (feature "soundfont") - automatically initialized
+/// - Plugin hosting (feature "plugin") - requires tokio runtime handle
 ///
 /// # Example
 ///
 /// ```ignore
 /// use tutti::prelude::*;
 ///
+/// // Enable features in Cargo.toml:
+/// // tutti = { version = "...", features = ["sampler", "neural"] }
+///
 /// let engine = TuttiEngine::builder()
 ///     .sample_rate(44100.0)
 ///     .build()?;
+///
+/// // Subsystems are ready to use
+/// let sampler = engine.sampler();
+/// let neural = engine.neural();
 ///
 /// engine.graph(|net| {
 ///     let osc = net.add(Box::new(sine_hz(440.0)));
@@ -53,17 +63,17 @@ pub struct TuttiEngine {
     #[cfg(feature = "midi")]
     midi: Option<Arc<MidiSystem>>,
 
-    /// Sampler subsystem (optional)
+    /// Sampler subsystem (feature-gated)
     #[cfg(feature = "sampler")]
-    sampler: Option<SamplerSystem>,
+    sampler: Arc<SamplerSystem>,
 
-    /// Neural subsystem (optional)
+    /// Neural subsystem (feature-gated)
     #[cfg(feature = "neural")]
-    neural: Option<NeuralSystem>,
+    neural: Arc<NeuralSystem>,
 
-    /// SoundFont manager (optional)
+    /// SoundFont manager (feature-gated)
     #[cfg(feature = "soundfont")]
-    soundfont_manager: Option<Arc<crate::synth::SoundFontSystem>>,
+    soundfont: Arc<crate::synth::SoundFontSystem>,
 
     /// Plugin runtime handle for async plugin loading (optional)
     #[cfg(feature = "plugin")]
@@ -275,16 +285,34 @@ impl TuttiEngine {
         })
     }
 
-    /// Get the sampler subsystem (if enabled)
+    /// Get the sampler subsystem handle.
+    ///
+    /// Available when the "sampler" feature is enabled in Cargo.toml.
+    /// The subsystem is automatically initialized when the engine is built.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let sampler = engine.sampler();
+    /// sampler.stream("file.wav").gain(0.8).start();
+    /// ```
     #[cfg(feature = "sampler")]
-    pub fn sampler(&self) -> Option<&SamplerSystem> {
-        self.sampler.as_ref()
+    pub fn sampler(&self) -> SamplerHandle {
+        SamplerHandle::new(Some(self.sampler.clone()))
     }
 
-    /// Get the neural subsystem (if enabled)
+    /// Get the neural subsystem handle.
+    ///
+    /// Available when the "neural" feature is enabled in Cargo.toml.
+    /// The subsystem is automatically initialized when the engine is built.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let neural = engine.neural();
+    /// neural.load_synth("model.mpk")?;
+    /// ```
     #[cfg(feature = "neural")]
-    pub fn neural(&self) -> Option<&NeuralSystem> {
-        self.neural.as_ref()
+    pub fn neural(&self) -> NeuralHandle {
+        NeuralHandle::new(Some(self.neural.clone()))
     }
 
     /// Export audio from the current graph.
@@ -322,16 +350,8 @@ impl TuttiEngine {
     /// ```
     #[cfg(feature = "neural")]
     pub fn load_mpk(&self, name: impl Into<String>, path: impl AsRef<Path>) -> Result<()> {
-        if let Some(neural) = &self.neural {
-            crate::neural::register_neural_model(&self.registry, neural, name, path).map_err(
-                |e| crate::Error::InvalidConfig(format!("Failed to load .mpk model: {:?}", e)),
-            )?;
-            Ok(())
-        } else {
-            Err(crate::Error::InvalidConfig(
-                "Neural subsystem not enabled. Use .neural() in builder.".into(),
-            ))
-        }
+        crate::neural::register_neural_model(&self.registry, &self.neural, name, path)
+            .map_err(|e| crate::Error::InvalidConfig(format!("Failed to load .mpk model: {:?}", e)))
     }
 
     /// Load a neural model from ONNX format (requires conversion to Burn format first)
@@ -344,16 +364,9 @@ impl TuttiEngine {
     /// ```
     #[cfg(feature = "neural")]
     pub fn load_onnx(&self, name: impl Into<String>, path: impl AsRef<Path>) -> Result<()> {
-        if let Some(neural) = &self.neural {
-            crate::neural::register_neural_model(&self.registry, neural, name, path).map_err(
-                |e| crate::Error::InvalidConfig(format!("Failed to load .onnx model: {:?}", e)),
-            )?;
-            Ok(())
-        } else {
-            Err(crate::Error::InvalidConfig(
-                "Neural subsystem not enabled. Use .neural() in builder.".into(),
-            ))
-        }
+        crate::neural::register_neural_model(&self.registry, &self.neural, name, path).map_err(
+            |e| crate::Error::InvalidConfig(format!("Failed to load .onnx model: {:?}", e)),
+        )
     }
 
     // ===== Plugin loading =====
@@ -531,22 +544,16 @@ impl TuttiEngine {
     /// ```
     #[cfg(feature = "soundfont")]
     pub fn load_sf2(&self, name: impl Into<String>, path: impl AsRef<Path>) -> Result<()> {
-        let manager = self.soundfont_manager.as_ref().ok_or_else(|| {
-            crate::Error::InvalidConfig(
-                "SoundFont support not enabled. Requires 'soundfont' feature.".into(),
-            )
-        })?;
-
         let name = name.into();
         let path_buf = path.as_ref().to_path_buf();
 
         // Load the SoundFont file
-        let handle = manager.load(&path_buf).map_err(|e| {
+        let handle = self.soundfont.load(&path_buf).map_err(|e| {
             crate::Error::InvalidConfig(format!("Failed to load SoundFont: {:?}", e))
         })?;
 
         // Clone Arc to move into closure
-        let manager_clone = manager.clone();
+        let manager_clone = self.soundfont.clone();
         let sample_rate = self.sample_rate();
 
         // Register in node registry
@@ -621,11 +628,9 @@ impl TuttiEngine {
     pub(crate) fn from_parts(
         core: TuttiSystem,
         #[cfg(feature = "midi")] midi: Option<Arc<MidiSystem>>,
-        #[cfg(feature = "sampler")] sampler: Option<SamplerSystem>,
-        #[cfg(feature = "neural")] neural: Option<NeuralSystem>,
-        #[cfg(feature = "soundfont")] soundfont_manager: Option<
-            Arc<crate::synth::SoundFontSystem>,
-        >,
+        #[cfg(feature = "sampler")] sampler: Arc<SamplerSystem>,
+        #[cfg(feature = "neural")] neural: Arc<NeuralSystem>,
+        #[cfg(feature = "soundfont")] soundfont: Arc<crate::synth::SoundFontSystem>,
         #[cfg(feature = "plugin")] plugin_runtime: Option<tokio::runtime::Handle>,
     ) -> Self {
         Self {
@@ -638,7 +643,7 @@ impl TuttiEngine {
             #[cfg(feature = "neural")]
             neural,
             #[cfg(feature = "soundfont")]
-            soundfont_manager,
+            soundfont,
             #[cfg(feature = "plugin")]
             plugin_runtime,
         }

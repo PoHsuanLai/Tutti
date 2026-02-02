@@ -20,14 +20,13 @@
 //! ```ignore
 //! use tutti::prelude::*;
 //!
-//! // Create tokio runtime for plugin loading (if using plugins)
+//! // Create tokio runtime for plugin loading (optional)
 //! let runtime = tokio::runtime::Runtime::new()?;
 //!
-//! // Create engine (capabilities depend on enabled features)
+//! // Create engine (subsystems enabled via Cargo features)
 //! let engine = TuttiEngine::builder()
 //!     .sample_rate(44100.0)
-//!     .neural()  // Optional: enable neural subsystem
-//!     .plugin_runtime(runtime.handle().clone())  // Optional: enable plugin loading
+//!     .plugin_runtime(runtime.handle().clone())  // Optional: for plugin loading
 //!     .build()?;
 //!
 //! // Load nodes once (explicit format methods = compile-time type safety)
@@ -156,7 +155,7 @@ pub use tutti_sampler as sampler;
 
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::{
-    AudioInput, AudioInputBackend, SamplerSystem, SamplerSystemBuilder, SamplerUnit,
+    AudioInput, AudioInputBackend, SamplerHandle, SamplerSystem, SamplerSystemBuilder, SamplerUnit,
     StreamingSamplerUnit, TimeStretchUnit,
 };
 
@@ -218,8 +217,8 @@ pub use tutti_neural as neural;
 #[cfg(feature = "neural")]
 pub use tutti_neural::{
     register_all_neural_models, register_neural_directory, register_neural_effects,
-    register_neural_model, register_neural_synth_models, NeuralModelMetadata, NeuralModelType,
-    NeuralSystem, NeuralSystemBuilder,
+    register_neural_model, register_neural_synth_models, NeuralHandle, NeuralModelMetadata,
+    NeuralModelType, NeuralSystem, NeuralSystemBuilder,
 };
 
 /// Full FunDSP prelude - oscillators, filters, effects, and more.
@@ -276,7 +275,11 @@ pub mod prelude {
 
     // Sampler (optional)
     #[cfg(feature = "sampler")]
-    pub use crate::sampler::{SamplerSystem, SamplerUnit};
+    pub use crate::sampler::{SamplerHandle, SamplerSystem, SamplerUnit};
+
+    // Neural (optional)
+    #[cfg(feature = "neural")]
+    pub use crate::neural::{NeuralHandle, NeuralSystem};
 
     // Export (optional)
     #[cfg(feature = "export")]

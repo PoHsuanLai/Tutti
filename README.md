@@ -80,14 +80,13 @@ Tutti uses a modular architecture where each subsystem is an independent crate. 
 ```rust
 use tutti::prelude::*;
 
-// Create tokio runtime for plugin loading (if using plugins)
+// Create tokio runtime for plugin loading (optional)
 let runtime = tokio::runtime::Runtime::new()?;
 
-// Build engine with neural subsystem and plugin support
+// Build engine - subsystems enabled via Cargo features
 let engine = TuttiEngine::builder()
     .sample_rate(44100.0)
-    .neural()  // Enable neural subsystem
-    .plugin_runtime(runtime.handle().clone())  // Enable plugin loading
+    .plugin_runtime(runtime.handle().clone())  // Optional: for plugin loading
     .build()?;
 
 // Load nodes once (explicit format methods = compile-time type safety)
@@ -154,32 +153,30 @@ transport.stop();
 ```rust
 use tutti::prelude::*;
 
-// Enable sampler subsystem for Butler streaming
-let engine = TuttiEngine::builder()
-    .sampler()
-    .build()?;
+// Sampler subsystem automatically enabled when 'sampler' feature is compiled
+let engine = TuttiEngine::builder().build()?;
 
-if let Some(sampler) = engine.sampler() {
-    // Stream large files from disk (no memory loading)
-    sampler.stream("huge_audio_file.wav")
-        .channel(0)
-        .gain(0.8)
-        .speed(1.5)
-        .start_sample(44100)  // Start at 1 second
-        .start();
+let sampler = engine.sampler();
 
-    // Record audio with ring buffer
-    let session = sampler.record("recording.wav")
-        .channels(2)
-        .buffer_seconds(5.0)
-        .start();
+// Stream large files from disk (no memory loading)
+sampler.stream("huge_audio_file.wav")
+    .channel(0)
+    .gain(0.8)
+    .speed(1.5)
+    .start_sample(44100)  // Start at 1 second
+    .start();
 
-    // Audio callback writes to session.producer
+// Record audio with ring buffer
+let session = sampler.record("recording.wav")
+    .channels(2)
+    .buffer_seconds(5.0)
+    .start();
 
-    // Stop and flush to disk
-    sampler.stop_capture(session.id);
-    sampler.flush_capture(session.id, "final.wav");
-}
+// Audio callback writes to session.producer
+
+// Stop and flush to disk
+sampler.stop_capture(session.id);
+sampler.flush_capture(session.id, "final.wav");
 ```
 
 ### Loading and Exporting
@@ -215,12 +212,12 @@ engine.export()
 ```rust
 use tutti::prelude::*;
 
-// Enable MIDI subsystem with hardware I/O
+// MIDI subsystem automatically enabled when 'midi' feature is compiled
+// Enable it in Cargo.toml: tutti = { version = "...", features = ["midi"] }
 let engine = TuttiEngine::builder()
-    .midi()
+    .midi()  // Opt-in to connect MIDI hardware
     .build()?;
 
-// No Option unwrapping needed - always works!
 let midi = engine.midi();
 
 // Connect to hardware
@@ -236,28 +233,25 @@ midi.send()
 midi.send().note_on(0, 60, 100);
 ```
 
-### With MIDI, Sampler, and Neural
+### With Multiple Subsystems
 
 ```rust
 use tutti::prelude::*;
 
+// Enable features in Cargo.toml:
+// tutti = { version = "...", features = ["midi", "sampler", "neural"] }
+
 let engine = TuttiEngine::builder()
-    .midi()     // Enable MIDI subsystem
-    .sampler()  // Enable sampler subsystem
-    .neural()   // Enable neural subsystem
+    .midi()  // Opt-in to connect MIDI hardware
     .build()?;
 
-// Access subsystems - MIDI is always available (no-op if disabled)
 engine.midi().send().note_on(0, 60, 100);
 
-// Sampler and Neural return Option (for backwards compatibility)
-if let Some(sampler) = engine.sampler() {
-    sampler.stream("file.wav").start();
-}
+let sampler = engine.sampler();
+sampler.stream("file.wav").start();
 
-if let Some(neural) = engine.neural() {
-    // Neural audio processing
-}
+let neural = engine.neural();
+neural.load_synth("model.mpk")?;
 ```
 
 ### Using Individual Crates

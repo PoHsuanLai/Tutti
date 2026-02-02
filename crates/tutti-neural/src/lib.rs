@@ -60,6 +60,10 @@ pub use system::{
     EffectHandle, GpuInfo, NeuralModel, NeuralSystem, NeuralSystemBuilder, SynthHandle,
 };
 
+// Fluent handle
+mod handle;
+pub use handle::NeuralHandle;
+
 pub use gpu::{InferenceConfig, ModelType, VoiceId};
 pub use tutti_core::neural::{BatchingStrategy, NeuralNodeManager};
 pub use tutti_core::AudioUnit;

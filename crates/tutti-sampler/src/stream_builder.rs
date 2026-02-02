@@ -17,7 +17,7 @@ use std::path::PathBuf;
 ///     .start();
 /// ```
 pub struct StreamBuilder<'a> {
-    sampler: &'a SamplerSystem,
+    sampler: Option<&'a SamplerSystem>,
     file_path: PathBuf,
     channel: usize,
     start_sample: usize,
@@ -30,8 +30,22 @@ pub struct StreamBuilder<'a> {
 impl<'a> StreamBuilder<'a> {
     pub(crate) fn new(sampler: &'a SamplerSystem, file_path: impl Into<PathBuf>) -> Self {
         Self {
-            sampler,
+            sampler: Some(sampler),
             file_path: file_path.into(),
+            channel: 0,
+            start_sample: 0,
+            duration_samples: usize::MAX,
+            offset_samples: 0,
+            speed: 1.0,
+            gain: 1.0,
+        }
+    }
+
+    /// Create a disabled builder (no-op when start() is called).
+    pub(crate) fn disabled() -> Self {
+        Self {
+            sampler: None,
+            file_path: PathBuf::new(),
             channel: 0,
             start_sample: 0,
             duration_samples: usize::MAX,
@@ -78,15 +92,19 @@ impl<'a> StreamBuilder<'a> {
     }
 
     /// Start streaming.
+    ///
+    /// No-op when sampler is disabled.
     pub fn start(self) {
-        self.sampler
-            .stream_file(self.channel, self.file_path)
-            .start_sample(self.start_sample)
-            .duration_samples(self.duration_samples)
-            .offset_samples(self.offset_samples)
-            .speed(self.speed)
-            .gain(self.gain)
-            .start();
+        if let Some(sampler) = self.sampler {
+            sampler
+                .stream_file(self.channel, self.file_path)
+                .start_sample(self.start_sample)
+                .duration_samples(self.duration_samples)
+                .offset_samples(self.offset_samples)
+                .speed(self.speed)
+                .gain(self.gain)
+                .start();
+        }
     }
 }
 
