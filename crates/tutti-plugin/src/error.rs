@@ -64,10 +64,7 @@ pub enum BridgeError {
 
     /// Operation timeout
     #[error("Timeout after {duration_ms}ms: {operation}")]
-    Timeout {
-        operation: String,
-        duration_ms: u64,
-    },
+    Timeout { operation: String, duration_ms: u64 },
 
     /// Bridge process crashed
     #[error("Bridge process crashed")]

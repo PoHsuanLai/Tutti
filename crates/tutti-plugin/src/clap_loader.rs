@@ -362,11 +362,13 @@ impl ClapInstance {
 
             // Get entry point
             let entry: libloading::Symbol<unsafe extern "C" fn() -> *const clap_plugin_entry> = unsafe {
-                library.get(b"clap_entry\0").map_err(|e| BridgeError::LoadFailed {
-                    path: path.to_path_buf(),
-                    stage: LoadStage::Opening,
-                    reason: format!("No clap_entry symbol: {}", e),
-                })?
+                library
+                    .get(b"clap_entry\0")
+                    .map_err(|e| BridgeError::LoadFailed {
+                        path: path.to_path_buf(),
+                        stage: LoadStage::Opening,
+                        reason: format!("No clap_entry symbol: {}", e),
+                    })?
             };
 
             let entry_ptr = unsafe { entry() };
@@ -403,11 +405,14 @@ impl ClapInstance {
             let host = Box::into_raw(Box::new(create_clap_host()));
 
             // Get plugin factory
-            let get_factory_fn = entry_struct.get_factory.ok_or_else(|| BridgeError::LoadFailed {
-                path: path.to_path_buf(),
-                stage: LoadStage::Factory,
-                reason: "No get_factory function".to_string(),
-            })?;
+            let get_factory_fn =
+                entry_struct
+                    .get_factory
+                    .ok_or_else(|| BridgeError::LoadFailed {
+                        path: path.to_path_buf(),
+                        stage: LoadStage::Factory,
+                        reason: "No get_factory function".to_string(),
+                    })?;
             let factory_ptr = unsafe {
                 get_factory_fn(clap_sys::factory::plugin_factory::CLAP_PLUGIN_FACTORY_ID.as_ptr())
             };
@@ -427,11 +432,13 @@ impl ClapInstance {
             // Get plugin count and use first plugin
             let factory_typed =
                 factory_ptr as *const clap_sys::factory::plugin_factory::clap_plugin_factory;
-            let get_count_fn = factory.get_plugin_count.ok_or_else(|| BridgeError::LoadFailed {
-                path: path.to_path_buf(),
-                stage: LoadStage::Factory,
-                reason: "No get_plugin_count function".to_string(),
-            })?;
+            let get_count_fn = factory
+                .get_plugin_count
+                .ok_or_else(|| BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Factory,
+                    reason: "No get_plugin_count function".to_string(),
+                })?;
             let plugin_count = unsafe { get_count_fn(factory_typed) };
             if plugin_count == 0 {
                 return Err(BridgeError::LoadFailed {
@@ -442,11 +449,14 @@ impl ClapInstance {
             }
 
             // Get first plugin descriptor
-            let get_desc_fn = factory.get_plugin_descriptor.ok_or_else(|| BridgeError::LoadFailed {
-                path: path.to_path_buf(),
-                stage: LoadStage::Factory,
-                reason: "No get_plugin_descriptor function".to_string(),
-            })?;
+            let get_desc_fn =
+                factory
+                    .get_plugin_descriptor
+                    .ok_or_else(|| BridgeError::LoadFailed {
+                        path: path.to_path_buf(),
+                        stage: LoadStage::Factory,
+                        reason: "No get_plugin_descriptor function".to_string(),
+                    })?;
             let desc_ptr = unsafe { get_desc_fn(factory_typed, 0) };
             if desc_ptr.is_null() {
                 return Err(BridgeError::LoadFailed {
@@ -460,19 +470,20 @@ impl ClapInstance {
 
             // Create plugin instance
             let plugin_id = unsafe { CStr::from_ptr(descriptor.id) }.to_string_lossy();
-            let plugin_id_cstr = CString::new(plugin_id.as_ref()).map_err(|e| {
-                BridgeError::LoadFailed {
+            let plugin_id_cstr =
+                CString::new(plugin_id.as_ref()).map_err(|e| BridgeError::LoadFailed {
                     path: path.to_path_buf(),
                     stage: LoadStage::Instantiation,
                     reason: format!("Invalid plugin ID (contains null byte): {}", e),
-                }
-            })?;
+                })?;
 
-            let create_fn = factory.create_plugin.ok_or_else(|| BridgeError::LoadFailed {
-                path: path.to_path_buf(),
-                stage: LoadStage::Instantiation,
-                reason: "No create_plugin function".to_string(),
-            })?;
+            let create_fn = factory
+                .create_plugin
+                .ok_or_else(|| BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Instantiation,
+                    reason: "No create_plugin function".to_string(),
+                })?;
             let plugin = unsafe { create_fn(factory_typed, host, plugin_id_cstr.as_ptr()) };
 
             if plugin.is_null() {
@@ -560,11 +571,13 @@ impl ClapInstance {
             }
 
             // Start processing
-            let start_fn = plugin_ref.start_processing.ok_or_else(|| BridgeError::LoadFailed {
-                path: PathBuf::from("unknown"),
-                stage: LoadStage::Activation,
-                reason: "No start_processing function".to_string(),
-            })?;
+            let start_fn = plugin_ref
+                .start_processing
+                .ok_or_else(|| BridgeError::LoadFailed {
+                    path: PathBuf::from("unknown"),
+                    stage: LoadStage::Activation,
+                    reason: "No start_processing function".to_string(),
+                })?;
             if !unsafe { start_fn(self.plugin) } {
                 return Err(BridgeError::LoadFailed {
                     path: PathBuf::from("unknown"),

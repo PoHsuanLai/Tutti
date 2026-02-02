@@ -56,10 +56,9 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
         B::FloatElem: burn::serde::de::DeserializeOwned,
     {
         let path = path.as_ref();
-        let ext = path
-            .extension()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| crate::error::Error::InvalidPath("Invalid file extension".to_string()))?;
+        let ext = path.extension().and_then(|s| s.to_str()).ok_or_else(|| {
+            crate::error::Error::InvalidPath("Invalid file extension".to_string())
+        })?;
 
         match ext {
             "onnx" => Self::load_from_onnx(path, device),
@@ -79,7 +78,10 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
     /// # Convert ONNX to Burn format:
     /// burn-import onnx model.onnx --out-type burn model.mpk
     /// ```
-    fn load_from_onnx(_path: &std::path::Path, _device: &B::Device) -> Result<Self, crate::error::Error> {
+    fn load_from_onnx(
+        _path: &std::path::Path,
+        _device: &B::Device,
+    ) -> Result<Self, crate::error::Error> {
         Err(crate::error::Error::InvalidConfig(
             "ONNX runtime loading is not supported. \
              Pre-convert your model using: burn-import onnx <model.onnx> --out-type burn <model.mpk> \
@@ -91,7 +93,10 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
     /// Load from Burn's native MessagePack format
     ///
     /// This is Burn's native format - fastest and most optimized.
-    fn load_from_burn_mpk(path: &std::path::Path, device: &B::Device) -> Result<Self, crate::error::Error>
+    fn load_from_burn_mpk(
+        path: &std::path::Path,
+        device: &B::Device,
+    ) -> Result<Self, crate::error::Error>
     where
         B::FloatElem: burn::serde::de::DeserializeOwned,
     {
@@ -123,7 +128,10 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
     // SafeTensors loading disabled due to burn-import 0.20 compilation issues
     // TODO: Re-enable when burn-import 0.21+ is available
     #[allow(dead_code)]
-    fn load_from_safetensors(_path: &std::path::Path, _device: &B::Device) -> Result<Self, crate::error::Error> {
+    fn load_from_safetensors(
+        _path: &std::path::Path,
+        _device: &B::Device,
+    ) -> Result<Self, crate::error::Error> {
         Err(crate::error::Error::InvalidConfig(
             "SafeTensors support temporarily disabled (burn-import 0.20 has compilation issues). \
              Use .mpk format instead. Convert with: burn-import onnx <model.onnx> --out-type burn <model.mpk>"

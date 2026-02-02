@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     for i in 0..num_samples {
         let t = i as f64 / sample_rate as f64;
         let sample = (t * 440.0 * 2.0 * std::f64::consts::PI).sin() as f32;
-        
+
         // Simple fade out
         let env = if t > duration_seconds - 0.1 {
             (duration_seconds - t) / 0.1

@@ -566,11 +566,8 @@ impl EventList {
     /// Update existing event list from MIDI events (RT-safe: reuses allocation)
     fn update_from_midi(&mut self, midi_events: &[MidiEvent]) {
         self.events.clear();
-        self.events.extend(
-            midi_events
-                .iter()
-                .filter_map(Self::midi_to_vst3_event)
-        );
+        self.events
+            .extend(midi_events.iter().filter_map(Self::midi_to_vst3_event));
     }
 
     /// Update from MIDI and note expression (RT-safe: reuses allocation)
@@ -582,11 +579,8 @@ impl EventList {
         self.events.clear();
 
         // Add MIDI events
-        self.events.extend(
-            midi_events
-                .iter()
-                .filter_map(Self::midi_to_vst3_event)
-        );
+        self.events
+            .extend(midi_events.iter().filter_map(Self::midi_to_vst3_event));
 
         // Add note expression events
         for expr in &note_expression.changes {
@@ -1241,11 +1235,13 @@ impl Vst3Library {
 
         // Get the factory function
         let get_factory: libloading::Symbol<GetPluginFactoryFn> = unsafe {
-            library.get(b"GetPluginFactory\0").map_err(|e| BridgeError::LoadFailed {
-                path: lib_path.clone(),
-                stage: LoadStage::Factory,
-                reason: format!("Missing GetPluginFactory symbol: {}", e),
-            })?
+            library
+                .get(b"GetPluginFactory\0")
+                .map_err(|e| BridgeError::LoadFailed {
+                    path: lib_path.clone(),
+                    stage: LoadStage::Factory,
+                    reason: format!("Missing GetPluginFactory symbol: {}", e),
+                })?
         };
 
         // Call the factory function
@@ -2004,7 +2000,11 @@ impl Vst3Instance {
             for output_slice in buffer.outputs.iter_mut() {
                 output_slice.fill(0.0);
             }
-            return (crate::protocol::MidiEventVec::new(), Default::default(), Default::default());
+            return (
+                crate::protocol::MidiEventVec::new(),
+                Default::default(),
+                Default::default(),
+            );
         }
 
         // Collect outputs
@@ -2193,7 +2193,11 @@ impl Vst3Instance {
             for output_slice in buffer.outputs.iter_mut() {
                 output_slice.fill(0.0);
             }
-            return (crate::protocol::MidiEventVec::new(), Default::default(), Default::default());
+            return (
+                crate::protocol::MidiEventVec::new(),
+                Default::default(),
+                Default::default(),
+            );
         }
 
         let midi_output = output_event_list.to_midi_events();
@@ -2333,11 +2337,13 @@ impl Vst3Instance {
             reason: "Plugin has no editor controller".to_string(),
         })?;
 
-        let ctrl_vtable = self.controller_vtable.ok_or_else(|| BridgeError::LoadFailed {
-            path: PathBuf::from("unknown"),
-            stage: LoadStage::Initialization,
-            reason: "Controller vtable missing".to_string(),
-        })?;
+        let ctrl_vtable = self
+            .controller_vtable
+            .ok_or_else(|| BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: "Controller vtable missing".to_string(),
+            })?;
 
         // Create view using IEditController::createView
         let view_ptr = unsafe { ((*ctrl_vtable).create_view)(ctrl, std::ptr::null()) };

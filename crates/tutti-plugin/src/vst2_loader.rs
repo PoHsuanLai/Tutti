@@ -649,11 +649,14 @@ impl Vst2Instance {
     /// Open plugin editor
     #[cfg(feature = "vst2")]
     pub fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
-        let mut editor = self.instance.get_editor().ok_or_else(|| BridgeError::LoadFailed {
-            path: PathBuf::from("unknown"),
-            stage: LoadStage::Initialization,
-            reason: "Plugin has no editor".to_string(),
-        })?;
+        let mut editor = self
+            .instance
+            .get_editor()
+            .ok_or_else(|| BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: "Plugin has no editor".to_string(),
+            })?;
 
         editor.open(parent);
 

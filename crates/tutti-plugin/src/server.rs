@@ -93,9 +93,7 @@ impl PluginServer {
     /// Ensure audio buffers are sized correctly
     /// Only reallocates if channel count or buffer size changed
     fn ensure_buffers_sized(&mut self, num_channels: usize, buffer_size: usize) {
-        if self.current_num_channels != num_channels
-            || self.current_buffer_size != buffer_size
-        {
+        if self.current_num_channels != num_channels || self.current_buffer_size != buffer_size {
             // Resize f32 buffers
             self.input_buffers_f32.clear();
             self.output_buffers_f32.clear();
@@ -480,7 +478,8 @@ impl PluginServer {
                         .iter()
                         .map(|v| &v[..num_samples])
                         .collect();
-                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64[..num_channels]
+                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64
+                        [..num_channels]
                         .iter_mut()
                         .map(|v| &mut v[..num_samples])
                         .collect();
@@ -520,7 +519,10 @@ impl PluginServer {
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer.write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]) {}
+                        if let Err(_e) = shared_buffer
+                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples])
+                        {
+                        }
                     }
                 }
                 crate::protocol::SampleFormat::Float32 => {
@@ -540,7 +542,8 @@ impl PluginServer {
                         .iter()
                         .map(|v| &v[..num_samples])
                         .collect();
-                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32[..num_channels]
+                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32
+                        [..num_channels]
                         .iter_mut()
                         .map(|v| &mut v[..num_samples])
                         .collect();
@@ -578,7 +581,10 @@ impl PluginServer {
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer.write_channel(ch, &self.output_buffers_f32[ch][..num_samples]) {}
+                        if let Err(_e) = shared_buffer
+                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples])
+                        {
+                        }
                     }
                 }
             }
@@ -663,7 +669,8 @@ impl PluginServer {
                         .iter()
                         .map(|v| &v[..num_samples])
                         .collect();
-                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64[..num_channels]
+                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64
+                        [..num_channels]
                         .iter_mut()
                         .map(|v| &mut v[..num_samples])
                         .collect();
@@ -725,7 +732,10 @@ impl PluginServer {
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer.write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]) {}
+                        if let Err(_e) = shared_buffer
+                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples])
+                        {
+                        }
                     }
                 }
                 crate::protocol::SampleFormat::Float32 => {
@@ -745,7 +755,8 @@ impl PluginServer {
                         .iter()
                         .map(|v| &v[..num_samples])
                         .collect();
-                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32[..num_channels]
+                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32
+                        [..num_channels]
                         .iter_mut()
                         .map(|v| &mut v[..num_samples])
                         .collect();
@@ -802,7 +813,10 @@ impl PluginServer {
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer.write_channel(ch, &self.output_buffers_f32[ch][..num_samples]) {}
+                        if let Err(_e) = shared_buffer
+                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples])
+                        {
+                        }
                     }
                 }
             }
@@ -856,40 +870,42 @@ impl PluginServer {
         // Determine plugin format from extension
         let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
-        let (plugin, metadata): (LoadedPlugin, PluginMetadata) =
-            match extension.to_lowercase().as_str() {
-                #[cfg(feature = "vst3")]
-                "vst3" => {
-                    // Load as VST3
-                    let mut vst = Vst3Instance::load(&path, sample_rate)?;
-                    // Negotiate format: use f64 if preferred AND plugin supports it
-                    if preferred_format == crate::protocol::SampleFormat::Float64
-                        && vst.can_process_f64()
-                    {
-                        let _ = vst.set_sample_format(crate::protocol::SampleFormat::Float64);
-                    }
-                    let metadata = vst.metadata().clone();
-                    (LoadedPlugin::Vst3(vst), metadata)
+        let (plugin, metadata): (LoadedPlugin, PluginMetadata) = match extension
+            .to_lowercase()
+            .as_str()
+        {
+            #[cfg(feature = "vst3")]
+            "vst3" => {
+                // Load as VST3
+                let mut vst = Vst3Instance::load(&path, sample_rate)?;
+                // Negotiate format: use f64 if preferred AND plugin supports it
+                if preferred_format == crate::protocol::SampleFormat::Float64
+                    && vst.can_process_f64()
+                {
+                    let _ = vst.set_sample_format(crate::protocol::SampleFormat::Float64);
                 }
+                let metadata = vst.metadata().clone();
+                (LoadedPlugin::Vst3(vst), metadata)
+            }
 
-                #[cfg(feature = "vst2")]
-                "vst" | "dll" | "so" => {
-                    // Load as VST2
-                    let vst = Vst2Instance::load(&path, sample_rate)?;
-                    let metadata = vst.metadata().clone();
-                    (LoadedPlugin::Vst2(vst), metadata)
-                }
+            #[cfg(feature = "vst2")]
+            "vst" | "dll" | "so" => {
+                // Load as VST2
+                let vst = Vst2Instance::load(&path, sample_rate)?;
+                let metadata = vst.metadata().clone();
+                (LoadedPlugin::Vst2(vst), metadata)
+            }
 
-                #[cfg(feature = "clap")]
-                "clap" => {
-                    // Load as CLAP
-                    let clap = ClapInstance::load(&path, sample_rate)?;
-                    let metadata = clap.metadata().clone();
-                    (LoadedPlugin::Clap(clap), metadata)
-                }
+            #[cfg(feature = "clap")]
+            "clap" => {
+                // Load as CLAP
+                let clap = ClapInstance::load(&path, sample_rate)?;
+                let metadata = clap.metadata().clone();
+                (LoadedPlugin::Clap(clap), metadata)
+            }
 
-                _ => {
-                    return Err(BridgeError::LoadFailed {
+            _ => {
+                return Err(BridgeError::LoadFailed {
                         path: path.to_path_buf(),
                         stage: LoadStage::Opening,
                         reason: format!(
@@ -897,8 +913,8 @@ impl PluginServer {
                             extension
                         ),
                     });
-                }
-            };
+            }
+        };
 
         // Negotiate format: use f64 only if preferred AND plugin supports it
         let negotiated_format = if preferred_format == crate::protocol::SampleFormat::Float64

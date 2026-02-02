@@ -171,47 +171,46 @@ impl MidiInputManager {
         let midi_input = MidiInput::new("dawai-midi-input")?;
 
         let ports = midi_input.ports();
-        let port = ports
-            .get(device_index)
-            .ok_or_else(|| crate::error::Error::MidiDevice(format!("MIDI device {} not found", device_index)))?;
+        let port = ports.get(device_index).ok_or_else(|| {
+            crate::error::Error::MidiDevice(format!("MIDI device {} not found", device_index))
+        })?;
 
         let port_name = midi_input
             .port_name(port)
             .unwrap_or_else(|_| format!("Device {}", device_index));
 
-        let connection = midi_input
-            .connect(
-                port,
-                "dawai-input",
-                move |_timestamp, message, _| {
-                    // Parse raw MIDI bytes into structured MidiEvent
-                    match MidiEvent::from_bytes(message) {
-                        Ok(event) => {
-                            // Process through MPE if enabled
-                            #[cfg(feature = "mpe")]
-                            if let Some(ref processor) = mpe_processor {
-                                processor.write().process_midi1(&event);
-                            }
+        let connection = midi_input.connect(
+            port,
+            "dawai-input",
+            move |_timestamp, message, _| {
+                // Parse raw MIDI bytes into structured MidiEvent
+                match MidiEvent::from_bytes(message) {
+                    Ok(event) => {
+                        // Process through MPE if enabled
+                        #[cfg(feature = "mpe")]
+                        if let Some(ref processor) = mpe_processor {
+                            processor.write().process_midi1(&event);
+                        }
 
-                            // Also process as MIDI 2.0 for high-res MPE expression
-                            #[cfg(all(feature = "mpe", feature = "midi2"))]
-                            if let Some(ref processor) = mpe_processor {
-                                if let Some(midi2_event) = crate::midi2::midi1_to_midi2(&event) {
-                                    processor.read().process_midi2(&midi2_event);
-                                }
-                            }
-
-                            if !producer_handle.push(event) {
-                                debug!("MIDI input ring buffer full, dropping event");
+                        // Also process as MIDI 2.0 for high-res MPE expression
+                        #[cfg(all(feature = "mpe", feature = "midi2"))]
+                        if let Some(ref processor) = mpe_processor {
+                            if let Some(midi2_event) = crate::midi2::midi1_to_midi2(&event) {
+                                processor.read().process_midi2(&midi2_event);
                             }
                         }
-                        Err(e) => {
-                            debug!("Failed to parse MIDI event: {:?}", e);
+
+                        if !producer_handle.push(event) {
+                            debug!("MIDI input ring buffer full, dropping event");
                         }
                     }
-                },
-                (),
-            )?;
+                    Err(e) => {
+                        debug!("Failed to parse MIDI event: {:?}", e);
+                    }
+                }
+            },
+            (),
+        )?;
 
         Ok((connection, port_name))
     }
@@ -241,7 +240,9 @@ impl MidiInputManager {
         let producer_handle = self
             .port_manager
             .get_input_producer_handle(port_index)
-            .ok_or_else(|| crate::error::Error::MidiDevice("Failed to get producer handle".to_string()))?;
+            .ok_or_else(|| {
+                crate::error::Error::MidiDevice("Failed to get producer handle".to_string())
+            })?;
 
         self.command_sender
             .send(MidiCommand::Connect(
@@ -257,7 +258,9 @@ impl MidiInputManager {
         let device = devices
             .iter()
             .find(|d| d.name.to_lowercase().contains(&name.to_lowercase()))
-            .ok_or_else(|| crate::error::Error::MidiDevice(format!("No MIDI device matching '{}' found", name)))?;
+            .ok_or_else(|| {
+                crate::error::Error::MidiDevice(format!("No MIDI device matching '{}' found", name))
+            })?;
         self.connect(device.index)
     }
 

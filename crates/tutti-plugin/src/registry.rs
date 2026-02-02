@@ -100,8 +100,7 @@ pub fn register_plugin_directory<P: AsRef<Path>>(
         path: dir_path.to_path_buf(),
         stage: LoadStage::Scanning,
         reason: format!("Failed to read directory: {}", e),
-    })?
-    {
+    })? {
         let entry = entry.map_err(|e| BridgeError::LoadFailed {
             path: dir_path.to_path_buf(),
             stage: LoadStage::Scanning,

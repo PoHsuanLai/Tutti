@@ -31,8 +31,8 @@ impl ThumbnailCache {
     /// # Arguments
     /// * `max_entries` - Maximum number of thumbnails to keep in memory
     pub fn new(max_entries: usize) -> Self {
-        let capacity = NonZeroUsize::new(max_entries.max(1))
-            .expect("BUG: max(1) should always be non-zero");
+        let capacity =
+            NonZeroUsize::new(max_entries.max(1)).expect("BUG: max(1) should always be non-zero");
         Self {
             memory_cache: LruCache::new(capacity),
             disk_path: None,
