@@ -560,6 +560,16 @@ impl TuttiEngine {
         let manager_clone = self.soundfont.clone();
         let sample_rate = self.sample_rate();
 
+        // Get MIDI registry from core
+        #[cfg(feature = "midi")]
+        let midi_registry = {
+            let mut reg = None;
+            self.core.graph(|net| {
+                reg = Some(net.midi_registry().clone());
+            });
+            reg.unwrap()
+        };
+
         // Register in node registry
         self.registry.register(&name, move |params| {
             let soundfont = manager_clone.get(&handle).ok_or_else(|| {
@@ -570,6 +580,11 @@ impl TuttiEngine {
 
             let settings =
                 crate::synth::SoundFontSystem::new(sample_rate as u32).default_settings();
+
+            #[cfg(feature = "midi")]
+            let mut unit = crate::synth::SoundFontUnit::with_midi(soundfont, &settings, midi_registry.clone());
+
+            #[cfg(not(feature = "midi"))]
             let mut unit = crate::synth::SoundFontUnit::new(soundfont, &settings);
 
             // Apply instance parameters
@@ -582,6 +597,72 @@ impl TuttiEngine {
         });
 
         Ok(())
+    }
+
+    /// Queue MIDI events to a specific audio node
+    ///
+    /// This allows programmatic MIDI triggering for internal audio nodes
+    /// that implement MidiAudioUnit (e.g., SoundFontUnit, PolySynth).
+    ///
+    /// # Example
+    /// ```ignore
+    /// let synth = engine.instance("piano", &params! {})?;
+    ///
+    /// // Trigger notes programmatically
+    /// use tutti_midi_io::MidiEvent;
+    /// let note_on = MidiEvent::note_on_builder(60, 100).build();
+    /// engine.queue_midi_to_node(synth, &[note_on]);
+    /// ```
+    #[cfg(feature = "midi")]
+    pub fn queue_midi_to_node(&self, node: crate::core::NodeId, events: &[crate::MidiEvent]) {
+        self.core.graph(|net| {
+            net.queue_midi(node, events);
+        });
+    }
+
+    /// Send a Note On event to a node
+    ///
+    /// Convenience method for triggering notes on MIDI-aware audio nodes.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let synth = engine.instance("piano", &params! {})?;
+    /// engine.note_on(synth, 0, 60, 100);  // Channel 0, Middle C, velocity 100
+    /// ```
+    #[cfg(feature = "midi")]
+    pub fn note_on(&self, node: crate::core::NodeId, channel: u8, note: u8, velocity: u8) {
+        let event = crate::MidiEvent::note_on_builder(note, velocity)
+            .channel(channel)
+            .build();
+        self.queue_midi_to_node(node, &[event]);
+    }
+
+    /// Send a Note Off event to a node
+    ///
+    /// # Example
+    /// ```ignore
+    /// engine.note_off(synth, 0, 60);  // Channel 0, Middle C
+    /// ```
+    #[cfg(feature = "midi")]
+    pub fn note_off(&self, node: crate::core::NodeId, channel: u8, note: u8) {
+        let event = crate::MidiEvent::note_off_builder(note)
+            .channel(channel)
+            .build();
+        self.queue_midi_to_node(node, &[event]);
+    }
+
+    /// Send a Control Change event to a node
+    ///
+    /// # Example
+    /// ```ignore
+    /// engine.control_change(synth, 0, 7, 100);  // Channel 0, Volume CC, max value
+    /// ```
+    #[cfg(feature = "midi")]
+    pub fn control_change(&self, node: crate::core::NodeId, channel: u8, cc: u8, value: u8) {
+        let event = crate::MidiEvent::cc_builder(cc, value)
+            .channel(channel)
+            .build();
+        self.queue_midi_to_node(node, &[event]);
     }
 
     /// Internal helper for loading audio samples

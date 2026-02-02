@@ -27,6 +27,8 @@ exclude = [
     "assets/models/*.onnx",
     "assets/models/*.onnx.data",
     "assets/plugins/*",
+    "assets/soundfonts/*.sf2",
+    "assets/soundfonts/*.sf3",
     ".github/",
     "TESTING.md",
 ]
@@ -117,3 +119,7 @@ required-features = ["plugin"]
 [[example]]
 name = "neural_model_save_load"
 required-features = ["neural"]
+
+[[example]]
+name = "soundfont"
+required-features = ["soundfont"]
