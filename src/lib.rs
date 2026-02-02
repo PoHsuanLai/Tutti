@@ -53,6 +53,19 @@
 //! engine.transport().play();
 //! ```
 //!
+//! ## Built-in Audio Nodes
+//!
+//! Tutti provides many AudioUnit implementations out of the box:
+//!
+//! - **Synths**: `PolySynth` (waveform synth), `SoundFontUnit` (sample-based)
+//! - **Samplers**: `SamplerUnit`, `StreamingSamplerUnit`, `TimeStretchUnit`
+//! - **DSP**: `LfoNode`, `EnvelopeFollowerNode`, sidechain dynamics
+//! - **Spatial**: `BinauralPannerNode` (HRTF), `SpatialPannerNode` (VBAP)
+//! - **Effects**: All FunDSP nodes (`lowpass_hz`, `reverb_stereo`, 100+ more)
+//!
+//! See [BUILTIN_NODES.md](https://github.com/PoHsuanLai/Tutti/blob/main/BUILTIN_NODES.md)
+//! for complete reference with examples.
+//!
 //! ## Feature Flags
 //!
 //! - `default` - Core audio engine
