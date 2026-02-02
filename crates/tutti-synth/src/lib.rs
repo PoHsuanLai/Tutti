@@ -54,7 +54,7 @@ pub use error::{Error, Result};
 pub mod soundfont;
 
 #[cfg(feature = "soundfont")]
-pub use soundfont::{SoundFontSystem, SoundFontSynth, SoundFontUnit};
+pub use soundfont::{SoundFontSynth, SoundFontSystem, SoundFontUnit};
 
 pub mod polysynth;
 pub use polysynth::{Envelope, PolySynth, Waveform};

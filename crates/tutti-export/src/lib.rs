@@ -31,8 +31,8 @@
 
 // Core modules
 pub mod error;
-mod options;
 pub mod export_builder;
+mod options;
 
 // Advanced APIs
 pub mod dsp;

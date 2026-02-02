@@ -54,10 +54,13 @@ fn main() -> tutti::Result<()> {
     let sine_id = engine.instance("sine", &params! { "frequency" => 440.0 })?;
     let filter_id = engine.instance("lowpass", &params! { "cutoff" => 2000.0 })?;
     let gain_id = engine.instance("mul", &params! { "value" => 0.3 })?;
-    let reverb_id = engine.instance("reverb_stereo", &params! {
-        "room_size" => 0.7,
-        "time" => 3.0
-    })?;
+    let reverb_id = engine.instance(
+        "reverb_stereo",
+        &params! {
+            "room_size" => 0.7,
+            "time" => 3.0
+        },
+    )?;
 
     // Build audio graph
     engine.graph(|net| {

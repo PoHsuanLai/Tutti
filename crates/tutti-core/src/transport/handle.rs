@@ -255,18 +255,12 @@ impl TransportHandle {
 
     /// Check if transport is seeking/locating.
     pub fn is_seeking(&self) -> bool {
-        matches!(
-            self.transport.motion_state(),
-            MotionState::DeclickToLocate
-        )
+        matches!(self.transport.motion_state(), MotionState::DeclickToLocate)
     }
 
     /// Check if transport is stopping.
     pub fn is_stopping(&self) -> bool {
-        matches!(
-            self.transport.motion_state(),
-            MotionState::DeclickToStop
-        )
+        matches!(self.transport.motion_state(), MotionState::DeclickToStop)
     }
 
     /// Check if transport is in fast forward mode.

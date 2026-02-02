@@ -1,9 +1,9 @@
 //! Builder traits for neural synthesis and effects.
 
 use super::metadata::NeuralModelId;
+use crate::compat::{Arc, Box};
 use crate::AudioUnit;
 use crate::Result;
-use crate::compat::{Arc, Box};
 
 /// Builder for neural synthesis voices.
 pub trait NeuralSynthBuilder: Send + Sync {

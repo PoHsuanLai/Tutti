@@ -1,8 +1,8 @@
 //! Lock-free primitives for real-time audio.
 
+use crate::compat::AtomicBool as StdAtomicBool;
 use crate::Ordering;
 use atomic_float::{AtomicF32, AtomicF64};
-use crate::compat::AtomicBool as StdAtomicBool;
 
 /// Cache-line aligned atomic f32.
 #[derive(Debug)]

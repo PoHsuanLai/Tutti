@@ -22,9 +22,9 @@
 //! ```
 
 use crate::{
-    BinauralPannerNode, ChannelLayout, EnvelopeFollowerNode, LfoNode, LfoShape,
+    AudioUnit, BinauralPannerNode, ChannelLayout, EnvelopeFollowerNode, LfoNode, LfoShape,
     SidechainCompressor, SidechainGate, SpatialPannerNode, StereoSidechainCompressor,
-    StereoSidechainGate, AudioUnit,
+    StereoSidechainGate,
 };
 use tutti_core::{get_param_or, NodeRegistry};
 
@@ -104,12 +104,7 @@ impl<'a> DspHandle<'a> {
     /// dsp.lfo("bass_lfo", LfoShape::Sine, 0.5)?;
     /// let lfo = engine.instance("bass_lfo", &params! { "depth" => 0.8 });
     /// ```
-    pub fn lfo(
-        &self,
-        name: impl Into<String>,
-        shape: LfoShape,
-        frequency: f32,
-    ) -> &Self {
+    pub fn lfo(&self, name: impl Into<String>, shape: LfoShape, frequency: f32) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
@@ -149,12 +144,7 @@ impl<'a> DspHandle<'a> {
     /// dsp.envelope("env", 0.001, 0.1)?;
     /// let env = engine.instance("env", &params! { "gain" => 2.0 });
     /// ```
-    pub fn envelope(
-        &self,
-        name: impl Into<String>,
-        attack_sec: f32,
-        release_sec: f32,
-    ) -> &Self {
+    pub fn envelope(&self, name: impl Into<String>, attack_sec: f32, release_sec: f32) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
@@ -219,7 +209,7 @@ impl<'a> DspHandle<'a> {
     /// ```ignore
     /// dsp.sidechain().compressor("comp", -20.0, 4.0, 0.001, 0.05)?;
     /// ```
-    pub fn sidechain(&self) -> SidechainHandle {
+    pub fn sidechain(&self) -> SidechainHandle<'a> {
         SidechainHandle::new(self.registry, self.sample_rate)
     }
 
@@ -230,7 +220,7 @@ impl<'a> DspHandle<'a> {
     /// dsp.spatial().vbap("panner", ChannelLayout::Stereo)?;
     /// dsp.spatial().binaural("binaural")?;
     /// ```
-    pub fn spatial(&self) -> SpatialHandle {
+    pub fn spatial(&self) -> SpatialHandle<'a> {
         SpatialHandle::new(self.registry, self.sample_rate)
     }
 }
@@ -457,22 +447,27 @@ impl<'a> SpatialHandle<'a> {
                     height_front_right: None,
                     height_rear_left: None,
                     height_rear_right: None,
-                } => SpatialPannerNode::stereo()
-                    .map_err(|e| tutti_core::NodeRegistryError::ConstructionFailed(e.to_string()))?,
+                } => SpatialPannerNode::stereo().map_err(|e| {
+                    tutti_core::NodeRegistryError::ConstructionFailed(e.to_string())
+                })?,
                 _ if layout.surround_left.is_some() && layout.surround_right.is_some() => {
                     if layout.height_front_left.is_some() {
-                        SpatialPannerNode::atmos_7_1_4()
-                            .map_err(|e| tutti_core::NodeRegistryError::ConstructionFailed(e.to_string()))?
+                        SpatialPannerNode::atmos_7_1_4().map_err(|e| {
+                            tutti_core::NodeRegistryError::ConstructionFailed(e.to_string())
+                        })?
                     } else if layout.rear_left.is_some() {
-                        SpatialPannerNode::surround_7_1()
-                            .map_err(|e| tutti_core::NodeRegistryError::ConstructionFailed(e.to_string()))?
+                        SpatialPannerNode::surround_7_1().map_err(|e| {
+                            tutti_core::NodeRegistryError::ConstructionFailed(e.to_string())
+                        })?
                     } else {
-                        SpatialPannerNode::surround_5_1()
-                            .map_err(|e| tutti_core::NodeRegistryError::ConstructionFailed(e.to_string()))?
+                        SpatialPannerNode::surround_5_1().map_err(|e| {
+                            tutti_core::NodeRegistryError::ConstructionFailed(e.to_string())
+                        })?
                     }
                 }
-                _ => SpatialPannerNode::stereo()
-                    .map_err(|e| tutti_core::NodeRegistryError::ConstructionFailed(e.to_string()))?, // Default to stereo
+                _ => SpatialPannerNode::stereo().map_err(|e| {
+                    tutti_core::NodeRegistryError::ConstructionFailed(e.to_string())
+                })?, // Default to stereo
             };
 
             AudioUnit::set_sample_rate(&mut panner, sample_rate);

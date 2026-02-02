@@ -1,8 +1,8 @@
 //! Transport state machine.
 
 use super::position::{LoopRange, MusicalPosition};
-use crate::AtomicFlag;
 use crate::compat::Arc;
+use crate::AtomicFlag;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MotionState {

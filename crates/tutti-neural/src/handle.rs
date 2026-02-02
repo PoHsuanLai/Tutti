@@ -67,30 +67,21 @@ impl NeuralHandle {
     ///
     /// Returns false when neural is disabled.
     pub fn has_gpu(&self) -> bool {
-        self.neural
-            .as_ref()
-            .map(|n| n.has_gpu())
-            .unwrap_or(false)
+        self.neural.as_ref().map(|n| n.has_gpu()).unwrap_or(false)
     }
 
     /// Get the current sample rate.
     ///
     /// Returns 0.0 when neural is disabled.
     pub fn sample_rate(&self) -> f32 {
-        self.neural
-            .as_ref()
-            .map(|n| n.sample_rate())
-            .unwrap_or(0.0)
+        self.neural.as_ref().map(|n| n.sample_rate()).unwrap_or(0.0)
     }
 
     /// Get the current buffer size.
     ///
     /// Returns 0 when neural is disabled.
     pub fn buffer_size(&self) -> usize {
-        self.neural
-            .as_ref()
-            .map(|n| n.buffer_size())
-            .unwrap_or(0)
+        self.neural.as_ref().map(|n| n.buffer_size()).unwrap_or(0)
     }
 
     /// Check if neural subsystem is enabled.

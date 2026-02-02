@@ -1,9 +1,9 @@
 //! PDC delay compensation AudioUnit.
 
+use crate::compat::{any, AtomicUsize, Ordering};
 use crate::pdc::DelayBuffer;
 use crate::{AudioUnit, BufferMut, BufferRef};
 use fundsp::signal::SignalFrame;
-use crate::compat::{any, AtomicUsize, Ordering};
 
 /// PDC delay compensation as an AudioUnit.
 pub struct PdcDelayUnit {

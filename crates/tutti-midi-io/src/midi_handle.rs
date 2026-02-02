@@ -6,10 +6,10 @@
 use crate::system::MidiSystem;
 use std::sync::Arc;
 
-#[cfg(feature = "mpe")]
-use crate::system::MpeHandle;
 #[cfg(feature = "midi2")]
 use crate::system::Midi2Handle;
+#[cfg(feature = "mpe")]
+use crate::system::MpeHandle;
 
 /// Fluent handle for MIDI operations.
 ///

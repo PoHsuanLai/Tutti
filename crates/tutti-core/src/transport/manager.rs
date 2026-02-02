@@ -1,14 +1,14 @@
 //! Transport manager with FSM-based state management.
 
+use crate::compat::{Arc, UnsafeCell};
 use arc_swap::ArcSwap;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use crate::compat::{UnsafeCell, Arc};
 
 use super::fsm::{TransportEvent, TransportFSM};
 use super::position::{LoopRange, MusicalPosition};
 use super::tempo_map::{TempoMap, TempoMapSnapshot, TimeSignature, BBT};
-use crate::{AtomicDouble, AtomicFlag, AtomicFloat, AtomicU8};
 use crate::compat::Ordering;
+use crate::{AtomicDouble, AtomicFlag, AtomicFloat, AtomicU8};
 
 // Re-export MotionState from FSM
 pub use super::fsm::MotionState;

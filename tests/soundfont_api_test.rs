@@ -6,10 +6,7 @@ mod soundfont_tests {
 
     #[test]
     fn test_soundfont_load_api() {
-        let engine = TuttiEngine::builder()
-            .sample_rate(48000.0)
-            .build()
-            .unwrap();
+        let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
         // Note: This test documents the API but won't actually load a file
         // In a real scenario, you'd provide a valid .sf2 file path
@@ -22,10 +19,7 @@ mod soundfont_tests {
 
     #[test]
     fn test_soundfont_instance_api() {
-        let engine = TuttiEngine::builder()
-            .sample_rate(48000.0)
-            .build()
-            .unwrap();
+        let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
         // If we had a valid .sf2 file, we could:
         // 1. Load it: engine.load_sf2("piano", "path/to/piano.sf2")?;

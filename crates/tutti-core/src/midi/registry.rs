@@ -5,9 +5,9 @@
 //! only occur during `register_unit()` which runs at setup time, never on
 //! the audio thread.
 
+use crate::compat::{Arc, Vec};
 use crossbeam_channel::{Receiver, Sender};
 use dashmap::DashMap;
-use crate::compat::{Arc, Vec};
 
 use super::traits::MidiEvent;
 

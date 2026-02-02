@@ -1,15 +1,11 @@
 //! Integration tests for DSP fluent API
 
-use tutti::prelude::*;
 use tutti::dsp_nodes::{ChannelLayout, LfoShape};
+use tutti::prelude::*;
 
 #[test]
 fn test_dsp_lfo_registration_and_instantiation() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Register an LFO node type
     engine.dsp().lfo("test_lfo", LfoShape::Sine, 2.0);
@@ -28,11 +24,7 @@ fn test_dsp_lfo_registration_and_instantiation() {
 
 #[test]
 fn test_dsp_envelope_registration() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Register peak envelope follower
     engine.dsp().envelope("env", 0.001, 0.1);
@@ -42,18 +34,16 @@ fn test_dsp_envelope_registration() {
 
     // Instantiate both
     let env = engine.instance("env", &params! {}).unwrap();
-    let rms_env = engine.instance("rms_env", &params! { "gain" => 2.0 }).unwrap();
+    let rms_env = engine
+        .instance("rms_env", &params! { "gain" => 2.0 })
+        .unwrap();
 
     assert_ne!(env, rms_env);
 }
 
 #[test]
 fn test_dsp_sidechain_dynamics() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Register sidechain compressor and gate
     engine
@@ -90,11 +80,7 @@ fn test_dsp_sidechain_dynamics() {
 
 #[test]
 fn test_dsp_spatial_panners() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Register VBAP panner with stereo layout
     engine
@@ -125,11 +111,7 @@ fn test_dsp_spatial_panners() {
 
 #[test]
 fn test_dsp_chained_registration() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Test chained registration (fluent API)
     engine
@@ -146,11 +128,7 @@ fn test_dsp_chained_registration() {
 
 #[test]
 fn test_dsp_nodes_in_graph() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Register DSP nodes
     engine.dsp().lfo("lfo", LfoShape::Sine, 0.5);
@@ -177,11 +155,7 @@ fn test_dsp_nodes_in_graph() {
 
 #[test]
 fn test_multiple_instances_of_same_node() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Register once
     engine.dsp().lfo("lfo", LfoShape::Sine, 2.0);
@@ -201,10 +175,7 @@ fn test_multiple_instances_of_same_node() {
 
 #[test]
 fn test_dsp_remove_and_query() {
-    let engine = TuttiEngine::builder()
-        .sample_rate(48000.0)
-        .build()
-        .unwrap();
+    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
 
     // Register some nodes
     engine.dsp().lfo("lfo1", LfoShape::Sine, 2.0);

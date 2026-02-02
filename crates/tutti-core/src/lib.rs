@@ -64,7 +64,7 @@ pub use pdc::PdcDelayUnit;
 
 // Transport types
 pub use transport::{
-    automation_curves, AutomationEnvelopeFn, AutomationReaderInput, MetronomeHandle, Metronome,
+    automation_curves, AutomationEnvelopeFn, AutomationReaderInput, Metronome, MetronomeHandle,
     MetronomeMode, MotionState, TempoMap, TimeSignature, TransportClock, TransportHandle,
     TransportManager, BBT,
 };
@@ -79,8 +79,8 @@ pub use metering::{
 pub use pdc::{DelayBuffer, PdcManager, PdcState};
 
 // Lock-free primitives
-pub use lockfree::{AtomicDouble, AtomicFlag, AtomicFloat};
 pub use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+pub use lockfree::{AtomicDouble, AtomicFlag, AtomicFloat};
 
 // Neural audio integration (graph analysis & traits)
 #[cfg(feature = "neural")]
@@ -103,8 +103,8 @@ pub use neural::{
 pub type VoiceId = u64;
 
 // Module declarations
-pub(crate) mod compat;
 pub(crate) mod callback;
+pub(crate) mod compat;
 pub(crate) mod lockfree;
 pub(crate) mod metering;
 mod net_frontend;

@@ -90,7 +90,7 @@ impl<'a> GraphAnalyzer<'a> {
         // Pre-size collections based on neural node count (typical graphs have few groups)
         let node_count = neural_nodes.len();
         let mut visited = HashSet::with_capacity(node_count);
-        let mut groups = Vec::with_capacity(node_count.min(8));  // Rarely >8 parallel groups
+        let mut groups = Vec::with_capacity(node_count.min(8)); // Rarely >8 parallel groups
 
         for &node_id in &neural_nodes {
             if visited.contains(&node_id) {

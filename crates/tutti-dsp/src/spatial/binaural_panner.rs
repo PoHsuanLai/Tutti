@@ -96,16 +96,6 @@ impl BinauralPanner {
         self.elevation_target.set(elevation.clamp(-90.0, 90.0));
     }
 
-    /// Get current azimuth (target value)
-    pub(crate) fn azimuth(&self) -> f32 {
-        self.azimuth_target.get()
-    }
-
-    /// Get current elevation (target value)
-    pub(crate) fn elevation(&self) -> f32 {
-        self.elevation_target.get()
-    }
-
     /// Process mono input to binaural stereo output
     ///
     /// Uses simple ITD/ILD model:

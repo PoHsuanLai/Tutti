@@ -106,8 +106,8 @@ pub use tutti_core::{
     Fade,
     // Metering (includes LUFS!)
     MeteringManager,
-    MetronomeHandle,
     Metronome,
+    MetronomeHandle,
     MetronomeMode,
     MotionState,
     NetBackend,
@@ -157,7 +157,9 @@ pub use tutti_core::{Sample, F32, F64};
 pub use tutti_midi_io as midi;
 
 #[cfg(feature = "midi")]
-pub use tutti_midi_io::{MidiEvent, MidiSystem, MidiSystemBuilder, MidiHandle, PortInfo, RawMidiEvent};
+pub use tutti_midi_io::{
+    MidiEvent, MidiHandle, MidiSystem, MidiSystemBuilder, PortInfo, RawMidiEvent,
+};
 
 #[cfg(feature = "midi")]
 pub use tutti_core::{AsMidiAudioUnit, MidiAudioUnit, MidiRegistry};
@@ -184,7 +186,7 @@ pub use tutti_synth as synth;
 pub use tutti_synth::{Envelope, PolySynth, Waveform};
 
 #[cfg(feature = "soundfont")]
-pub use tutti_synth::{SoundFontSystem, SoundFontSynth, SoundFontUnit};
+pub use tutti_synth::{SoundFontSynth, SoundFontSystem, SoundFontUnit};
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
@@ -275,16 +277,14 @@ pub mod prelude {
     pub use crate::core::TransportManager;
 
     // Node parameters (for instance() calls)
-    pub use crate::core::{
-        get_param, get_param_or, NodeParamValue, NodeParams,
-    };
+    pub use crate::core::{get_param, get_param_or, NodeParamValue, NodeParams};
 
     // Re-export macros from tutti-core
     pub use tutti_core::{chain, mix, params, split};
 
     // MIDI (optional)
     #[cfg(feature = "midi")]
-    pub use crate::midi::{MidiEvent, MidiSystem, MidiHandle};
+    pub use crate::midi::{MidiEvent, MidiHandle, MidiSystem};
 
     // Sampler (optional)
     #[cfg(feature = "sampler")]
@@ -300,5 +300,5 @@ pub mod prelude {
 
     // Analysis (optional)
     #[cfg(feature = "analysis")]
-    pub use crate::analysis::{TransientDetector, PitchDetector};
+    pub use crate::analysis::{PitchDetector, TransientDetector};
 }

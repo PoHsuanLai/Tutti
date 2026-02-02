@@ -1,8 +1,7 @@
-use crate::spatial::types::ChannelLayout;
 use crate::Result;
 use std::sync::Arc;
 use tutti_core::AtomicFloat;
-use vbap::{SpeakerConfig, VBAPanner};
+use vbap::VBAPanner;
 
 /// Default smoothing time for position changes (50ms for smooth automation)
 const DEFAULT_POSITION_SMOOTH_TIME: f32 = 0.05;
@@ -48,7 +47,6 @@ impl ExponentialSmoother {
 /// **Internal implementation detail** - users should use `SpatialPannerNode` instead.
 pub(crate) struct SpatialPanner {
     panner: VBAPanner,
-    layout: ChannelLayout,
     /// Target azimuth position in degrees (-180 to 180)
     azimuth_target: Arc<AtomicFloat>,
     /// Target elevation position in degrees (-90 to 90)
@@ -66,11 +64,10 @@ pub(crate) struct SpatialPanner {
 
 impl SpatialPanner {
     /// Helper to create panner with default smoothing
-    fn new_with_layout(panner: VBAPanner, layout: ChannelLayout) -> Self {
+    fn new_with_layout(panner: VBAPanner) -> Self {
         let sample_rate = 48000.0; // Default sample rate, can be updated later
         Self {
             panner,
-            layout,
             azimuth_target: Arc::new(AtomicFloat::new(0.0)),
             elevation_target: Arc::new(AtomicFloat::new(0.0)),
             azimuth_smoother: ExponentialSmoother::new(DEFAULT_POSITION_SMOOTH_TIME, sample_rate),
@@ -83,117 +80,33 @@ impl SpatialPanner {
     /// Create a stereo panner
     pub(crate) fn stereo() -> Result<Self> {
         let panner = VBAPanner::builder().stereo().build()?;
-        Ok(Self::new_with_layout(panner, ChannelLayout::stereo()))
+        Ok(Self::new_with_layout(panner))
     }
 
     /// Create a quad (4.0) panner
     pub(crate) fn quad() -> Result<Self> {
         let panner = VBAPanner::builder().quad().build()?;
-        Ok(Self::new_with_layout(
-            panner,
-            ChannelLayout {
-                left: 0,
-                right: 1,
-                center: None,
-                lfe: None,
-                surround_left: Some(2),
-                surround_right: Some(3),
-                rear_left: None,
-                rear_right: None,
-                height_front_left: None,
-                height_front_right: None,
-                height_rear_left: None,
-                height_rear_right: None,
-            },
-        ))
+        Ok(Self::new_with_layout(panner))
     }
 
     /// Create a 5.1 surround panner
     pub(crate) fn surround_5_1() -> Result<Self> {
         let panner = VBAPanner::builder().surround_5_1().build()?;
-        Ok(Self::new_with_layout(panner, ChannelLayout::surround_5_1()))
+        Ok(Self::new_with_layout(panner))
     }
 
     /// Create a 7.1 surround panner
     pub(crate) fn surround_7_1() -> Result<Self> {
         let panner = VBAPanner::builder().surround_7_1().build()?;
-        Ok(Self::new_with_layout(panner, ChannelLayout::surround_7_1()))
+        Ok(Self::new_with_layout(panner))
     }
 
     /// Create a Dolby Atmos 7.1.4 panner
     pub(crate) fn atmos_7_1_4() -> Result<Self> {
         let panner = VBAPanner::builder().atmos_7_1_4().build()?;
-        Ok(Self::new_with_layout(panner, ChannelLayout::atmos_7_1_4()))
+        Ok(Self::new_with_layout(panner))
     }
 
-    /// Create a panner with custom speaker configuration
-    pub fn from_config(config: SpeakerConfig) -> Result<Self> {
-        let num_speakers = config.num_speakers();
-        let panner = VBAPanner::new(config);
-
-        let layout = match num_speakers {
-            2 => ChannelLayout::stereo(),
-            6 => ChannelLayout::surround_5_1(),
-            8 => ChannelLayout::surround_7_1(),
-            12 => ChannelLayout::atmos_7_1_4(),
-            _ => ChannelLayout {
-                left: 0,
-                right: std::cmp::min(1, num_speakers - 1),
-                center: None,
-                lfe: None,
-                surround_left: None,
-                surround_right: None,
-                rear_left: None,
-                rear_right: None,
-                height_front_left: None,
-                height_front_right: None,
-                height_rear_left: None,
-                height_rear_right: None,
-            },
-        };
-
-        Ok(Self::new_with_layout(panner, layout))
-    }
-
-    /// Create a panner with custom speaker positions
-    ///
-    /// Each position is (azimuth, elevation) in degrees.
-    pub fn custom(positions: &[(f64, f64)]) -> Result<Self> {
-        let mut builder = VBAPanner::builder();
-        for &(az, el) in positions {
-            builder = builder.add_speaker(az, el);
-        }
-        let panner = builder.build()?;
-
-        let num_speakers = panner.num_speakers();
-        let layout = match num_speakers {
-            2 => ChannelLayout::stereo(),
-            6 => ChannelLayout::surround_5_1(),
-            8 => ChannelLayout::surround_7_1(),
-            12 => ChannelLayout::atmos_7_1_4(),
-            _ => ChannelLayout {
-                left: 0,
-                right: std::cmp::min(1, num_speakers.saturating_sub(1)),
-                center: None,
-                lfe: None,
-                surround_left: None,
-                surround_right: None,
-                rear_left: None,
-                rear_right: None,
-                height_front_left: None,
-                height_front_right: None,
-                height_rear_left: None,
-                height_rear_right: None,
-            },
-        };
-
-        Ok(Self::new_with_layout(panner, layout))
-    }
-
-    /// Get the channel layout
-    pub fn layout(&self) -> &ChannelLayout {
-        &self.layout
-    }
 
     /// Get number of output channels
     pub fn num_channels(&self) -> usize {
@@ -210,24 +123,9 @@ impl SpatialPanner {
         self.elevation_target.set(elevation.clamp(-90.0, 90.0));
     }
 
-    /// Get current azimuth (target value)
-    pub fn azimuth(&self) -> f32 {
-        self.azimuth_target.get()
-    }
-
-    /// Get current elevation (target value)
-    pub fn elevation(&self) -> f32 {
-        self.elevation_target.get()
-    }
-
     /// Set spread factor (0.0 = point source, 1.0 = diffuse)
     pub fn set_spread(&mut self, spread: f32) {
         self.spread = spread.clamp(0.0, 1.0);
-    }
-
-    /// Get current spread
-    pub fn spread(&self) -> f32 {
-        self.spread
     }
 
     /// Compute speaker gains for current position
@@ -265,40 +163,12 @@ impl SpatialPanner {
         gains
     }
 
-    /// Compute gains for a specific position (without changing stored position)
-    pub fn compute_gains_at(&self, azimuth: f32, elevation: f32) -> Vec<f32> {
-        let gains_f64 = self.panner.compute_gains(azimuth as f64, elevation as f64);
-        gains_f64.iter().map(|&g| g as f32).collect()
-    }
-
-    /// Process a mono sample into multichannel output
-    pub fn process_mono(&mut self, sample: f32) -> Vec<f32> {
-        self.compute_gains().iter().map(|g| sample * g).collect()
-    }
-
     /// Process mono into pre-allocated output buffer
     pub fn process_mono_into(&mut self, sample: f32, output: &mut [f32]) {
         let gains = self.compute_gains();
         for (out, gain) in output.iter_mut().zip(gains.iter()) {
             *out = sample * gain;
         }
-    }
-
-    /// Process a block of mono samples into multichannel output
-    ///
-    /// Output is interleaved: [ch0_s0, ch1_s0, ..., chN_s0, ch0_s1, ch1_s1, ...]
-    pub fn process_mono_block(&mut self, input: &[f32]) -> Vec<f32> {
-        let gains = self.compute_gains();
-        let num_channels = gains.len();
-        let mut output = Vec::with_capacity(input.len() * num_channels);
-
-        for &sample in input {
-            for &gain in &gains {
-                output.push(sample * gain);
-            }
-        }
-
-        output
     }
 
     /// Process stereo into multichannel with width preservation
@@ -348,31 +218,5 @@ impl SpatialPanner {
                 *out = left * gain_l + right * gain_r;
             }
         }
-    }
-
-    /// Process a block of mono samples with position automation
-    ///
-    /// `positions` should contain (azimuth, elevation) pairs for each sample.
-    /// Output is interleaved multichannel.
-    pub fn process_mono_block_automated(
-        &self,
-        input: &[f32],
-        positions: &[(f32, f32)],
-    ) -> Vec<f32> {
-        let num_channels = self.num_channels();
-        let mut output = Vec::with_capacity(input.len() * num_channels);
-
-        for (i, &sample) in input.iter().enumerate() {
-            let (az, el) = positions
-                .get(i)
-                .copied()
-                .unwrap_or((self.azimuth(), self.elevation()));
-            let gains_f64 = self.panner.compute_gains(az as f64, el as f64);
-            for gain in gains_f64 {
-                output.push(sample * gain as f32);
-            }
-        }
-
-        output
     }
 }

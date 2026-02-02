@@ -71,8 +71,11 @@ impl ExportBuilder {
     ///
     /// The format is auto-detected from the file extension.
     pub fn to_file(self, path: impl AsRef<Path>) -> Result<()> {
-        let duration = self.duration_seconds
-            .ok_or_else(|| crate::ExportError::InvalidOptions("Duration not set. Use .duration_seconds() or .duration_beats()".into()))?;
+        let duration = self.duration_seconds.ok_or_else(|| {
+            crate::ExportError::InvalidOptions(
+                "Duration not set. Use .duration_seconds() or .duration_beats()".into(),
+            )
+        })?;
 
         // Render the Net offline
         let mut render_net = self.net;
@@ -93,7 +96,8 @@ impl ExportBuilder {
         // Export using tutti-export
         let path = path.as_ref();
         crate::export_to_file(
-            path.to_str().ok_or_else(|| crate::ExportError::InvalidOptions("Invalid path".into()))?,
+            path.to_str()
+                .ok_or_else(|| crate::ExportError::InvalidOptions("Invalid path".into()))?,
             &left,
             &right,
             &self.options,
@@ -106,8 +110,11 @@ impl ExportBuilder {
     ///
     /// Returns `(left_channel, right_channel, sample_rate)`.
     pub fn render(self) -> Result<(Vec<f32>, Vec<f32>, f64)> {
-        let duration = self.duration_seconds
-            .ok_or_else(|| crate::ExportError::InvalidOptions("Duration not set. Use .duration_seconds() or .duration_beats()".into()))?;
+        let duration = self.duration_seconds.ok_or_else(|| {
+            crate::ExportError::InvalidOptions(
+                "Duration not set. Use .duration_seconds() or .duration_beats()".into(),
+            )
+        })?;
 
         // Render the Net offline
         let mut render_net = self.net;

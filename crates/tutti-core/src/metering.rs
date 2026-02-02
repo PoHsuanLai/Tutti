@@ -295,9 +295,7 @@ impl MeteringManager {
     }
 
     pub fn set_master_consumer(&self, receiver: Receiver<(f32, f32)>) -> crate::Result<()> {
-        *self
-            .analysis_buffer_rx
-            .lock() = Some(receiver);
+        *self.analysis_buffer_rx.lock() = Some(receiver);
         Ok(())
     }
 
@@ -346,10 +344,7 @@ impl MeteringManager {
     }
 
     pub fn take_analysis_consumer(&self) -> crate::Result<Option<AnalysisConsumer>> {
-        let receiver = self
-            .analysis_buffer_rx
-            .lock()
-            .take();
+        let receiver = self.analysis_buffer_rx.lock().take();
         Ok(receiver.map(|r| (r, self.sample_rate)))
     }
 
@@ -364,16 +359,12 @@ impl MeteringManager {
         channel_index: usize,
     ) -> crate::Result<crossbeam_channel::Sender<(f32, f32)>> {
         let (tx, rx) = crossbeam_channel::bounded::<(f32, f32)>(8192);
-        self.channel_analysis_rxs
-            .lock()
-            .insert(channel_index, rx);
+        self.channel_analysis_rxs.lock().insert(channel_index, rx);
         Ok(tx)
     }
 
     pub fn remove_channel_analysis_buffer(&self, channel_index: usize) -> crate::Result<()> {
-        self.channel_analysis_rxs
-            .lock()
-            .remove(&channel_index);
+        self.channel_analysis_rxs.lock().remove(&channel_index);
         Ok(())
     }
 
@@ -454,9 +445,7 @@ impl MeteringManager {
     }
 
     pub fn reset_lufs(&self) -> crate::Result<()> {
-        self.ebur128
-            .lock()
-            .reset();
+        self.ebur128.lock().reset();
         Ok(())
     }
 

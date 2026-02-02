@@ -228,7 +228,10 @@ impl SamplerSystem {
     ///     .speed(1.5)
     ///     .start();
     /// ```
-    pub fn stream(&self, file_path: impl Into<std::path::PathBuf>) -> crate::stream_builder::StreamBuilder<'_> {
+    pub fn stream(
+        &self,
+        file_path: impl Into<std::path::PathBuf>,
+    ) -> crate::stream_builder::StreamBuilder<'_> {
         crate::stream_builder::StreamBuilder::new(self, file_path)
     }
 
@@ -247,7 +250,10 @@ impl SamplerSystem {
     /// sampler.stop_capture(session.id);
     /// sampler.flush_capture(session.id, "final.wav");
     /// ```
-    pub fn record(&self, file_path: impl Into<std::path::PathBuf>) -> crate::stream_builder::RecordBuilder<'_> {
+    pub fn record(
+        &self,
+        file_path: impl Into<std::path::PathBuf>,
+    ) -> crate::stream_builder::RecordBuilder<'_> {
         crate::stream_builder::RecordBuilder::new(self, file_path)
     }
 }

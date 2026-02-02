@@ -196,7 +196,9 @@ impl NodeRegistry {
         F: Fn(&NodeParams) -> Result<Box<dyn AudioUnit>, NodeRegistryError> + Send + Sync + 'static,
     {
         let name = name.into();
-        self.constructors.write().insert(name, Arc::new(constructor));
+        self.constructors
+            .write()
+            .insert(name, Arc::new(constructor));
     }
 
     /// Create a node instance from registered type
@@ -283,10 +285,7 @@ pub enum NodeRegistryError {
 /// let volume: f64 = get_param(params, "volume")?;
 /// let enabled: bool = get_param(params, "enabled")?;
 /// ```
-pub fn get_param<T: ParamConvert>(
-    params: &NodeParams,
-    name: &str,
-) -> Result<T, NodeRegistryError> {
+pub fn get_param<T: ParamConvert>(params: &NodeParams, name: &str) -> Result<T, NodeRegistryError> {
     params
         .get(name)
         .ok_or_else(|| NodeRegistryError::MissingParameter(name.to_string()))
@@ -311,4 +310,3 @@ pub fn get_param_or<T: ParamConvert>(params: &NodeParams, name: &str, default: T
         .and_then(|v| T::from_param(v))
         .unwrap_or(default)
 }
-

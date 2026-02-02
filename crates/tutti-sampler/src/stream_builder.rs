@@ -168,7 +168,9 @@ impl<'a> RecordBuilder<'a> {
     /// should write to. The butler thread will read from the ring buffer
     /// and write to disk asynchronously.
     pub fn start(self) -> CaptureSession {
-        let sample_rate = self.sample_rate.unwrap_or_else(|| self.sampler.sample_rate());
+        let sample_rate = self
+            .sample_rate
+            .unwrap_or_else(|| self.sampler.sample_rate());
 
         let session = self.sampler.create_capture(
             self.file_path,
