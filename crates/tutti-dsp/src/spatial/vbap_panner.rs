@@ -107,7 +107,6 @@ impl SpatialPanner {
         Ok(Self::new_with_layout(panner))
     }
 
-
     /// Get number of output channels
     pub fn num_channels(&self) -> usize {
         self.panner.num_speakers()
