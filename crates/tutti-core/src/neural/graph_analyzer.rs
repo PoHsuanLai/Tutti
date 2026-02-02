@@ -1,7 +1,7 @@
 //! Graph analysis for neural batching optimization.
 
 use super::metadata::{NeuralModelId, NeuralNodeManager};
-use crate::compat::{Box, HashMap, Vec};
+use crate::compat::{HashMap, Vec};
 use alloc::collections::VecDeque;
 use fundsp::net::{Net, NodeId, Source};
 use hashbrown::HashSet;
