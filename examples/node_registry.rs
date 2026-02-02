@@ -16,35 +16,35 @@ fn main() -> tutti::Result<()> {
     // Register custom DSP nodes
     engine.add_node("sine", |params| {
         use tutti::dsp::*;
-        let freq = get_param_or(params, "frequency", 440.0, |v| v.as_f32());
+        let freq: f32 = get_param_or(params, "frequency", 440.0);
         Ok(Box::new(sine_hz::<f32>(freq)))
     });
 
     engine.add_node("lowpass", |params| {
         use tutti::dsp::*;
-        let cutoff = get_param_or(params, "cutoff", 2000.0, |v| v.as_f32());
-        let q = get_param_or(params, "q", 1.0, |v| v.as_f32());
+        let cutoff: f32 = get_param_or(params, "cutoff", 2000.0);
+        let q: f32 = get_param_or(params, "q", 1.0);
         Ok(Box::new(lowpass_hz::<f32>(cutoff, q)))
     });
 
     engine.add_node("mul", |params| {
         use tutti::dsp::*;
-        let value = get_param_or(params, "value", 1.0, |v| v.as_f32());
+        let value: f32 = get_param_or(params, "value", 1.0);
         Ok(Box::new(dc(value)))
     });
 
     engine.add_node("reverb_stereo", |params| {
         use tutti::dsp::*;
-        let room_size = get_param_or(params, "room_size", 0.5, |v| v.as_f64());
-        let time = get_param_or(params, "time", 2.0, |v| v.as_f64());
-        let diffusion = get_param_or(params, "diffusion", 0.5, |v| v.as_f64());
+        let room_size: f64 = get_param_or(params, "room_size", 0.5);
+        let time: f64 = get_param_or(params, "time", 2.0);
+        let diffusion: f64 = get_param_or(params, "diffusion", 0.5);
         Ok(Box::new(reverb_stereo(room_size, time, diffusion)))
     });
 
     engine.add_node("custom_oscillator", |params| {
         use tutti::dsp::*;
-        let freq = get_param_or(params, "frequency", 440.0, |v| v.as_f32());
-        let detune = get_param_or(params, "detune", 5.0, |v| v.as_f32());
+        let freq: f32 = get_param_or(params, "frequency", 440.0);
+        let detune: f32 = get_param_or(params, "detune", 5.0);
         Ok(Box::new(
             sine_hz::<f32>(freq) * 0.5 + sine_hz::<f32>(freq + detune) * 0.5,
         ))

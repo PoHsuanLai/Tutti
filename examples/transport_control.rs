@@ -11,6 +11,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Create a simple sine wave
     engine.add_node("sine", |params| {
+        use tutti::dsp::*;
         let freq: f32 = get_param_or(params, "frequency", 440.0);
         Ok(Box::new(sine_hz::<f32>(freq)))
     });

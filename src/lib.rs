@@ -118,8 +118,7 @@ pub use tutti_core::{
     NodeInfo,
     NodeParamValue,
     NodeParams,
-    // Node registry
-    NodeRegistry,
+    // Note: NodeRegistry is now internal - use engine.add_node() / engine.load_*() APIs
     NodeRegistryError,
     PdcDelayUnit,
 

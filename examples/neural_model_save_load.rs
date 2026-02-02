@@ -22,22 +22,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("2. Convert to Burn .mpk format:");
     println!("   $ burn-import onnx model.onnx --out-type burn model.mpk");
     println!();
-    println!("3. Register with Tutti:");
-    println!("   let registry = NodeRegistry::default();");
-    println!("   register_neural_model(&registry, &neural, \"my_synth\", \"model.mpk\")?;");
+    println!("3. Load with Tutti engine:");
+    println!("   engine.load_mpk(\"my_synth\", \"model.mpk\")?;");
     println!();
     println!("4. Use in audio graph:");
+    println!("   let synth = engine.instance(\"my_synth\", &params! {{}})?;");
     println!("   engine.graph(|net| {{");
-    println!("       let synth = registry.create(\"my_synth\", &params! {{}}).unwrap();");
-    println!("       let synth_id = net.add(synth);");
-    println!("       net.pipe_output(synth_id);");
+    println!("       net.pipe_output(synth);");
     println!("   }});");
     println!();
     println!("Alternative: Load SafeTensors format");
     println!("   $ Enable feature: tutti = {{ features = [\"neural\", \"safetensors\"] }}");
-    println!(
-        "   $ register_neural_model(&registry, &neural, \"my_synth\", \"model.safetensors\")?;"
-    );
+    println!("   $ engine.load_safetensors(\"my_synth\", \"model.safetensors\")?;");
     println!();
     println!("✓ Neural system is ready for model loading!");
 

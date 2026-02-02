@@ -8,69 +8,58 @@
 //! - Dragonfly Room Reverb: https://github.com/michaelwillis/dragonfly-reverb/releases
 //! - Surge XT: https://github.com/surge-synthesizer/releases-xt/releases
 
-use std::path::PathBuf;
 use std::time::Duration;
 use tutti::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Runtime::new()?;
-    let handle = runtime.handle();
-    let registry = NodeRegistry::default();
 
-    // Try assets/plugins first, then system directories
-    let assets_path = PathBuf::from("assets/plugins");
-    let mut plugins = if assets_path.exists() {
-        register_plugin_directory(&registry, &handle, &assets_path).ok()
-    } else {
-        None
-    };
+    // Create audio engine with plugin support
+    let engine = TuttiEngine::builder()
+        .sample_rate(44100.0)
+        .plugin_runtime(runtime.handle().clone())
+        .build()?;
 
-    if plugins.as_ref().map_or(true, |p| p.is_empty()) {
-        plugins = register_all_system_plugins(&registry, &handle).ok();
+    // Try to load a plugin (example paths - adjust to your system)
+    let plugin_paths = [
+        "/Library/Audio/Plug-Ins/VST3/DragonflyRoomReverb.vst3",
+        "/usr/lib/vst3/DragonflyRoomReverb.vst3",
+        "assets/plugins/DragonflyRoomReverb.vst3",
+    ];
+
+    let mut loaded = false;
+    for path in &plugin_paths {
+        if std::path::Path::new(path).exists() {
+            match engine.load_vst3("reverb", path) {
+                Ok(_) => {
+                    println!("Loaded plugin from: {}", path);
+                    loaded = true;
+                    break;
+                }
+                Err(e) => println!("Failed to load {}: {}", path, e),
+            }
+        }
     }
 
-    if let Some(ref p) = plugins {
-        println!("Loaded {} plugins", p.len());
+    if !loaded {
+        println!("No plugin found. Install DragonflyRoomReverb or adjust plugin_paths.");
+        return Ok(());
     }
 
-    // Create audio engine with sine -> reverb -> output
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    // Create instances
+    use tutti::dsp::sine_hz;
+    let sine_id = engine.graph(|net| net.add(Box::new(sine_hz::<f32>(440.0))));
+    let reverb = engine.instance("reverb", &params! {})?;
 
+    // Connect graph
     engine.graph(|net| {
-        let sine = registry
-            .create("sine", &params! { "frequency" => 440.0 })
-            .unwrap();
-        let sine_id = net.add(sine);
-
-        // Try plugin reverb, fallback to builtin
-        let reverb_id = ["DragonflyRoomReverb", "ValhallaFreqEcho", "CloudReverb"]
-            .iter()
-            .find_map(|name| {
-                registry
-                    .create(name, &params! { "sample_rate" => 44100.0 })
-                    .ok()
-                    .map(|r| net.add(r))
-            })
-            .unwrap_or_else(|| {
-                let r = registry
-                    .create(
-                        "reverb_stereo",
-                        &params! {
-                            "room_size" => 0.8,
-                            "time" => 3.0
-                        },
-                    )
-                    .unwrap();
-                net.add(r)
-            });
-
-        net.pipe(sine_id, reverb_id);
-        net.pipe_output(reverb_id);
+        net.pipe(sine_id, reverb);
+        net.pipe_output(reverb);
     });
 
-    println!("Playing for 3 seconds...");
+    println!("Playing sine through plugin reverb...");
     engine.transport().play();
-    std::thread::sleep(Duration::from_secs(3));
+    std::thread::sleep(Duration::from_secs(5));
 
     Ok(())
 }
