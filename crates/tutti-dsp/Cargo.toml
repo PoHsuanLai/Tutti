@@ -13,6 +13,9 @@ tutti-core = { path = "../tutti-core", default-features = false }
 # Spatial audio VBAP library (always included)
 vbap = "0.1"
 
+# Error handling
+thiserror = "2"
+
 # Serialization (optional)
 serde = { version = "1", features = ["derive"], optional = true }
 

@@ -2,7 +2,7 @@
 //!
 //! Provides RT-safe communication with plugin server processes via lock-free queues.
 
-use crate::error::{BridgeError, Result};
+use crate::error::{BridgeError, LoadStage, Result};
 use crate::lockfree_bridge::{BridgeThreadHandle, LockFreeBridge};
 use crate::protocol::{BridgeConfig, BridgeMessage, HostMessage, PluginMetadata, SampleFormat};
 use crate::shared_memory::SharedAudioBuffer;
@@ -138,6 +138,7 @@ impl PluginClient {
 
         // Load plugin with preferred format from config
         let preferred_format = config.preferred_format;
+        let plugin_path_for_error = plugin_path.clone();
         transport
             .send_host_message(&HostMessage::LoadPlugin {
                 path: plugin_path,
@@ -150,7 +151,11 @@ impl PluginClient {
         let metadata = match response {
             BridgeMessage::PluginLoaded { metadata } => metadata,
             BridgeMessage::Error { message } => {
-                return Err(BridgeError::LoadFailed(message));
+                return Err(BridgeError::LoadFailed {
+                    path: plugin_path_for_error,
+                    stage: LoadStage::Opening,
+                    reason: message,
+                });
             }
             _ => {
                 return Err(BridgeError::ProtocolError(format!(

@@ -4,7 +4,7 @@
 //! External code should use `SyncNeuralSynthBuilder` which handles threading safely.
 
 use super::neural_synth::NeuralSynth;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::gpu::{InferenceRequest, ModelType, NeuralInferenceEngine, NeuralModelId, VoiceId};
 use burn::tensor::backend::Backend;
 use std::sync::Arc;
@@ -76,9 +76,7 @@ impl<B: Backend> NeuralSynthBuilder<B> {
         let model_path = model_path.into();
 
         // Load model into engine
-        let model_id = engine
-            .load_model(&model_path, ModelType::NeuralSynth)
-            .map_err(|e| Error::ModelLoad(format!("Failed to load neural synth model: {}", e)))?;
+        let model_id = engine.load_model(&model_path, ModelType::NeuralSynth)?;
 
         // Extract model name from path
         let model_name = std::path::Path::new(&model_path)

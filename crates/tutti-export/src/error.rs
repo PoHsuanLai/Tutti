@@ -37,3 +37,41 @@ pub enum ExportError {
 
 /// Result type for export operations
 pub type Result<T> = std::result::Result<T, ExportError>;
+
+// From trait implementations for external library errors
+
+impl From<hound::Error> for ExportError {
+    fn from(e: hound::Error) -> Self {
+        ExportError::Io(io::Error::other(e))
+    }
+}
+
+impl From<rubato::ResamplerConstructionError> for ExportError {
+    fn from(e: rubato::ResamplerConstructionError) -> Self {
+        ExportError::Resample(e.to_string())
+    }
+}
+
+impl From<rubato::ResampleError> for ExportError {
+    fn from(e: rubato::ResampleError) -> Self {
+        ExportError::Resample(e.to_string())
+    }
+}
+
+impl From<flacenc::error::Verify> for ExportError {
+    fn from(e: flacenc::error::Verify) -> Self {
+        ExportError::Encoding(format!("FLAC config error: {:?}", e))
+    }
+}
+
+impl From<flacenc::error::EncodeError> for ExportError {
+    fn from(e: flacenc::error::EncodeError) -> Self {
+        ExportError::Encoding(format!("FLAC encoding error: {:?}", e))
+    }
+}
+
+impl From<flacenc::error::OutputError> for ExportError {
+    fn from(e: flacenc::error::OutputError) -> Self {
+        ExportError::Encoding(format!("FLAC output error: {:?}", e))
+    }
+}

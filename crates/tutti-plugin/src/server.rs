@@ -2,7 +2,7 @@
 //!
 //! The server loads and runs plugins in a sandboxed environment.
 
-use crate::error::{BridgeError, Result};
+use crate::error::{BridgeError, LoadStage, Result};
 use crate::protocol::{BridgeConfig, BridgeMessage, HostMessage, PluginMetadata};
 use crate::shared_memory::SharedAudioBuffer;
 use crate::transport::{MessageTransport, TransportListener};
@@ -739,10 +739,11 @@ impl PluginServer {
     ) -> Result<PluginMetadata> {
         // Validate plugin exists
         if !path.exists() {
-            return Err(BridgeError::LoadFailed(format!(
-                "Plugin not found: {:?}",
-                path
-            )));
+            return Err(BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Scanning,
+                reason: "Plugin not found".to_string(),
+            });
         }
 
         // Determine plugin format from extension
@@ -781,10 +782,14 @@ impl PluginServer {
                 }
 
                 _ => {
-                    return Err(BridgeError::LoadFailed(format!(
-                    "Unsupported plugin format: {}. Supported: .vst3, .vst/.dll/.so (VST2), .clap",
-                    extension
-                )));
+                    return Err(BridgeError::LoadFailed {
+                        path: path.to_path_buf(),
+                        stage: LoadStage::Opening,
+                        reason: format!(
+                            "Unsupported plugin format: {}. Supported: .vst3, .vst/.dll/.so (VST2), .clap",
+                            extension
+                        ),
+                    });
                 }
             };
 

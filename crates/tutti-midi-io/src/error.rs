@@ -36,5 +36,23 @@ impl From<midly::Error> for Error {
     }
 }
 
+impl From<midir::InitError> for Error {
+    fn from(e: midir::InitError) -> Self {
+        Error::MidiDevice(e.to_string())
+    }
+}
+
+impl From<midir::ConnectError<midir::MidiOutput>> for Error {
+    fn from(e: midir::ConnectError<midir::MidiOutput>) -> Self {
+        Error::MidiPort(e.to_string())
+    }
+}
+
+impl From<midir::ConnectError<midir::MidiInput>> for Error {
+    fn from(e: midir::ConnectError<midir::MidiInput>) -> Self {
+        Error::MidiPort(e.to_string())
+    }
+}
+
 /// Result type for tutti-midi operations
 pub type Result<T> = std::result::Result<T, Error>;

@@ -4,7 +4,7 @@
 //! to be used with tutti's NodeRegistry system.
 
 use crate::client::PluginClient;
-use crate::error::BridgeError;
+use crate::error::{BridgeError, LoadStage};
 use crate::protocol::BridgeConfig;
 use std::path::{Path, PathBuf};
 use tutti_core::{get_param_or, NodeRegistry, NodeRegistryError};
@@ -88,18 +88,25 @@ pub fn register_plugin_directory<P: AsRef<Path>>(
     let dir_path = path.as_ref();
 
     if !dir_path.is_dir() {
-        return Err(BridgeError::LoadFailed(format!(
-            "Not a directory: {}",
-            dir_path.display()
-        )));
+        return Err(BridgeError::LoadFailed {
+            path: dir_path.to_path_buf(),
+            stage: LoadStage::Scanning,
+            reason: "Not a directory".to_string(),
+        });
     }
 
     // Scan for plugin files
-    for entry in std::fs::read_dir(dir_path)
-        .map_err(|e| BridgeError::LoadFailed(format!("Failed to read directory: {}", e)))?
+    for entry in std::fs::read_dir(dir_path).map_err(|e| BridgeError::LoadFailed {
+        path: dir_path.to_path_buf(),
+        stage: LoadStage::Scanning,
+        reason: format!("Failed to read directory: {}", e),
+    })?
     {
-        let entry =
-            entry.map_err(|e| BridgeError::LoadFailed(format!("Failed to read entry: {}", e)))?;
+        let entry = entry.map_err(|e| BridgeError::LoadFailed {
+            path: dir_path.to_path_buf(),
+            stage: LoadStage::Scanning,
+            reason: format!("Failed to read entry: {}", e),
+        })?;
         let path = entry.path();
 
         if is_plugin_file(&path) {

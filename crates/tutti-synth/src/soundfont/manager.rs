@@ -41,13 +41,7 @@ impl SoundFontSystem {
         }
 
         // Load the SoundFont file (I/O happens outside lock)
-        let file = File::open(&path).map_err(|e| {
-            Error::SoundFont(format!(
-                "Failed to open SoundFont file '{}': {}",
-                path.display(),
-                e
-            ))
-        })?;
+        let file = File::open(&path)?;
 
         let mut reader = BufReader::new(file);
         let soundfont = Arc::new(SoundFont::new(&mut reader).map_err(|e| {

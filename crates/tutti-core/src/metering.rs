@@ -1,6 +1,6 @@
 //! Real-time audio metering and CPU tracking.
 
-use crate::compat::{Arc, HashMap, Mutex, ToString};
+use crate::compat::{Arc, HashMap, Mutex};
 use crate::{AtomicBool, AtomicFloat, AtomicU32, AtomicU64, Ordering};
 use core::time::Duration;
 use crossbeam_channel::Receiver;
@@ -420,28 +420,28 @@ impl MeteringManager {
         self.ebur128
             .lock()
             .loudness_global()
-            .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
+            .map_err(|_| crate::Error::LufsNotReady)
     }
 
     pub fn loudness_shortterm(&self) -> crate::Result<f64> {
         self.ebur128
             .lock()
             .loudness_shortterm()
-            .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
+            .map_err(|_| crate::Error::LufsNotReady)
     }
 
     pub fn loudness_range(&self) -> crate::Result<f64> {
         self.ebur128
             .lock()
             .loudness_range()
-            .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
+            .map_err(|_| crate::Error::LufsNotReady)
     }
 
     pub fn true_peak(&self, channel: u32) -> crate::Result<f64> {
         self.ebur128
             .lock()
             .true_peak(channel)
-            .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
+            .map_err(|_| crate::Error::LufsNotReady)
     }
 
     pub fn reset_lufs(&self) -> crate::Result<()> {

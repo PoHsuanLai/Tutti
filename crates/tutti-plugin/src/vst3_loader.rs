@@ -2,7 +2,7 @@
 //!
 //! This module handles loading and interfacing with VST3 plugins in the bridge server.
 
-use crate::error::{BridgeError, Result};
+use crate::error::{BridgeError, LoadStage, Result};
 use crate::protocol::{AudioBuffer, MidiEvent, PluginMetadata};
 use libloading::Library;
 use std::collections::HashMap;
@@ -1241,28 +1241,30 @@ impl Vst3Library {
 
         // Load the shared library
         let library = unsafe {
-            Library::new(&lib_path).map_err(|e| {
-                BridgeError::LoadFailed(format!(
-                    "Failed to load VST3 library {}: {}",
-                    lib_path.display(),
-                    e
-                ))
+            Library::new(&lib_path).map_err(|e| BridgeError::LoadFailed {
+                path: lib_path.clone(),
+                stage: LoadStage::Opening,
+                reason: e.to_string(),
             })?
         };
 
         // Get the factory function
         let get_factory: libloading::Symbol<GetPluginFactoryFn> = unsafe {
-            library.get(b"GetPluginFactory\0").map_err(|e| {
-                BridgeError::LoadFailed(format!("VST3 library missing GetPluginFactory: {}", e))
+            library.get(b"GetPluginFactory\0").map_err(|e| BridgeError::LoadFailed {
+                path: lib_path.clone(),
+                stage: LoadStage::Factory,
+                reason: format!("Missing GetPluginFactory symbol: {}", e),
             })?
         };
 
         // Call the factory function
         let factory = unsafe { get_factory() };
         if factory.is_null() {
-            return Err(BridgeError::LoadFailed(
-                "GetPluginFactory returned null".to_string(),
-            ));
+            return Err(BridgeError::LoadFailed {
+                path: lib_path,
+                stage: LoadStage::Factory,
+                reason: "GetPluginFactory returned null".to_string(),
+            });
         }
 
         // Get vtable from the factory object (first pointer is vtable)
@@ -1282,7 +1284,11 @@ impl Vst3Library {
             let lib_name = bundle_path
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .ok_or_else(|| BridgeError::LoadFailed(bundle_path.display().to_string()))?;
+                .ok_or_else(|| BridgeError::LoadFailed {
+                    path: bundle_path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: "Failed to extract plugin name from bundle path".to_string(),
+                })?;
 
             let lib_path = bundle_path.join("Contents").join("MacOS").join(lib_name);
             if lib_path.exists() {
@@ -1295,7 +1301,11 @@ impl Vst3Library {
             let lib_name = bundle_path
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .ok_or_else(|| BridgeError::LoadFailed(bundle_path.display().to_string()))?;
+                .ok_or_else(|| BridgeError::LoadFailed {
+                    path: bundle_path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: "Failed to extract plugin name from bundle path".to_string(),
+                })?;
 
             let lib_path = bundle_path
                 .join("Contents")
@@ -1311,7 +1321,11 @@ impl Vst3Library {
             let lib_name = bundle_path
                 .file_stem()
                 .and_then(|s| s.to_str())
-                .ok_or_else(|| BridgeError::LoadFailed(bundle_path.display().to_string()))?;
+                .ok_or_else(|| BridgeError::LoadFailed {
+                    path: bundle_path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: "Failed to extract plugin name from bundle path".to_string(),
+                })?;
 
             let lib_path = bundle_path
                 .join("Contents")
@@ -1327,10 +1341,11 @@ impl Vst3Library {
             return Ok(bundle_path.to_path_buf());
         }
 
-        Err(BridgeError::LoadFailed(format!(
-            "Could not find library in VST3 bundle: {}",
-            bundle_path.display()
-        )))
+        Err(BridgeError::LoadFailed {
+            path: bundle_path.to_path_buf(),
+            stage: LoadStage::Opening,
+            reason: "Could not find library in VST3 bundle".to_string(),
+        })
     }
 
     /// Get factory info
@@ -1356,10 +1371,10 @@ impl Vst3Library {
         if result == K_RESULT_OK {
             Ok(info)
         } else {
-            Err(BridgeError::LoadFailed(format!(
-                "get_class_info failed with code {}",
-                result
-            )))
+            Err(BridgeError::PluginError {
+                stage: LoadStage::Factory,
+                code: result,
+            })
         }
     }
 
@@ -1370,10 +1385,10 @@ impl Vst3Library {
         if result == K_RESULT_OK && !obj.is_null() {
             Ok(obj)
         } else {
-            Err(BridgeError::LoadFailed(format!(
-                "create_instance failed with code {}",
-                result
-            )))
+            Err(BridgeError::PluginError {
+                stage: LoadStage::Instantiation,
+                code: result,
+            })
         }
     }
 
@@ -1448,19 +1463,22 @@ impl Vst3Instance {
     /// Load a VST3 plugin from path
     pub fn load(path: &Path, sample_rate: f32) -> Result<Self> {
         if !path.exists() {
-            return Err(BridgeError::LoadFailed(format!(
-                "Plugin not found: {:?}",
-                path
-            )));
+            return Err(BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Scanning,
+                reason: "Plugin file not found".to_string(),
+            });
         }
 
         let library = Arc::new(Vst3Library::load(path)?);
         let count = library.count_classes();
 
         if count == 0 {
-            return Err(BridgeError::LoadFailed(
-                "VST3 factory contains no classes".to_string(),
-            ));
+            return Err(BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Factory,
+                reason: "VST3 factory contains no classes".to_string(),
+            });
         }
 
         // Get factory info for vendor name
@@ -1482,8 +1500,10 @@ impl Vst3Instance {
                     None
                 }
             })
-            .ok_or_else(|| {
-                BridgeError::LoadFailed("No audio processor classes found in VST3".to_string())
+            .ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Factory,
+                reason: "No audio processor classes found in VST3".to_string(),
             })?;
 
         // Create IComponent instance
@@ -1499,9 +1519,11 @@ impl Vst3Instance {
             if result == K_RESULT_OK && !proc_ptr.is_null() {
                 proc_ptr
             } else {
-                return Err(BridgeError::LoadFailed(
-                    "VST3 plugin does not support IAudioProcessor".to_string(),
-                ));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Instantiation,
+                    reason: "VST3 plugin does not support IAudioProcessor".to_string(),
+                });
             }
         };
 
@@ -1584,10 +1606,10 @@ impl Vst3Instance {
             unsafe { ((*self.component_vtable).initialize)(self.component, std::ptr::null_mut()) };
 
         if result != K_RESULT_OK && result != K_RESULT_TRUE {
-            return Err(BridgeError::LoadFailed(format!(
-                "IComponent::initialize failed with code {}",
-                result
-            )));
+            return Err(BridgeError::PluginError {
+                stage: LoadStage::Initialization,
+                code: result,
+            });
         }
 
         // Initialize controller if separate
@@ -1612,10 +1634,10 @@ impl Vst3Instance {
         let result = unsafe { ((*self.processor_vtable).setup_processing)(self.processor, &setup) };
 
         if result != K_RESULT_OK && result != K_RESULT_TRUE {
-            return Err(BridgeError::LoadFailed(format!(
-                "IAudioProcessor::setupProcessing failed with code {}",
-                result
-            )));
+            return Err(BridgeError::PluginError {
+                stage: LoadStage::Setup,
+                code: result,
+            });
         }
 
         // Activate buses
@@ -1623,12 +1645,20 @@ impl Vst3Instance {
 
         // Set active state
         let result = unsafe { ((*self.processor_vtable).set_processing)(self.processor, 1) };
-
-        if result != K_RESULT_OK && result != K_RESULT_TRUE {}
+        if result != K_RESULT_OK && result != K_RESULT_TRUE {
+            return Err(BridgeError::PluginError {
+                stage: LoadStage::Activation,
+                code: result,
+            });
+        }
 
         let result = unsafe { ((*self.component_vtable).set_active)(self.component, 1) };
-
-        if result != K_RESULT_OK && result != K_RESULT_TRUE {}
+        if result != K_RESULT_OK && result != K_RESULT_TRUE {
+            return Err(BridgeError::PluginError {
+                stage: LoadStage::Activation,
+                code: result,
+            });
+        }
 
         self.is_active = true;
         Ok(())
@@ -1675,9 +1705,11 @@ impl Vst3Instance {
     /// If the plugin doesn't support f64, this will return an error.
     pub fn set_sample_format(&mut self, format: crate::protocol::SampleFormat) -> Result<()> {
         if format == crate::protocol::SampleFormat::Float64 && !self.metadata.supports_f64 {
-            return Err(BridgeError::LoadFailed(
-                "Plugin does not support 64-bit audio processing".to_string(),
-            ));
+            return Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Setup,
+                reason: "Plugin does not support 64-bit audio processing".to_string(),
+            });
         }
         self.sample_format = format;
         Ok(())
@@ -1820,7 +1852,13 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {}
+        // On error, clear output buffers to prevent noise/glitches
+        if result != K_RESULT_OK {
+            for output_slice in buffer.outputs.iter_mut() {
+                output_slice.fill(0.0);
+            }
+            return crate::protocol::MidiEventVec::new(); // Return empty MIDI events on error
+        }
 
         // Collect output MIDI events from the plugin (e.g., synths, arpeggiators)
         output_event_list.to_midi_events()
@@ -1944,7 +1982,13 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {}
+        // On error, clear output buffers to prevent noise/glitches
+        if result != K_RESULT_OK {
+            for output_slice in buffer.outputs.iter_mut() {
+                output_slice.fill(0.0);
+            }
+            return (crate::protocol::MidiEventVec::new(), Default::default(), Default::default());
+        }
 
         // Collect outputs
         let midi_output = output_event_list.to_midi_events();
@@ -2120,7 +2164,13 @@ impl Vst3Instance {
         let result =
             unsafe { ((*self.processor_vtable).process)(self.processor, &mut process_data) };
 
-        if result != K_RESULT_OK {}
+        // On error, clear output buffers to prevent noise/glitches
+        if result != K_RESULT_OK {
+            for output_slice in buffer.outputs.iter_mut() {
+                output_slice.fill(0.0);
+            }
+            return (crate::protocol::MidiEventVec::new(), Default::default(), Default::default());
+        }
 
         let midi_output = output_event_list.to_midi_events();
         let param_output = output_param_changes.to_protocol();
@@ -2196,7 +2246,11 @@ impl Vst3Instance {
     /// Load plugin state from byte array
     pub fn set_state(&mut self, data: &[u8]) -> Result<()> {
         if data.len() < 4 {
-            return Err(BridgeError::LoadFailed("Invalid state data".to_string()));
+            return Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: "Invalid state data".to_string(),
+            });
         }
 
         // Read parameter count
@@ -2204,11 +2258,15 @@ impl Vst3Instance {
         let expected_size = 4 + (param_count as usize * 8);
 
         if data.len() != expected_size {
-            return Err(BridgeError::LoadFailed(format!(
-                "State size mismatch: expected {}, got {}",
-                expected_size,
-                data.len()
-            )));
+            return Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: format!(
+                    "State size mismatch: expected {}, got {}",
+                    expected_size,
+                    data.len()
+                ),
+            });
         }
 
         // Read and set all parameter values
@@ -2241,21 +2299,27 @@ impl Vst3Instance {
     ///
     /// The `parent` pointer must be a valid window handle for the target platform.
     pub unsafe fn open_editor(&mut self, parent: *mut c_void) -> Result<(u32, u32)> {
-        let ctrl = self.controller.ok_or_else(|| {
-            BridgeError::LoadFailed("Plugin has no editor controller".to_string())
+        let ctrl = self.controller.ok_or_else(|| BridgeError::LoadFailed {
+            path: PathBuf::from("unknown"),
+            stage: LoadStage::Initialization,
+            reason: "Plugin has no editor controller".to_string(),
         })?;
 
-        let ctrl_vtable = self
-            .controller_vtable
-            .ok_or_else(|| BridgeError::LoadFailed("Controller vtable missing".to_string()))?;
+        let ctrl_vtable = self.controller_vtable.ok_or_else(|| BridgeError::LoadFailed {
+            path: PathBuf::from("unknown"),
+            stage: LoadStage::Initialization,
+            reason: "Controller vtable missing".to_string(),
+        })?;
 
         // Create view using IEditController::createView
         let view_ptr = unsafe { ((*ctrl_vtable).create_view)(ctrl, std::ptr::null()) };
 
         if view_ptr.is_null() {
-            return Err(BridgeError::LoadFailed(
-                "Failed to create plugin view".to_string(),
-            ));
+            return Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: "Failed to create plugin view".to_string(),
+            });
         }
 
         let view_vtable = unsafe { *(view_ptr as *const *const IPlugViewVtable) };
@@ -2271,10 +2335,10 @@ impl Vst3Instance {
         let result = unsafe { ((*view_vtable).attached)(view_ptr, parent, platform_type) };
 
         if result != K_RESULT_OK {
-            return Err(BridgeError::LoadFailed(format!(
-                "Failed to attach view: result = {}",
-                result
-            )));
+            return Err(BridgeError::PluginError {
+                stage: LoadStage::Initialization,
+                code: result,
+            });
         }
 
         // Get view size

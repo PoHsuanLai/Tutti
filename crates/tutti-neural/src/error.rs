@@ -19,10 +19,6 @@ pub(crate) enum GpuError {
     /// Resource not found
     #[error("Resource not found: {0}")]
     ResourceNotFound(String),
-
-    /// Model loading error
-    #[error("Failed to load model: {0}")]
-    ModelLoadError(String),
 }
 
 /// Errors that can occur during neural audio processing
@@ -75,10 +71,20 @@ pub enum Error {
     /// Invalid file path
     #[error("Invalid path: {0}")]
     InvalidPath(String),
+
+    /// Burn model loading error (RecorderError)
+    #[error("Burn model loading failed: {0}")]
+    BurnRecorder(String),
 }
 
 impl From<GpuError> for Error {
     fn from(e: GpuError) -> Self {
         Error::Gpu(e.to_string())
+    }
+}
+
+impl From<burn::record::RecorderError> for Error {
+    fn from(e: burn::record::RecorderError) -> Self {
+        Error::BurnRecorder(e.to_string())
     }
 }

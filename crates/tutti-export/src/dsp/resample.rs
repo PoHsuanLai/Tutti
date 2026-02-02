@@ -80,8 +80,7 @@ pub fn resample_stereo(
         chunk_size,
         sub_chunks,
         2, // stereo
-    )
-    .map_err(|e| ExportError::Resample(format!("Failed to create resampler: {}", e)))?;
+    )?;
 
     // Prepare input channels
     let input_frames = left.len();
@@ -117,9 +116,7 @@ pub fn resample_stereo(
         let input_channels = vec![chunk_left, chunk_right];
 
         // Resample
-        let output = resampler
-            .process(&input_channels, None)
-            .map_err(|e| ExportError::Resample(format!("Resampling failed: {}", e)))?;
+        let output = resampler.process(&input_channels, None)?;
 
         // Collect output
         output_left.extend_from_slice(&output[0]);

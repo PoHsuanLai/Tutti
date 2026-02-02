@@ -6,7 +6,7 @@ VST2, VST3, and CLAP plugin hosting.
 
 Loads audio plugins in separate server processes. Each plugin runs in its own process, so crashes don't affect the main application. Audio buffers are passed via shared memory (mmap).
 
-Uses [vst](https://crates.io/crates/vst) for VST2, [vst3-sys](https://crates.io/crates/vst3-sys) for VST3, and [clap-sys](https://crates.io/crates/clap-sys) for CLAP.
+Uses [vst](https://crates.io/crates/vst) for VST2, raw C pointers for VST3, and [clap-sys](https://crates.io/crates/clap-sys) for CLAP.
 
 ## Quick Start
 

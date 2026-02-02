@@ -147,7 +147,6 @@ impl MidiSystem {
             .as_ref()
             .ok_or_else(|| Error::InvalidConfig("MIDI I/O not enabled".to_string()))?
             .connect(device_index)
-            .map_err(Error::InvalidConfig)
     }
 
     /// Connect a hardware MIDI device by name (partial match)
@@ -158,7 +157,6 @@ impl MidiSystem {
             .as_ref()
             .ok_or_else(|| Error::InvalidConfig("MIDI I/O not enabled".to_string()))?
             .connect_by_name(name)
-            .map_err(Error::InvalidConfig)
     }
 
     /// Disconnect the currently connected device

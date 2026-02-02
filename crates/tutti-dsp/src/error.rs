@@ -1,27 +1,26 @@
 //! Error types for tutti-dsp
 
-use std::fmt;
+use thiserror::Error;
 
-#[derive(Debug, Clone)]
+/// Error type for DSP operations
+#[derive(Debug, Clone, Error)]
 pub enum Error {
+    /// Invalid channel count for the operation
+    #[error("Invalid channel count: {0}")]
     InvalidChannelCount(String),
+
+    /// Invalid speaker configuration
+    #[error("Invalid speaker configuration: {0}")]
     InvalidSpeakerConfig(String),
+
+    /// Invalid parameter value
+    #[error("Invalid parameter: {0}")]
     InvalidParameter(String),
+
+    /// VBAP spatial audio error
+    #[error("VBAP error: {0}")]
     VBAPError(String),
 }
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::InvalidChannelCount(msg) => write!(f, "Invalid channel count: {}", msg),
-            Error::InvalidSpeakerConfig(msg) => write!(f, "Invalid speaker configuration: {}", msg),
-            Error::InvalidParameter(msg) => write!(f, "Invalid parameter: {}", msg),
-            Error::VBAPError(msg) => write!(f, "VBAP error: {}", msg),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
 
 // Convert VBAP errors to our error type
 impl From<vbap::VBAPError> for Error {
@@ -30,4 +29,5 @@ impl From<vbap::VBAPError> for Error {
     }
 }
 
+/// Result type for DSP operations
 pub type Result<T> = std::result::Result<T, Error>;

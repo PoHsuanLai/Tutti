@@ -58,6 +58,9 @@ pub enum Error {
 
     #[error("Not implemented: {0}")]
     NotImplemented(String),
+
+    #[error("LUFS measurement not available (already in use or not initialized)")]
+    LufsNotReady,
 }
 
 /// Result type alias.

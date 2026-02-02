@@ -2,6 +2,9 @@
 //!
 //! This module handles loading and interfacing with VST2 plugins.
 
+use crate::error::LoadStage;
+use std::path::PathBuf;
+
 #[cfg(feature = "vst2")]
 use vst::plugin::Plugin as VstPlugin;
 
@@ -63,11 +66,18 @@ impl Vst2Instance {
             )));
 
             // Load plugin (clone host since it will be moved into the loader)
-            let mut loader = PluginLoader::load(path, Arc::clone(&host))
-                .map_err(|e| BridgeError::LoadFailed(format!("Failed to load VST: {:?}", e)))?;
+            let mut loader = PluginLoader::load(path, Arc::clone(&host)).map_err(|e| {
+                BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: format!("Failed to load VST: {:?}", e),
+                }
+            })?;
 
-            let mut instance = loader.instance().map_err(|e| {
-                BridgeError::LoadFailed(format!("Failed to create instance: {:?}", e))
+            let mut instance = loader.instance().map_err(|e| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Instantiation,
+                reason: format!("Failed to create instance: {:?}", e),
             })?;
 
             // Initialize plugin
@@ -99,9 +109,11 @@ impl Vst2Instance {
         #[cfg(not(feature = "vst2"))]
         {
             let _ = (path, sample_rate);
-            Err(BridgeError::LoadFailed(
-                "VST2 support not compiled (enable 'vst2' feature)".to_string(),
-            ))
+            Err(BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Opening,
+                reason: "VST2 support not compiled (enable 'vst2' feature)".to_string(),
+            })
         }
     }
 
@@ -637,10 +649,11 @@ impl Vst2Instance {
     /// Open plugin editor
     #[cfg(feature = "vst2")]
     pub fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
-        let mut editor = self
-            .instance
-            .get_editor()
-            .ok_or_else(|| BridgeError::LoadFailed("Plugin has no editor".to_string()))?;
+        let mut editor = self.instance.get_editor().ok_or_else(|| BridgeError::LoadFailed {
+            path: PathBuf::from("unknown"),
+            stage: LoadStage::Initialization,
+            reason: "Plugin has no editor".to_string(),
+        })?;
 
         editor.open(parent);
 
@@ -651,9 +664,11 @@ impl Vst2Instance {
 
     #[cfg(not(feature = "vst2"))]
     pub fn open_editor(&mut self, _parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
-        Err(BridgeError::LoadFailed(
-            "VST2 support not compiled".to_string(),
-        ))
+        Err(BridgeError::LoadFailed {
+            path: PathBuf::from("unknown"),
+            stage: LoadStage::Opening,
+            reason: "VST2 support not compiled".to_string(),
+        })
     }
 
     /// Close plugin editor
@@ -770,7 +785,11 @@ impl Vst2Instance {
     #[cfg(feature = "vst2")]
     pub fn set_state(&mut self, data: &[u8]) -> Result<()> {
         if data.len() < 4 {
-            return Err(BridgeError::LoadFailed("Invalid state data".to_string()));
+            return Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: "Invalid state data".to_string(),
+            });
         }
 
         // Read parameter count
@@ -778,11 +797,15 @@ impl Vst2Instance {
         let expected_size = (param_count as usize + 1) * 4;
 
         if data.len() != expected_size {
-            return Err(BridgeError::LoadFailed(format!(
-                "State size mismatch: expected {}, got {}",
-                expected_size,
-                data.len()
-            )));
+            return Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: format!(
+                    "State size mismatch: expected {}, got {}",
+                    expected_size,
+                    data.len()
+                ),
+            });
         }
 
         // Read and set all parameter values

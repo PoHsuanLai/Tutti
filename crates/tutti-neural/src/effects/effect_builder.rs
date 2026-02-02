@@ -3,7 +3,7 @@
 //! This is an internal implementation detail used only on the inference thread.
 //! External code should use `SyncEffectBuilder` which handles threading safely.
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::gpu::{ModelType, NeuralEffectNode, NeuralInferenceEngine, NeuralModelId};
 use burn::tensor::backend::Backend;
 use std::sync::Arc;
@@ -51,9 +51,7 @@ impl<B: Backend> EffectBuilder<B> {
     {
         let model_path = model_path.into();
 
-        let model_id = engine
-            .load_model(&model_path, ModelType::Effect)
-            .map_err(|e| Error::ModelLoad(format!("Failed to load effect model: {}", e)))?;
+        let model_id = engine.load_model(&model_path, ModelType::Effect)?;
 
         let model_name = std::path::Path::new(&model_path)
             .file_stem()

@@ -78,11 +78,8 @@ pub fn register_neural_directory<P: AsRef<Path>>(
     }
 
     // Scan for model files
-    for entry in std::fs::read_dir(dir_path)
-        .map_err(|e| NeuralError::InvalidPath(format!("Failed to read directory: {}", e)))?
-    {
-        let entry =
-            entry.map_err(|e| NeuralError::InvalidPath(format!("Failed to read entry: {}", e)))?;
+    for entry in std::fs::read_dir(dir_path)? {
+        let entry = entry?;
         let path = entry.path();
 
         if is_neural_model_file(&path) {

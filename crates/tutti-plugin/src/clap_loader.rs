@@ -2,6 +2,9 @@
 //!
 //! This module handles loading and interfacing with CLAP plugins.
 
+use crate::error::LoadStage;
+use std::path::PathBuf;
+
 #[cfg(feature = "clap")]
 use clap_sys::entry::clap_plugin_entry;
 #[cfg(feature = "clap")]
@@ -350,48 +353,66 @@ impl ClapInstance {
         {
             // Load library
             let library = unsafe {
-                libloading::Library::new(path).map_err(|e| {
-                    BridgeError::LoadFailed(format!("Failed to load library: {}", e))
+                libloading::Library::new(path).map_err(|e| BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: format!("Failed to load library: {}", e),
                 })?
             };
 
             // Get entry point
             let entry: libloading::Symbol<unsafe extern "C" fn() -> *const clap_plugin_entry> = unsafe {
-                library
-                    .get(b"clap_entry\0")
-                    .map_err(|e| BridgeError::LoadFailed(format!("No clap_entry symbol: {}", e)))?
+                library.get(b"clap_entry\0").map_err(|e| BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: format!("No clap_entry symbol: {}", e),
+                })?
             };
 
             let entry_ptr = unsafe { entry() };
             if entry_ptr.is_null() {
-                return Err(BridgeError::LoadFailed(
-                    "clap_entry returned null".to_string(),
-                ));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: "clap_entry returned null".to_string(),
+                });
             }
 
             let entry_struct = unsafe { &*entry_ptr };
 
             // Check version compatibility
-            let init_fn = entry_struct
-                .init
-                .ok_or_else(|| BridgeError::LoadFailed("No init function".to_string()))?;
+            let init_fn = entry_struct.init.ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Opening,
+                reason: "No init function".to_string(),
+            })?;
             if !unsafe { init_fn(path.to_str().unwrap().as_ptr() as *const i8) } {
-                return Err(BridgeError::LoadFailed("Entry init failed".to_string()));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: "Entry init failed".to_string(),
+                });
             }
 
             // Create host
             let host = Box::into_raw(Box::new(create_clap_host()));
 
             // Get plugin factory
-            let get_factory_fn = entry_struct
-                .get_factory
-                .ok_or_else(|| BridgeError::LoadFailed("No get_factory function".to_string()))?;
+            let get_factory_fn = entry_struct.get_factory.ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Factory,
+                reason: "No get_factory function".to_string(),
+            })?;
             let factory_ptr = unsafe {
                 get_factory_fn(clap_sys::factory::plugin_factory::CLAP_PLUGIN_FACTORY_ID.as_ptr())
             };
 
             if factory_ptr.is_null() {
-                return Err(BridgeError::LoadFailed("No plugin factory".to_string()));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Factory,
+                    reason: "No plugin factory".to_string(),
+                });
             }
 
             let factory = unsafe {
@@ -401,21 +422,33 @@ impl ClapInstance {
             // Get plugin count and use first plugin
             let factory_typed =
                 factory_ptr as *const clap_sys::factory::plugin_factory::clap_plugin_factory;
-            let get_count_fn = factory.get_plugin_count.ok_or_else(|| {
-                BridgeError::LoadFailed("No get_plugin_count function".to_string())
+            let get_count_fn = factory.get_plugin_count.ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Factory,
+                reason: "No get_plugin_count function".to_string(),
             })?;
             let plugin_count = unsafe { get_count_fn(factory_typed) };
             if plugin_count == 0 {
-                return Err(BridgeError::LoadFailed("No plugins in factory".to_string()));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Factory,
+                    reason: "No plugins in factory".to_string(),
+                });
             }
 
             // Get first plugin descriptor
-            let get_desc_fn = factory.get_plugin_descriptor.ok_or_else(|| {
-                BridgeError::LoadFailed("No get_plugin_descriptor function".to_string())
+            let get_desc_fn = factory.get_plugin_descriptor.ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Factory,
+                reason: "No get_plugin_descriptor function".to_string(),
             })?;
             let desc_ptr = unsafe { get_desc_fn(factory_typed, 0) };
             if desc_ptr.is_null() {
-                return Err(BridgeError::LoadFailed("No plugin descriptor".to_string()));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Factory,
+                    reason: "No plugin descriptor".to_string(),
+                });
             }
 
             let descriptor = unsafe { &*desc_ptr };
@@ -424,24 +457,34 @@ impl ClapInstance {
             let plugin_id = unsafe { CStr::from_ptr(descriptor.id) }.to_string_lossy();
             let plugin_id_cstr = CString::new(plugin_id.as_ref()).unwrap();
 
-            let create_fn = factory
-                .create_plugin
-                .ok_or_else(|| BridgeError::LoadFailed("No create_plugin function".to_string()))?;
+            let create_fn = factory.create_plugin.ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Instantiation,
+                reason: "No create_plugin function".to_string(),
+            })?;
             let plugin = unsafe { create_fn(factory_typed, host, plugin_id_cstr.as_ptr()) };
 
             if plugin.is_null() {
-                return Err(BridgeError::LoadFailed(
-                    "Failed to create plugin instance".to_string(),
-                ));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Instantiation,
+                    reason: "Failed to create plugin instance".to_string(),
+                });
             }
 
             // Initialize plugin
             let plugin_ref = unsafe { &*plugin };
-            let init_fn = plugin_ref
-                .init
-                .ok_or_else(|| BridgeError::LoadFailed("No plugin init function".to_string()))?;
+            let init_fn = plugin_ref.init.ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Initialization,
+                reason: "No plugin init function".to_string(),
+            })?;
             if !unsafe { init_fn(plugin) } {
-                return Err(BridgeError::LoadFailed("Plugin init failed".to_string()));
+                return Err(BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Initialization,
+                    reason: "Plugin init failed".to_string(),
+                });
             }
 
             // Build metadata
@@ -472,9 +515,11 @@ impl ClapInstance {
         #[cfg(not(feature = "clap"))]
         {
             let _ = (path, sample_rate);
-            Err(BridgeError::LoadFailed(
-                "CLAP support not compiled (enable 'clap' feature)".to_string(),
-            ))
+            Err(BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Opening,
+                reason: "CLAP support not compiled (enable 'clap' feature)".to_string(),
+            })
         }
     }
 
@@ -490,21 +535,31 @@ impl ClapInstance {
             let plugin_ref = unsafe { &*self.plugin };
 
             // Activate
-            let activate_fn = plugin_ref
-                .activate
-                .ok_or_else(|| BridgeError::LoadFailed("No activate function".to_string()))?;
+            let activate_fn = plugin_ref.activate.ok_or_else(|| BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Activation,
+                reason: "No activate function".to_string(),
+            })?;
             if !unsafe { activate_fn(self.plugin, self.sample_rate as f64, 1, self.max_frames) } {
-                return Err(BridgeError::LoadFailed("Activate failed".to_string()));
+                return Err(BridgeError::LoadFailed {
+                    path: PathBuf::from("unknown"),
+                    stage: LoadStage::Activation,
+                    reason: "Activate failed".to_string(),
+                });
             }
 
             // Start processing
-            let start_fn = plugin_ref.start_processing.ok_or_else(|| {
-                BridgeError::LoadFailed("No start_processing function".to_string())
+            let start_fn = plugin_ref.start_processing.ok_or_else(|| BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Activation,
+                reason: "No start_processing function".to_string(),
             })?;
             if !unsafe { start_fn(self.plugin) } {
-                return Err(BridgeError::LoadFailed(
-                    "Start processing failed".to_string(),
-                ));
+                return Err(BridgeError::LoadFailed {
+                    path: PathBuf::from("unknown"),
+                    stage: LoadStage::Activation,
+                    reason: "Start processing failed".to_string(),
+                });
             }
 
             self.is_processing = true;
@@ -1312,7 +1367,11 @@ impl ClapInstance {
                     if unsafe { save_fn(self.plugin, &stream) } {
                         return Ok(buffer);
                     } else {
-                        return Err(BridgeError::LoadFailed("State save failed".to_string()));
+                        return Err(BridgeError::LoadFailed {
+                            path: PathBuf::from("unknown"),
+                            stage: LoadStage::Initialization,
+                            reason: "State save failed".to_string(),
+                        });
                     }
                 }
             }
@@ -1336,7 +1395,11 @@ impl ClapInstance {
                     if unsafe { load_fn(self.plugin, &stream) } {
                         return Ok(());
                     } else {
-                        return Err(BridgeError::LoadFailed("State load failed".to_string()));
+                        return Err(BridgeError::LoadFailed {
+                            path: PathBuf::from("unknown"),
+                            stage: LoadStage::Initialization,
+                            reason: "State load failed".to_string(),
+                        });
                     }
                 }
             }
@@ -1391,7 +1454,11 @@ impl ClapInstance {
                     let is_floating = false;
 
                     if !unsafe { create_fn(self.plugin, api, is_floating) } {
-                        return Err(BridgeError::LoadFailed("GUI create failed".to_string()));
+                        return Err(BridgeError::LoadFailed {
+                            path: PathBuf::from("unknown"),
+                            stage: LoadStage::Initialization,
+                            reason: "GUI create failed".to_string(),
+                        });
                     }
                 }
 
@@ -1416,7 +1483,11 @@ impl ClapInstance {
                     };
 
                     if !unsafe { set_parent_fn(self.plugin, &window) } {
-                        return Err(BridgeError::LoadFailed("GUI set_parent failed".to_string()));
+                        return Err(BridgeError::LoadFailed {
+                            path: PathBuf::from("unknown"),
+                            stage: LoadStage::Initialization,
+                            reason: "GUI set_parent failed".to_string(),
+                        });
                     }
                 }
 
@@ -1433,22 +1504,28 @@ impl ClapInstance {
                     }
                 }
 
-                return Err(BridgeError::LoadFailed(
-                    "Could not get GUI size".to_string(),
-                ));
+                return Err(BridgeError::LoadFailed {
+                    path: PathBuf::from("unknown"),
+                    stage: LoadStage::Initialization,
+                    reason: "Could not get GUI size".to_string(),
+                });
             }
 
-            Err(BridgeError::LoadFailed(
-                "Plugin has no GUI extension".to_string(),
-            ))
+            Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Initialization,
+                reason: "Plugin has no GUI extension".to_string(),
+            })
         }
 
         #[cfg(not(feature = "clap"))]
         {
             let _ = parent;
-            Err(BridgeError::LoadFailed(
-                "CLAP support not compiled".to_string(),
-            ))
+            Err(BridgeError::LoadFailed {
+                path: PathBuf::from("unknown"),
+                stage: LoadStage::Opening,
+                reason: "CLAP support not compiled".to_string(),
+            })
         }
     }
 

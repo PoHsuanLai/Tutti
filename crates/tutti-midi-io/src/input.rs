@@ -167,14 +167,13 @@ impl MidiInputManager {
         device_index: usize,
         producer_handle: InputProducerHandle,
         #[cfg(feature = "mpe")] mpe_processor: Option<MpeProcessorRef>,
-    ) -> Result<(MidiInputConnection<()>, String), String> {
-        let midi_input = MidiInput::new("dawai-midi-input")
-            .map_err(|e| format!("Failed to create MIDI input: {}", e))?;
+    ) -> Result<(MidiInputConnection<()>, String), crate::error::Error> {
+        let midi_input = MidiInput::new("dawai-midi-input")?;
 
         let ports = midi_input.ports();
         let port = ports
             .get(device_index)
-            .ok_or_else(|| format!("MIDI device {} not found", device_index))?;
+            .ok_or_else(|| crate::error::Error::MidiDevice(format!("MIDI device {} not found", device_index)))?;
 
         let port_name = midi_input
             .port_name(port)
@@ -212,8 +211,7 @@ impl MidiInputManager {
                     }
                 },
                 (),
-            )
-            .map_err(|e| format!("Failed to connect to MIDI device: {}", e))?;
+            )?;
 
         Ok((connection, port_name))
     }
@@ -232,7 +230,7 @@ impl MidiInputManager {
         devices
     }
 
-    pub fn connect(&self, device_index: usize) -> Result<(), String> {
+    pub fn connect(&self, device_index: usize) -> crate::error::Result<()> {
         let devices = Self::list_devices();
         let device_name = devices
             .get(device_index)
@@ -243,7 +241,7 @@ impl MidiInputManager {
         let producer_handle = self
             .port_manager
             .get_input_producer_handle(port_index)
-            .ok_or_else(|| "Failed to get producer handle".to_string())?;
+            .ok_or_else(|| crate::error::Error::MidiDevice("Failed to get producer handle".to_string()))?;
 
         self.command_sender
             .send(MidiCommand::Connect(
@@ -251,15 +249,15 @@ impl MidiInputManager {
                 port_index,
                 producer_handle,
             ))
-            .map_err(|_| "MIDI thread not running".to_string())
+            .map_err(|_| crate::error::Error::MidiDevice("MIDI thread not running".to_string()))
     }
 
-    pub fn connect_by_name(&self, name: &str) -> Result<(), String> {
+    pub fn connect_by_name(&self, name: &str) -> crate::error::Result<()> {
         let devices = Self::list_devices();
         let device = devices
             .iter()
             .find(|d| d.name.to_lowercase().contains(&name.to_lowercase()))
-            .ok_or_else(|| format!("No MIDI device matching '{}' found", name))?;
+            .ok_or_else(|| crate::error::Error::MidiDevice(format!("No MIDI device matching '{}' found", name)))?;
         self.connect(device.index)
     }
 

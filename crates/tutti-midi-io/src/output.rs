@@ -210,22 +210,19 @@ impl MidiOutputManager {
         }
     }
 
-    fn connect_to_device(device_index: usize) -> Result<(MidiOutputConnection, String), String> {
-        let midi_output = MidiOutput::new("dawai-midi-output")
-            .map_err(|e| format!("Failed to create MIDI output: {}", e))?;
+    fn connect_to_device(device_index: usize) -> Result<(MidiOutputConnection, String), crate::error::Error> {
+        let midi_output = MidiOutput::new("dawai-midi-output")?;
 
         let ports = midi_output.ports();
         let port = ports
             .get(device_index)
-            .ok_or_else(|| format!("MIDI output device {} not found", device_index))?;
+            .ok_or_else(|| crate::error::Error::MidiDevice(format!("MIDI output device {} not found", device_index)))?;
 
         let port_name = midi_output
             .port_name(port)
             .unwrap_or_else(|_| format!("Device {}", device_index));
 
-        let connection = midi_output
-            .connect(port, "dawai-output")
-            .map_err(|e| format!("Failed to connect to MIDI output device: {}", e))?;
+        let connection = midi_output.connect(port, "dawai-output")?;
 
         Ok((connection, port_name))
     }
@@ -244,18 +241,18 @@ impl MidiOutputManager {
         devices
     }
 
-    pub fn connect(&self, device_index: usize) -> Result<(), String> {
+    pub fn connect(&self, device_index: usize) -> crate::error::Result<()> {
         self.command_sender
             .send(MidiOutputCommand::Connect(device_index))
-            .map_err(|_| "MIDI output thread not running".to_string())
+            .map_err(|_| crate::error::Error::MidiDevice("MIDI output thread not running".to_string()))
     }
 
-    pub fn connect_by_name(&self, name: &str) -> Result<(), String> {
+    pub fn connect_by_name(&self, name: &str) -> crate::error::Result<()> {
         let devices = Self::list_devices();
         let device = devices
             .iter()
             .find(|d| d.name.to_lowercase().contains(&name.to_lowercase()))
-            .ok_or_else(|| format!("No MIDI output device found matching '{}'", name))?;
+            .ok_or_else(|| crate::error::Error::MidiDevice(format!("No MIDI output device found matching '{}'", name)))?;
         self.connect(device.index)
     }
 

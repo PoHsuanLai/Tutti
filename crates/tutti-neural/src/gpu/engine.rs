@@ -228,8 +228,7 @@ impl<B: Backend> NeuralInferenceEngine<B> {
         let id = NeuralModelId::new();
 
         // Load model from file
-        let model = FusedNeuralSynthModel::load_from_file(path, &*self.device)
-            .map_err(GpuError::ModelLoadError)?;
+        let model = FusedNeuralSynthModel::load_from_file(path, &*self.device)?;
 
         let entry = ModelEntry { model };
 
