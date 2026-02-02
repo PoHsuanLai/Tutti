@@ -12,7 +12,7 @@ use vst::host::{Host, PluginLoader};
 use vst::event::{Event as VstEvent, MidiEvent as VstMidiEvent};
 
 // Import MIDI types for event conversion
-use tutti_midi::{ChannelVoiceMsg, ControlChange};
+use tutti_midi_io::{ChannelVoiceMsg, ControlChange};
 
 use crate::error::{BridgeError, Result};
 use crate::protocol::{AudioBuffer, MidiEvent, PluginMetadata};
@@ -120,7 +120,7 @@ impl Vst2Instance {
         &mut self,
         buffer: &mut AudioBuffer,
         midi_events: &[MidiEvent],
-    ) -> Vec<MidiEvent> {
+    ) -> crate::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
             use vst::api;
@@ -128,7 +128,7 @@ impl Vst2Instance {
 
             let num_samples = buffer.num_samples;
             if num_samples == 0 {
-                return Vec::new();
+                return smallvec::SmallVec::new();
             }
 
             // Convert MIDI events to VST API format and send to plugin
@@ -241,13 +241,13 @@ impl Vst2Instance {
 
             // VST2 doesn't have explicit MIDI output - return empty
             // (Some VST2 synths output MIDI via deprecated methods we don't support)
-            Vec::new()
+            smallvec::SmallVec::new()
         }
 
         #[cfg(not(feature = "vst2"))]
         {
             let _ = (buffer, midi_events);
-            Vec::new()
+            smallvec::SmallVec::new()
         }
     }
 
@@ -310,7 +310,7 @@ impl Vst2Instance {
         buffer: &mut AudioBuffer,
         midi_events: &[MidiEvent],
         transport: &crate::protocol::TransportInfo,
-    ) -> Vec<MidiEvent> {
+    ) -> crate::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
             // Update transport info lock-free via ArcSwap (no host Mutex needed)
@@ -326,7 +326,7 @@ impl Vst2Instance {
         #[cfg(not(feature = "vst2"))]
         {
             let _ = (buffer, midi_events, transport);
-            Vec::new()
+            smallvec::SmallVec::new()
         }
     }
 
@@ -338,7 +338,7 @@ impl Vst2Instance {
         &mut self,
         buffer: &mut crate::protocol::AudioBuffer64,
         midi_events: &[MidiEvent],
-    ) -> Vec<MidiEvent> {
+    ) -> crate::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
             use vst::api;
@@ -346,7 +346,7 @@ impl Vst2Instance {
 
             let num_samples = buffer.num_samples;
             if num_samples == 0 {
-                return Vec::new();
+                return smallvec::SmallVec::new();
             }
 
             // Send MIDI events (same as f32 path)
@@ -442,13 +442,13 @@ impl Vst2Instance {
                 }
             }
 
-            Vec::new()
+            smallvec::SmallVec::new()
         }
 
         #[cfg(not(feature = "vst2"))]
         {
             let _ = (buffer, midi_events);
-            Vec::new()
+            smallvec::SmallVec::new()
         }
     }
 
@@ -458,7 +458,7 @@ impl Vst2Instance {
         buffer: &mut crate::protocol::AudioBuffer64,
         midi_events: &[MidiEvent],
         transport: &crate::protocol::TransportInfo,
-    ) -> Vec<MidiEvent> {
+    ) -> crate::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
             // Update transport info lock-free via ArcSwap (no host Mutex needed)
@@ -473,7 +473,7 @@ impl Vst2Instance {
         #[cfg(not(feature = "vst2"))]
         {
             let _ = (buffer, midi_events, transport);
-            Vec::new()
+            smallvec::SmallVec::new()
         }
     }
 

@@ -3,11 +3,12 @@
 //! Defines the trait for audio nodes that can process MIDI events alongside audio.
 //! This allows TuttiNet to route MIDI events to nodes that support it.
 
+use crate::compat::Vec;
 use fundsp::prelude::AudioUnit;
 
-/// MIDI event type re-exported from tutti-midi
-/// This avoids tutti-core depending directly on tutti-midi for the trait definition
-pub type MidiEvent = tutti_midi::MidiEvent;
+/// MIDI event type re-exported from tutti-midi-io
+/// This avoids tutti-core depending directly on tutti-midi-io for the trait definition
+pub type MidiEvent = tutti_midi_io::MidiEvent;
 
 /// Trait for audio units that can process MIDI events alongside audio.
 ///

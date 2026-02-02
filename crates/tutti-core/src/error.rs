@@ -1,6 +1,12 @@
 //! Error types for tutti-core.
 
+use crate::compat::String;
 use thiserror::Error;
+
+// std is needed for CPAL errors and std::io::Error
+#[cfg(feature = "std")]
+#[allow(unused_extern_crates)]
+extern crate std;
 
 /// Error type for tutti-core operations.
 #[derive(Error, Debug)]
@@ -23,24 +29,30 @@ pub enum Error {
     #[error("Invalid device: {0}")]
     InvalidDevice(String),
 
+    #[cfg(feature = "std")]
     #[error("Audio device not available")]
     DeviceNotAvailable(#[from] cpal::DefaultStreamConfigError),
 
+    #[cfg(feature = "std")]
     #[error("Failed to build audio stream")]
     BuildStream(#[from] cpal::BuildStreamError),
 
+    #[cfg(feature = "std")]
     #[error("Failed to play audio stream")]
     PlayStream(#[from] cpal::PlayStreamError),
 
+    #[cfg(feature = "std")]
     #[error("Failed to enumerate devices")]
     DevicesError(#[from] cpal::DevicesError),
 
+    #[cfg(feature = "std")]
     #[error("Failed to get device name")]
     DeviceNameError(#[from] cpal::DeviceNameError),
 
     #[error("Lock poisoned")]
     LockPoisoned,
 
+    #[cfg(feature = "std")]
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
@@ -49,4 +61,4 @@ pub enum Error {
 }
 
 /// Result type alias.
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;

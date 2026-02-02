@@ -4,6 +4,12 @@
 //! let system = TuttiSystem::builder().build()?;
 //! ```
 
+// Always no_std + alloc (only enable std for CPAL audio I/O)
+#![no_std]
+
+#[macro_use]
+extern crate alloc;
+
 // Macros are defined in other modules and automatically available
 
 pub mod error;
@@ -46,26 +52,21 @@ pub use net_frontend::{Connection, NodeInfo, TuttiNet};
 // Node registry for dynamic node creation
 pub use registry::{
     get_param, get_param_or, NodeConstructor, NodeParamValue, NodeParams, NodeRegistry,
-    NodeRegistryError,
+    NodeRegistryError, ParamConvert,
 };
 
 // MIDI support (requires "midi" feature)
 #[cfg(feature = "midi")]
-pub mod midi_registry;
-
-#[cfg(feature = "midi")]
-pub use midi::{AsMidiAudioUnit, MidiAudioUnit, MidiEvent};
-
-#[cfg(feature = "midi")]
-pub use midi_registry::MidiRegistry;
+pub use midi::{AsMidiAudioUnit, MidiAudioUnit, MidiEvent, MidiRegistry};
 
 // DSP units (PDC is the only one in tutti-core, other DSP nodes are in tutti-dsp)
 pub use pdc::PdcDelayUnit;
 
 // Transport types
 pub use transport::{
-    automation_curves, AutomationEnvelopeFn, AutomationReaderInput, Metronome, MetronomeMode,
-    MotionState, TempoMap, TimeSignature, TransportClock, TransportManager, BBT,
+    automation_curves, AutomationEnvelopeFn, AutomationReaderInput, MetronomeHandle, Metronome,
+    MetronomeMode, MotionState, TempoMap, TimeSignature, TransportClock, TransportHandle,
+    TransportManager, BBT,
 };
 
 // Metering types
@@ -79,7 +80,7 @@ pub use pdc::{DelayBuffer, PdcManager, PdcState};
 
 // Lock-free primitives
 pub use lockfree::{AtomicDouble, AtomicFlag, AtomicFloat};
-pub use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+pub use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 // Neural audio integration (graph analysis & traits)
 #[cfg(feature = "neural")]
@@ -102,11 +103,15 @@ pub use neural::{
 pub type VoiceId = u64;
 
 // Module declarations
+pub(crate) mod compat;
 pub(crate) mod callback;
 pub(crate) mod lockfree;
 pub(crate) mod metering;
 mod net_frontend;
+
+#[cfg(feature = "std")]
 pub(crate) mod output;
+
 pub(crate) mod pdc;
 pub mod registry;
 pub(crate) mod transport;

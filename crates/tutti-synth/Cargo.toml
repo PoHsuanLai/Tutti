@@ -9,11 +9,11 @@ repository = "https://github.com/PoHsuanLai/Tutti"
 [features]
 default = []
 soundfont = ["dep:rustysynth"]
-midi = ["tutti-core/midi", "tutti-midi"]
+midi = ["tutti-core/midi", "tutti-midi-io"]
 
 [dependencies]
 tutti-core = { path = "../tutti-core" }
-tutti-midi = { path = "../tutti-midi", optional = true }
+tutti-midi-io = { path = "../tutti-midi-io", optional = true }
 
 # Lock-free
 dashmap = "6.1"

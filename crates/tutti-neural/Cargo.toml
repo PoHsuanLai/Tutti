@@ -13,7 +13,7 @@ categories = ["multimedia::audio"]
 tutti-core = { path = "../tutti-core", default-features = false, features = ["neural", "midi"] }
 
 # MIDI support (Phase 2)
-tutti-midi = { path = "../tutti-midi" }
+tutti-midi-io = { path = "../tutti-midi-io" }
 midi-msg = { version = "0.8", default-features = false }
 
 # ML/GPU framework (using stable crates.io version)

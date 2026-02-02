@@ -124,6 +124,7 @@ impl<B: Backend> FusedNeuralSynthModel<B> {
     /// If the model was exported from PyTorch, use key remapping to adapt names.
     // SafeTensors loading disabled due to burn-import 0.20 compilation issues
     // TODO: Re-enable when burn-import 0.21+ is available
+    #[allow(dead_code)]
     fn load_from_safetensors(_path: &std::path::Path, _device: &B::Device) -> Result<Self, String> {
         Err("SafeTensors support temporarily disabled (burn-import 0.20 has compilation issues). \
              Use .mpk format instead. Convert with: burn-import onnx <model.onnx> --out-type burn <model.mpk>"

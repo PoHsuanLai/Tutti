@@ -7,9 +7,9 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use dashmap::DashMap;
-use std::sync::Arc;
+use crate::compat::{Arc, Vec};
 
-use crate::midi::MidiEvent;
+use super::traits::MidiEvent;
 
 /// Maximum number of MIDI events buffered per unit per audio cycle.
 ///

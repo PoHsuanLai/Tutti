@@ -1,10 +1,7 @@
+use crate::compat::{any, Arc, Box, HashMap, String, ToString, Vec};
 use fundsp::net::{Net, NodeId, Source};
 use fundsp::prelude::AudioUnit;
 use fundsp::realnet::NetBackend;
-use std::collections::HashMap;
-
-#[cfg(feature = "neural")]
-use std::sync::Arc;
 
 #[cfg(feature = "neural")]
 use crate::neural::{
@@ -217,7 +214,7 @@ pub struct TuttiNet {
 
     /// MIDI event registry for routing events to nodes
     #[cfg(feature = "midi")]
-    midi_registry: crate::midi_registry::MidiRegistry,
+    midi_registry: crate::midi::MidiRegistry,
 
     #[cfg(feature = "neural")]
     neural_manager: SharedNeuralNodeManager,
@@ -251,7 +248,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
-                midi_registry: crate::midi_registry::MidiRegistry::new(),
+                midi_registry: crate::midi::MidiRegistry::new(),
                 node_tags: HashMap::new(),
             },
             backend,
@@ -284,7 +281,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
-                midi_registry: crate::midi_registry::MidiRegistry::new(),
+                midi_registry: crate::midi::MidiRegistry::new(),
                 neural_manager: registry.clone(),
                 batching_strategy: None,
                 node_tags: HashMap::new(),
@@ -315,7 +312,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
-                midi_registry: crate::midi_registry::MidiRegistry::new(),
+                midi_registry: crate::midi::MidiRegistry::new(),
                 node_tags: HashMap::new(),
             },
             backend,
@@ -354,7 +351,7 @@ impl TuttiNet {
             Self {
                 net,
                 midi_connections: Vec::new(),
-                midi_registry: crate::midi_registry::MidiRegistry::new(),
+                midi_registry: crate::midi::MidiRegistry::new(),
                 neural_manager: registry.clone(),
                 batching_strategy: None,
                 node_tags: HashMap::new(),
@@ -520,7 +517,7 @@ impl TuttiNet {
     ///
     /// Nodes can use this to poll for MIDI events during processing.
     #[cfg(feature = "midi")]
-    pub fn midi_registry(&self) -> &crate::midi_registry::MidiRegistry {
+    pub fn midi_registry(&self) -> &crate::midi::MidiRegistry {
         &self.midi_registry
     }
 
@@ -702,7 +699,7 @@ impl TuttiNet {
             outputs: unit.outputs(),
             latency: 0, // Can't call latency() on &self, would need &mut self
             tag: self.node_tags.get(&id).cloned(),
-            type_name: std::any::type_name_of_val(unit).to_string(),
+            type_name: any::type_name_of_val(unit).to_string(),
         })
     }
 
@@ -858,6 +855,14 @@ impl TuttiNet {
 
         fundsp::wave::Wave::render_latency(sample_rate, duration, &mut render_net)
     }
+
+    /// Clone the underlying Net for offline export.
+    ///
+    /// This creates a snapshot of the current DSP graph that can be rendered
+    /// offline without affecting the live audio engine.
+    pub fn clone_net(&self) -> Net {
+        self.net.clone()
+    }
 }
 
 #[cfg(all(not(feature = "neural"), not(feature = "midi")))]
@@ -876,7 +881,7 @@ impl Default for TuttiNet {
         Self {
             net: Net::new(0, 2),
             midi_connections: Vec::new(),
-            midi_registry: crate::midi_registry::MidiRegistry::new(),
+            midi_registry: crate::midi::MidiRegistry::new(),
             node_tags: HashMap::new(),
         }
     }
@@ -900,7 +905,7 @@ impl Default for TuttiNet {
         Self {
             net: Net::new(0, 2),
             midi_connections: Vec::new(),
-            midi_registry: crate::midi_registry::MidiRegistry::new(),
+            midi_registry: crate::midi::MidiRegistry::new(),
             neural_manager: Arc::new(NeuralNodeManager::new()),
             batching_strategy: None,
             node_tags: HashMap::new(),

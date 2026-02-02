@@ -1,11 +1,10 @@
 //! Metadata registry for neural nodes.
 
+use crate::compat::{Arc, HashMap, Vec};
+use core::sync::atomic::{AtomicU64, Ordering};
 use dashmap::DashMap;
 use fundsp::net::NodeId;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 /// Counter for generating unique model IDs
 static MODEL_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -37,8 +36,8 @@ impl Default for NeuralModelId {
     }
 }
 
-impl std::fmt::Display for NeuralModelId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for NeuralModelId {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         write!(f, "NeuralModel({})", self.0)
     }
 }
@@ -183,8 +182,8 @@ impl Default for NeuralNodeManager {
     }
 }
 
-impl std::fmt::Debug for NeuralNodeManager {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Debug for NeuralNodeManager {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("NeuralNodeManager")
             .field("node_count", &self.nodes.len())
             .finish()
@@ -197,6 +196,7 @@ pub type SharedNeuralNodeManager = Arc<NeuralNodeManager>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compat::Box;
     #[test]
     fn test_model_id_generation() {
         let id1 = NeuralModelId::new();

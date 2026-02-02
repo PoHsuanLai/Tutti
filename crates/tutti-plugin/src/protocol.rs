@@ -4,13 +4,22 @@
 //! process and the sandboxed plugin bridge process.
 
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::path::PathBuf;
+
+/// MIDI event capacity on stack (256 events = ~4KB).
+/// Typical plugins rarely exceed 64 events per buffer, so this avoids heap allocations.
+const MIDI_STACK_CAPACITY: usize = 256;
 
 // Use local metadata type for IPC
 pub use crate::metadata::PluginMetadata;
 
 // Re-export MIDI event from tutti-midi (now serializable!)
-pub use tutti_midi::MidiEvent;
+pub use tutti_midi_io::MidiEvent;
+
+/// Stack-allocated MIDI event buffer (256 events = ~4KB on stack).
+/// Used throughout the plugin bridge to avoid heap allocations for typical MIDI traffic.
+pub type MidiEventVec = SmallVec<[MidiEvent; MIDI_STACK_CAPACITY]>;
 
 /// Audio sample format
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -220,14 +229,14 @@ pub enum HostMessage {
     ProcessAudioMidi {
         buffer_id: u32,
         num_samples: usize,
-        midi_events: Vec<MidiEvent>,
+        midi_events: MidiEventVec,
     },
 
     /// Process audio with full automation (MIDI + parameter changes + transport + note expression)
     ProcessAudioFull {
         buffer_id: u32,
         num_samples: usize,
-        midi_events: Vec<MidiEvent>,
+        midi_events: MidiEventVec,
         param_changes: ParameterChanges,
         note_expression: NoteExpressionChanges,
         transport: TransportInfo,
@@ -279,13 +288,13 @@ pub enum BridgeMessage {
     /// Audio processing complete with MIDI output
     AudioProcessedMidi {
         latency_us: u64,
-        midi_output: Vec<MidiEvent>,
+        midi_output: MidiEventVec,
     },
 
     /// Audio processing complete with full output (MIDI + parameter changes + note expression)
     AudioProcessedFull {
         latency_us: u64,
-        midi_output: Vec<MidiEvent>,
+        midi_output: MidiEventVec,
         param_output: ParameterChanges,
         note_expression_output: NoteExpressionChanges,
     },

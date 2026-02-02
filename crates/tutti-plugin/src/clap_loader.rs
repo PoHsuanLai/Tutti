@@ -47,7 +47,7 @@ use crate::protocol::{AudioBuffer, MidiEvent, PluginMetadata};
 use std::ffi::{CStr, CString};
 use std::path::Path;
 use std::ptr;
-use tutti_midi::{ChannelVoiceMsg, ControlChange};
+use tutti_midi_io::{ChannelVoiceMsg, ControlChange};
 
 /// CLAP plugin instance wrapper
 pub struct ClapInstance {
@@ -188,7 +188,7 @@ impl ClapOutputEventList {
     }
 
     /// Extract MIDI output events
-    fn to_midi_events(&self) -> Vec<MidiEvent> {
+    fn to_midi_events(&self) -> crate::protocol::MidiEventVec {
         self.events
             .iter()
             .filter_map(ClapInstance::clap_to_midi_event)
@@ -586,16 +586,16 @@ impl ClapInstance {
         &mut self,
         buffer: &mut AudioBuffer,
         midi_events: &[MidiEvent],
-    ) -> Vec<MidiEvent> {
+    ) -> crate::protocol::MidiEventVec {
         #[cfg(feature = "clap")]
         {
             if let Err(_e) = self.ensure_activated() {
-                return Vec::new();
+                return smallvec::SmallVec::new();
             }
 
             let num_samples = buffer.num_samples;
             if num_samples == 0 {
-                return Vec::new();
+                return smallvec::SmallVec::new();
             }
 
             // Build CLAP audio buffers
@@ -661,13 +661,13 @@ impl ClapInstance {
 
             // Convert output events back to MIDI (if any)
             // Most plugins don't output MIDI, so return empty for now
-            Vec::new()
+            smallvec::SmallVec::new()
         }
 
         #[cfg(not(feature = "clap"))]
         {
             let _ = (buffer, midi_events);
-            Vec::new()
+            smallvec::SmallVec::new()
         }
     }
 
@@ -770,7 +770,7 @@ impl ClapInstance {
                 ..
             } => Some(MidiEvent {
                 frame_offset: header.time as usize,
-                channel: tutti_midi::Channel::from_u8(*channel as u8),
+                channel: tutti_midi_io::Channel::from_u8(*channel as u8),
                 msg: ChannelVoiceMsg::NoteOn {
                     note: *key as u8,
                     velocity: (*velocity * 127.0) as u8,
@@ -784,7 +784,7 @@ impl ClapInstance {
                 ..
             } => Some(MidiEvent {
                 frame_offset: header.time as usize,
-                channel: tutti_midi::Channel::from_u8(*channel as u8),
+                channel: tutti_midi_io::Channel::from_u8(*channel as u8),
                 msg: ChannelVoiceMsg::NoteOff {
                     note: *key as u8,
                     velocity: (*velocity * 127.0) as u8,
@@ -792,7 +792,7 @@ impl ClapInstance {
             }),
             ClapEvent::Midi { header, data, .. } => {
                 let status = data[0];
-                let channel = tutti_midi::Channel::from_u8(status & 0x0F);
+                let channel = tutti_midi_io::Channel::from_u8(status & 0x0F);
                 let msg_type = status & 0xF0;
 
                 let msg = match msg_type {
@@ -933,7 +933,7 @@ impl ClapInstance {
         note_expression: &crate::protocol::NoteExpressionChanges,
         transport: &crate::protocol::TransportInfo,
     ) -> (
-        Vec<MidiEvent>,
+        crate::protocol::MidiEventVec,
         crate::protocol::ParameterChanges,
         crate::protocol::NoteExpressionChanges,
     ) {
@@ -941,7 +941,7 @@ impl ClapInstance {
         {
             if let Err(_e) = self.ensure_activated() {
                 return (
-                    Vec::new(),
+                    smallvec::SmallVec::new(),
                     crate::protocol::ParameterChanges::new(),
                     crate::protocol::NoteExpressionChanges::new(),
                 );
@@ -950,7 +950,7 @@ impl ClapInstance {
             let num_samples = buffer.num_samples;
             if num_samples == 0 {
                 return (
-                    Vec::new(),
+                    smallvec::SmallVec::new(),
                     crate::protocol::ParameterChanges::new(),
                     crate::protocol::NoteExpressionChanges::new(),
                 );
@@ -1053,7 +1053,7 @@ impl ClapInstance {
                 transport,
             );
             (
-                Vec::new(),
+                smallvec::SmallVec::new(),
                 crate::protocol::ParameterChanges::new(),
                 crate::protocol::NoteExpressionChanges::new(),
             )
@@ -1141,7 +1141,7 @@ impl ClapInstance {
         note_expression: &crate::protocol::NoteExpressionChanges,
         transport: &crate::protocol::TransportInfo,
     ) -> (
-        Vec<MidiEvent>,
+        crate::protocol::MidiEventVec,
         crate::protocol::ParameterChanges,
         crate::protocol::NoteExpressionChanges,
     ) {
@@ -1149,7 +1149,7 @@ impl ClapInstance {
         {
             if let Err(_e) = self.ensure_activated() {
                 return (
-                    Vec::new(),
+                    smallvec::SmallVec::new(),
                     crate::protocol::ParameterChanges::new(),
                     crate::protocol::NoteExpressionChanges::new(),
                 );
@@ -1158,7 +1158,7 @@ impl ClapInstance {
             let num_samples = buffer.num_samples;
             if num_samples == 0 {
                 return (
-                    Vec::new(),
+                    smallvec::SmallVec::new(),
                     crate::protocol::ParameterChanges::new(),
                     crate::protocol::NoteExpressionChanges::new(),
                 );
@@ -1251,7 +1251,7 @@ impl ClapInstance {
                 transport,
             );
             (
-                Vec::new(),
+                smallvec::SmallVec::new(),
                 crate::protocol::ParameterChanges::new(),
                 crate::protocol::NoteExpressionChanges::new(),
             )

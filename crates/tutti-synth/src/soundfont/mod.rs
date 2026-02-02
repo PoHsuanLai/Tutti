@@ -13,7 +13,7 @@ mod synthesizer;
 mod unit;
 
 #[cfg(feature = "soundfont")]
-pub use manager::{SoundFontHandle, SoundFontManager};
+pub use manager::{SoundFontHandle, SoundFontSystem};
 
 #[cfg(feature = "soundfont")]
 pub use synthesizer::SoundFontSynth;
@@ -23,10 +23,10 @@ pub use unit::SoundFontUnit;
 
 // Stub types when soundfont feature is disabled
 #[cfg(not(feature = "soundfont"))]
-pub struct SoundFontManager;
+pub struct SoundFontSystem;
 
 #[cfg(not(feature = "soundfont"))]
-impl SoundFontManager {
+impl SoundFontSystem {
     pub fn new(_sample_rate: u32) -> Self {
         Self
     }

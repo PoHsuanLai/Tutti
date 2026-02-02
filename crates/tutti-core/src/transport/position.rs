@@ -15,7 +15,7 @@ impl MusicalPosition {
     }
 }
 
-impl std::ops::Add<f64> for MusicalPosition {
+impl core::ops::Add<f64> for MusicalPosition {
     type Output = Self;
 
     #[inline]
@@ -26,14 +26,14 @@ impl std::ops::Add<f64> for MusicalPosition {
     }
 }
 
-impl std::ops::AddAssign<f64> for MusicalPosition {
+impl core::ops::AddAssign<f64> for MusicalPosition {
     #[inline]
     fn add_assign(&mut self, beats: f64) {
         self.beats += beats;
     }
 }
 
-impl std::ops::Sub<f64> for MusicalPosition {
+impl core::ops::Sub<f64> for MusicalPosition {
     type Output = Self;
 
     #[inline]
@@ -44,7 +44,7 @@ impl std::ops::Sub<f64> for MusicalPosition {
     }
 }
 
-impl std::ops::Sub<MusicalPosition> for MusicalPosition {
+impl core::ops::Sub<MusicalPosition> for MusicalPosition {
     type Output = f64;
 
     #[inline]

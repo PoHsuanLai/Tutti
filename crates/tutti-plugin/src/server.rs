@@ -353,7 +353,7 @@ impl PluginServer {
         let start = std::time::Instant::now();
 
         // Collect MIDI output (will be populated by plugins that support it)
-        let mut midi_output = Vec::new();
+        let mut midi_output = smallvec::SmallVec::new();
 
         // Process audio through plugin
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
@@ -422,12 +422,12 @@ impl PluginServer {
                         #[cfg(feature = "vst3")]
                         LoadedPlugin::Vst3(p) => {
                             p.process_f64(&mut audio_buffer);
-                            Vec::new()
+                            smallvec::SmallVec::new()
                         }
                         #[cfg(feature = "clap")]
                         LoadedPlugin::Clap(p) => {
                             p.process_f64(&mut audio_buffer);
-                            Vec::new()
+                            smallvec::SmallVec::new()
                         }
                     };
 
@@ -521,7 +521,7 @@ impl PluginServer {
 
         let start = std::time::Instant::now();
 
-        let mut midi_output = Vec::new();
+        let mut midi_output = smallvec::SmallVec::new();
         let mut param_output = crate::protocol::ParameterChanges::new();
         let mut note_expression_output = crate::protocol::NoteExpressionChanges::new();
 

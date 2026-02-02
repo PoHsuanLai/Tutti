@@ -3,7 +3,7 @@
 use super::metadata::NeuralModelId;
 use crate::AudioUnit;
 use crate::Result;
-use std::sync::Arc;
+use crate::compat::{Arc, Box};
 
 /// Builder for neural synthesis voices.
 pub trait NeuralSynthBuilder: Send + Sync {

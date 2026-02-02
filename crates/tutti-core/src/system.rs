@@ -1,19 +1,22 @@
 //! Tutti system - unified audio engine with transport, metering, and DSP graph.
 
 use crate::callback::AudioCallbackState;
+use crate::compat::{Arc, Mutex, String, Vec};
 use crate::error::Result;
 use crate::metering::MeteringManager;
 use crate::net_frontend::TuttiNet;
-use crate::output::{AudioEngine, AudioEngineConfig};
 use crate::pdc::PdcManager;
-use crate::transport::{Metronome, TransportManager};
-use std::sync::{Arc, Mutex};
+use crate::transport::{Metronome, TransportHandle, TransportManager};
+
+#[cfg(feature = "std")]
+use crate::output::{AudioEngine, AudioEngineConfig};
 
 #[cfg(feature = "neural")]
 use crate::neural::NeuralNodeManager;
 
 /// Complete audio system with DSP graph, transport, metering, PDC, and neural audio.
 pub struct TuttiSystem {
+    #[cfg(feature = "std")]
     engine: Mutex<AudioEngine>,
     net: Mutex<TuttiNet>,
     transport: Arc<TransportManager>,
@@ -23,6 +26,8 @@ pub struct TuttiSystem {
     #[cfg(feature = "neural")]
     neural: Arc<NeuralNodeManager>,
     sample_rate: f64,
+    #[cfg(not(feature = "std"))]
+    channels: usize,
 }
 
 impl TuttiSystem {
@@ -37,28 +42,39 @@ impl TuttiSystem {
     }
 
     /// Check if audio is running.
+    #[cfg(feature = "std")]
     pub fn is_running(&self) -> bool {
-        self.engine.lock().unwrap().is_running()
+        self.engine.lock().is_running()
     }
 
     /// List available output devices.
+    #[cfg(feature = "std")]
     pub fn list_output_devices() -> Result<Vec<String>> {
         AudioEngine::list_output_devices()
     }
 
     /// Get the name of the current output device.
+    #[cfg(feature = "std")]
     pub fn current_output_device_name(&self) -> Result<String> {
-        self.engine.lock().unwrap().current_output_device_name()
+        self.engine.lock().current_output_device_name()
     }
 
     /// Set output device (requires restart to take effect).
+    #[cfg(feature = "std")]
     pub fn set_output_device(&self, index: Option<usize>) {
-        self.engine.lock().unwrap().set_output_device(index);
+        self.engine.lock().set_output_device(index);
     }
 
     /// Get number of output channels.
     pub fn channels(&self) -> usize {
-        self.engine.lock().unwrap().channels()
+        #[cfg(feature = "std")]
+        {
+            self.engine.lock().channels()
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            self.channels
+        }
     }
 
     /// Modify the DSP graph (non-realtime).
@@ -78,14 +94,32 @@ impl TuttiSystem {
     where
         F: FnOnce(&mut TuttiNet) -> R,
     {
-        let mut net = self.net.lock().unwrap();
+        let mut net = self.net.lock();
         let result = f(&mut net);
         net.commit(); // Auto-commit to audio thread
         result
     }
 
-    /// Get the transport manager.
-    pub fn transport(&self) -> &Arc<TransportManager> {
+    /// Get fluent transport API handle.
+    ///
+    /// # Example
+    /// ```ignore
+    /// system.transport()
+    ///     .tempo(128.0)
+    ///     .loop_range(0.0, 16.0)
+    ///     .enable_loop()
+    ///     .metronome()
+    ///         .volume(0.7)
+    ///         .accent_every(4)
+    ///         .always()
+    ///     .play();
+    /// ```
+    pub fn transport(&self) -> TransportHandle {
+        TransportHandle::new(self.transport.clone(), self.metronome.clone())
+    }
+
+    /// Get the transport manager (advanced use - prefer `transport()` for fluent API).
+    pub fn transport_manager(&self) -> &Arc<TransportManager> {
         &self.transport
     }
 
@@ -94,7 +128,7 @@ impl TuttiSystem {
         &self.metering
     }
 
-    /// Get the metronome.
+    /// Get the metronome (advanced use - prefer `transport().metronome()` for fluent API).
     pub fn metronome(&self) -> &Arc<Metronome> {
         &self.metronome
     }
@@ -127,18 +161,51 @@ impl TuttiSystem {
     pub fn neural(&self) -> &Arc<NeuralNodeManager> {
         &self.neural
     }
+
+    /// Clone the DSP graph for offline export.
+    ///
+    /// This creates a snapshot of the current audio graph that can be rendered
+    /// offline without affecting the live audio engine.
+    ///
+    /// Used internally by the export system.
+    pub fn clone_net(&self) -> fundsp::net::Net {
+        self.net.lock().clone_net()
+    }
 }
 
 /// Builder for TuttiSystem.
-#[derive(Default)]
 pub struct TuttiSystemBuilder {
+    #[cfg(feature = "std")]
     engine_config: AudioEngineConfig,
+    #[cfg_attr(feature = "std", allow(dead_code))]
+    sample_rate: Option<f64>,
     inputs: usize,
     outputs: usize,
 }
 
+#[allow(clippy::derivable_impls)]
+impl Default for TuttiSystemBuilder {
+    fn default() -> Self {
+        Self {
+            #[cfg(feature = "std")]
+            engine_config: AudioEngineConfig::default(),
+            sample_rate: None,
+            inputs: 0,
+            outputs: 0,
+        }
+    }
+}
+
 impl TuttiSystemBuilder {
-    /// Set output device index.
+    /// Set sample rate (only for no_std mode).
+    #[cfg(not(feature = "std"))]
+    pub fn sample_rate(mut self, rate: f64) -> Self {
+        self.sample_rate = Some(rate);
+        self
+    }
+
+    /// Set output device index (only for std mode with CPAL).
+    #[cfg(feature = "std")]
     pub fn output_device(mut self, index: usize) -> Self {
         self.engine_config.output_device_index = Some(index);
         self
@@ -158,8 +225,15 @@ impl TuttiSystemBuilder {
 
     /// Build and start the audio system.
     pub fn build(self) -> Result<TuttiSystem> {
-        let mut engine = AudioEngine::new(self.engine_config)?;
-        let sample_rate = engine.sample_rate();
+        #[cfg(feature = "std")]
+        let (sample_rate, mut engine) = {
+            let engine = AudioEngine::new(self.engine_config)?;
+            let sample_rate = engine.sample_rate();
+            (sample_rate, engine)
+        };
+
+        #[cfg(not(feature = "std"))]
+        let sample_rate = self.sample_rate.unwrap_or(44100.0);
 
         let inputs = self.inputs;
         let outputs = if self.outputs == 0 { 2 } else { self.outputs };
@@ -177,14 +251,21 @@ impl TuttiSystemBuilder {
         // Initialize PDC with outputs count (channels = outputs for now)
         let pdc = Arc::new(PdcManager::new(outputs, 0));
 
-        let mut callback_state =
-            AudioCallbackState::new(transport.clone(), metering.clone(), sample_rate);
+        #[cfg(feature = "std")]
+        {
+            let mut callback_state =
+                AudioCallbackState::new(transport.clone(), metering.clone(), sample_rate);
 
-        callback_state.set_net_backend(backend);
+            callback_state.set_net_backend(backend);
 
-        engine.start(callback_state)?;
+            engine.start(callback_state)?;
+        }
+
+        #[cfg(not(feature = "std"))]
+        let _backend = backend; // Prevent unused variable warning
 
         Ok(TuttiSystem {
+            #[cfg(feature = "std")]
             engine: Mutex::new(engine),
             net: Mutex::new(net),
             transport,
@@ -194,6 +275,8 @@ impl TuttiSystemBuilder {
             #[cfg(feature = "neural")]
             neural,
             sample_rate,
+            #[cfg(not(feature = "std"))]
+            channels: outputs,
         })
     }
 }

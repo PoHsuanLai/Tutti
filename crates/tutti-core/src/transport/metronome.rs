@@ -1,5 +1,5 @@
+use crate::compat::{AtomicI64, Vec};
 use crate::{AtomicFloat, AtomicU32, AtomicU8, Ordering};
-use std::sync::atomic::AtomicI64;
 
 pub struct Metronome {
     volume: AtomicFloat,
@@ -51,7 +51,7 @@ impl Metronome {
             };
 
             // Sine wave click
-            let phase = 2.0 * std::f64::consts::PI * freq * t;
+            let phase = 2.0 * core::f64::consts::PI * freq * t;
             let sample = (phase.sin() * env * volume as f64 * accent_volume) as f32;
 
             samples.push((sample, sample)); // Stereo (both channels same)

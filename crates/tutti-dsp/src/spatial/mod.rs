@@ -57,9 +57,8 @@ mod binaural_panner;
 mod nodes;
 mod vbap_panner;
 
-pub use binaural_panner::BinauralPanner;
+// Only export AudioUnit nodes - raw panners are internal
 pub use nodes::{BinauralPannerNode, SpatialPannerNode};
-pub use vbap_panner::SpatialPanner;
 
 // Re-export vbap types for advanced usage
 #[allow(unused_imports)] // These are public API exports for library users

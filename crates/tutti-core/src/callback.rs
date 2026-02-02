@@ -1,12 +1,10 @@
 //! Real-time audio callback for FunDSP Net processing.
 
+use crate::compat::{Arc, AtomicU64, Ordering, UnsafeCell};
 use crate::metering::MeteringManager;
 use crate::transport::TransportManager;
 use fundsp::audiounit::AudioUnit;
 use fundsp::realnet::NetBackend;
-use std::cell::UnsafeCell;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 /// State for the real-time audio callback.
 /// Uses `UnsafeCell` for interior mutability. Only access from the audio thread.

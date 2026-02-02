@@ -2,14 +2,13 @@
 
 use arc_swap::ArcSwap;
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use std::cell::UnsafeCell;
-use std::sync::Arc;
+use crate::compat::{UnsafeCell, Arc};
 
 use super::fsm::{TransportEvent, TransportFSM};
 use super::position::{LoopRange, MusicalPosition};
 use super::tempo_map::{TempoMap, TempoMapSnapshot, TimeSignature, BBT};
 use crate::{AtomicDouble, AtomicFlag, AtomicFloat, AtomicU8};
-use std::sync::atomic::Ordering;
+use crate::compat::Ordering;
 
 // Re-export MotionState from FSM
 pub use super::fsm::MotionState;
@@ -368,9 +367,6 @@ impl TransportManager {
     pub fn samples_per_beat(&self) -> f64 {
         self.sample_rate / self.beats_per_second()
     }
-
-    // REMOVED: Direct tempo map access - use tempo_map_snapshot() instead
-    // TempoMap is now wrapped in ArcSwap for lock-free copy-on-write updates
 }
 
 impl Default for TransportManager {
@@ -538,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_access() {
-        use std::sync::Arc;
+        use crate::compat::Arc;
         use std::thread;
 
         let manager = Arc::new(TransportManager::new(48000.0));

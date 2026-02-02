@@ -1,6 +1,6 @@
 //! Tempo map with 3-domain time system (superclock/beats/BBT).
 
-use std::sync::Arc;
+use crate::compat::{Arc, Vec};
 
 pub const SUPERCLOCK_TICKS_PER_SECOND: u64 = 282_240_000;
 

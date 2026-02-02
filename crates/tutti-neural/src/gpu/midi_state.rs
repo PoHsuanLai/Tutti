@@ -74,7 +74,7 @@ impl MidiState {
     /// Returns `true` if the event should trigger new inference
     /// (note on/off). Returns `false` for continuous controllers
     /// (CC, pitch bend, pressure) which only update state.
-    pub fn apply(&mut self, event: &tutti_midi::MidiEvent) -> bool {
+    pub fn apply(&mut self, event: &tutti_midi_io::MidiEvent) -> bool {
         use midi_msg::ChannelVoiceMsg;
 
         match event.msg {
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn test_note_on() {
         let mut state = MidiState::default();
-        let event = tutti_midi::MidiEvent::note_on_builder(69, 100)
+        let event = tutti_midi_io::MidiEvent::note_on_builder(69, 100)
             .channel(0)
             .offset(0)
             .build(); // A4
@@ -189,13 +189,13 @@ mod tests {
     fn test_note_off() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi::MidiEvent::note_on_builder(60, 80)
+            &tutti_midi_io::MidiEvent::note_on_builder(60, 80)
                 .channel(0)
                 .offset(0)
                 .build(),
         );
         let triggered = state.apply(
-            &tutti_midi::MidiEvent::note_off_builder(60)
+            &tutti_midi_io::MidiEvent::note_off_builder(60)
                 .channel(0)
                 .offset(0)
                 .build(),
@@ -212,14 +212,14 @@ mod tests {
     fn test_pitch_bend() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi::MidiEvent::note_on_builder(69, 100)
+            &tutti_midi_io::MidiEvent::note_on_builder(69, 100)
                 .channel(0)
                 .offset(0)
                 .build(),
         ); // A4
 
         // Bend fully up: bend=16383 → normalized=1.0 → +2 semitones (default range)
-        let bend_event = tutti_midi::MidiEvent::bend_builder(16383)
+        let bend_event = tutti_midi_io::MidiEvent::bend_builder(16383)
             .channel(0)
             .offset(0)
             .build();
@@ -232,7 +232,7 @@ mod tests {
 
         // Bend center: bend=8192 → normalized=0.0
         state.apply(
-            &tutti_midi::MidiEvent::bend_builder(8192)
+            &tutti_midi_io::MidiEvent::bend_builder(8192)
                 .channel(0)
                 .offset(0)
                 .build(),
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn test_cc_mod_wheel() {
         let mut state = MidiState::default();
-        let event = tutti_midi::MidiEvent::cc_builder(1, 64)
+        let event = tutti_midi_io::MidiEvent::cc_builder(1, 64)
             .channel(0)
             .offset(0)
             .build();
@@ -258,7 +258,7 @@ mod tests {
     fn test_cc_expression() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi::MidiEvent::note_on_builder(60, 100)
+            &tutti_midi_io::MidiEvent::note_on_builder(60, 100)
                 .channel(0)
                 .offset(0)
                 .build(),
@@ -266,7 +266,7 @@ mod tests {
 
         // Expression at 50%
         state.apply(
-            &tutti_midi::MidiEvent::cc_builder(11, 64)
+            &tutti_midi_io::MidiEvent::cc_builder(11, 64)
                 .channel(0)
                 .offset(0)
                 .build(),
@@ -281,7 +281,7 @@ mod tests {
 
         // Sustain on (CC64 >= 64)
         state.apply(
-            &tutti_midi::MidiEvent::cc_builder(64, 127)
+            &tutti_midi_io::MidiEvent::cc_builder(64, 127)
                 .channel(0)
                 .offset(0)
                 .build(),
@@ -290,7 +290,7 @@ mod tests {
 
         // Sustain off (CC64 < 64)
         state.apply(
-            &tutti_midi::MidiEvent::cc_builder(64, 0)
+            &tutti_midi_io::MidiEvent::cc_builder(64, 0)
                 .channel(0)
                 .offset(0)
                 .build(),
@@ -301,7 +301,7 @@ mod tests {
     #[test]
     fn test_channel_pressure() {
         let mut state = MidiState::default();
-        let event = tutti_midi::MidiEvent::aftertouch_builder(100)
+        let event = tutti_midi_io::MidiEvent::aftertouch_builder(100)
             .channel(0)
             .offset(0)
             .build();
@@ -314,7 +314,7 @@ mod tests {
     fn test_to_features_layout() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi::MidiEvent::note_on_builder(60, 100)
+            &tutti_midi_io::MidiEvent::note_on_builder(60, 100)
                 .channel(0)
                 .offset(0)
                 .build(),

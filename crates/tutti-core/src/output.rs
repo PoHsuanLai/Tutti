@@ -1,6 +1,11 @@
-//! CPAL audio output wrapper.
+//! CPAL audio output wrapper (requires std).
+
+// CPAL requires std, so we need it here
+#[allow(unused_extern_crates)]
+extern crate std;
 
 use crate::callback::AudioCallbackState;
+use crate::compat::{String, ToString, Vec};
 use crate::{Error, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
@@ -137,7 +142,7 @@ impl AudioEngine {
                             lufs_right[i] = output_f32[i * 2 + 1];
                         }
                         // try_lock: skip this callback if UI thread is reading LUFS
-                        if let Ok(mut ebur128) = state.metering.ebur128().try_lock() {
+                        if let Some(mut ebur128) = state.metering.ebur128().try_lock() {
                             let data: [&[f32]; 2] = [&lufs_left[..frames], &lufs_right[..frames]];
                             let _ = ebur128.add_frames_planar_f32(&data);
                         }

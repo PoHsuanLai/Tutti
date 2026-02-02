@@ -1,8 +1,8 @@
 //! Plugin Delay Compensation (PDC) Manager.
 
+use crate::compat::{Arc, Vec};
 use crate::{AtomicBool, AtomicUsize, Ordering};
 use arc_swap::ArcSwap;
-use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ChannelLatencyInfo {
@@ -57,7 +57,7 @@ pub struct PdcManager {
     state: ArcSwap<PdcState>,
     enabled: AtomicBool,
     max_allowed_latency: AtomicUsize,
-    version: std::sync::atomic::AtomicU64,
+    version: crate::compat::AtomicU64,
 }
 
 impl PdcManager {
@@ -68,7 +68,7 @@ impl PdcManager {
             state: ArcSwap::from_pointee(PdcState::new(channel_count, return_count)),
             enabled: AtomicBool::new(true),
             max_allowed_latency: AtomicUsize::new(Self::DEFAULT_MAX_LATENCY),
-            version: std::sync::atomic::AtomicU64::new(0),
+            version: crate::compat::AtomicU64::new(0),
         }
     }
 

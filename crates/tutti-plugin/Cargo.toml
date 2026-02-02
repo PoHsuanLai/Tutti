@@ -25,7 +25,7 @@ vst3 = []
 clap = ["dep:clap-sys"]
 
 # Hardware MIDI I/O support
-midi-io = ["tutti-midi/midi-io"]
+midi-io = ["tutti-midi-io/midi-io"]
 
 # All plugin formats
 all = ["vst2", "vst3", "clap"]
@@ -35,7 +35,7 @@ all = ["vst2", "vst3", "clap"]
 tutti-core = { path = "../tutti-core", features = ["midi"] }
 
 # MIDI support
-tutti-midi = { path = "../tutti-midi", features = ["midi-io"] }
+tutti-midi-io = { path = "../tutti-midi-io", features = ["midi-io"] }
 
 # Serialization for IPC
 serde = { version = "1", features = ["derive"] }
@@ -50,6 +50,9 @@ crossbeam-channel = "0.5"
 crossbeam = "0.8"
 parking_lot = "0.12"
 ringbuf = "0.4"
+
+# Stack-first vectors for MIDI events (zero-alloc for typical case)
+smallvec = { version = "1.13", features = ["serde"] }
 
 # Async runtime for IPC
 tokio = { version = "1", features = ["net", "io-util", "sync", "rt", "rt-multi-thread", "macros", "time"] }

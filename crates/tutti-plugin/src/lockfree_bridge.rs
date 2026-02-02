@@ -7,6 +7,7 @@ use crate::protocol::{BridgeMessage, HostMessage, MidiEvent, PluginMetadata};
 use crate::shared_memory::SharedAudioBuffer;
 use crate::transport::MessageTransport;
 use crossbeam::queue::ArrayQueue;
+use smallvec::SmallVec;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -20,12 +21,12 @@ pub enum BridgeCommand {
     ProcessAudio {
         buffer_id: u32,
         num_samples: usize,
-        midi_events: Vec<MidiEvent>,
+        midi_events: crate::protocol::MidiEventVec,
     },
     ProcessAudioFull {
         buffer_id: u32,
         num_samples: usize,
-        midi_events: Vec<MidiEvent>,
+        midi_events: crate::protocol::MidiEventVec,
         param_changes: crate::protocol::ParameterChanges,
         note_expression: crate::protocol::NoteExpressionChanges,
         transport: crate::protocol::TransportInfo,
@@ -49,11 +50,11 @@ pub enum BridgeCommand {
 pub enum BridgeResponse {
     AudioProcessed {
         buffer_id: u32,
-        midi_output: Vec<MidiEvent>,
+        midi_output: crate::protocol::MidiEventVec,
     },
     AudioProcessedFull {
         buffer_id: u32,
-        midi_output: Vec<MidiEvent>,
+        midi_output: crate::protocol::MidiEventVec,
         param_output: crate::protocol::ParameterChanges,
         note_expression_output: crate::protocol::NoteExpressionChanges,
     },
@@ -211,7 +212,7 @@ impl LockFreeBridge {
                     BridgeMessage::AudioProcessed { .. } => {
                         let _ = response_queue.push(BridgeResponse::AudioProcessed {
                             buffer_id,
-                            midi_output: Vec::new(),
+                            midi_output: SmallVec::new(),
                         });
                     }
                     BridgeMessage::AudioProcessedMidi { midi_output, .. } => {
@@ -300,7 +301,7 @@ impl LockFreeBridge {
                     BridgeMessage::AudioProcessed { .. } => {
                         let _ = response_queue.push(BridgeResponse::AudioProcessed {
                             buffer_id,
-                            midi_output: Vec::new(),
+                            midi_output: SmallVec::new(),
                         });
                     }
                     BridgeMessage::Error { message } => {
@@ -327,7 +328,7 @@ impl LockFreeBridge {
         &self,
         inputs: &[&[f32]],
         outputs: &mut [&mut [f32]],
-        midi_events: Vec<MidiEvent>,
+        midi_events: crate::protocol::MidiEventVec,
     ) -> bool {
         if inputs.is_empty() || inputs[0].is_empty() {
             return false;
@@ -384,7 +385,7 @@ impl LockFreeBridge {
         &self,
         inputs: &[&[f64]],
         outputs: &mut [&mut [f64]],
-        midi_events: Vec<MidiEvent>,
+        midi_events: crate::protocol::MidiEventVec,
     ) -> bool {
         if inputs.is_empty() || inputs[0].is_empty() {
             return false;
@@ -501,7 +502,7 @@ impl LockFreeBridge {
             .push(BridgeCommand::ProcessAudio {
                 buffer_id,
                 num_samples,
-                midi_events: midi_events.to_vec(),
+                midi_events: midi_events.iter().copied().collect(),
             })
             .is_err()
         {
@@ -530,7 +531,7 @@ impl LockFreeBridge {
             .push(BridgeCommand::ProcessAudioFull {
                 buffer_id,
                 num_samples,
-                midi_events: midi_events.to_vec(),
+                midi_events: midi_events.iter().copied().collect(),
                 param_changes: param_changes.clone(),
                 note_expression: note_expression.clone(),
                 transport: *transport,
@@ -612,7 +613,7 @@ mod tests {
             assert!(queue
                 .push(BridgeResponse::AudioProcessed {
                     buffer_id: i as u32,
-                    midi_output: Vec::new(),
+                    midi_output: SmallVec::new(),
                 })
                 .is_ok());
         }
@@ -621,7 +622,7 @@ mod tests {
         assert!(queue
             .push(BridgeResponse::AudioProcessed {
                 buffer_id: 0,
-                midi_output: Vec::new(),
+                midi_output: SmallVec::new(),
             })
             .is_err());
     }

@@ -17,8 +17,8 @@ For audio UI components, see [Armas](https://github.com/PoHsuanLai/Armas).
 
 Umbrella crate that coordinates multiple audio subsystems:
 
-- **[tutti-core]** - Audio graph runtime (Net, Transport, Metering, PDC)
-- **[tutti-midi]** - MIDI subsystem (I/O, MPE, MIDI 2.0, CC mapping)
+- **[tutti-core]** - Audio graph runtime (Net, Transport, Metering, PDC, MIDI routing)
+- **[tutti-midi-io]** - MIDI I/O subsystem (Hardware I/O, ports, MPE, MIDI 2.0, CC mapping)
 - **[tutti-sampler]** - Sample playback (Butler, streaming, recording, time-stretch)
 - **[tutti-dsp]** - DSP nodes (LFO, dynamics, envelope follower, spatial audio)
 - **[tutti-plugin]** - Plugin hosting (VST2, VST3, CLAP)
@@ -32,31 +32,25 @@ Umbrella crate that coordinates multiple audio subsystems:
 use tutti::prelude::*;
 
 let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
-let registry = NodeRegistry::default();
+
+// Register custom DSP nodes
+engine.add_node("sine", |params| {
+    let freq: f64 = get_param_or(params, "frequency", 440.0);
+    Ok(Box::new(sine_hz(freq)))
+});
+
+engine.add_node("lowpass", |params| {
+    let cutoff: f64 = get_param_or(params, "cutoff", 2000.0);
+    Ok(Box::new(lowpass_hz(cutoff)))
+});
+
+// Instantiate nodes (creates instances and returns NodeIds)
+let sine = engine.instance("sine", &params! { "frequency" => 440.0 })?;
+let filter = engine.instance("lowpass", &params! { "cutoff" => 2000.0 })?;
 
 // Build audio graph with macros
 engine.graph(|net| {
-    // Create nodes from registry
-    let sine = registry.create("sine", &params! {
-        "frequency" => 440.0
-    }).unwrap();
-
-    let filter = registry.create("lowpass", &params! {
-        "cutoff" => 2000.0,
-        "q" => 1.0
-    }).unwrap();
-
-    let reverb = registry.create("reverb_stereo", &params! {
-        "room_size" => 0.8,
-        "time" => 3.0
-    }).unwrap();
-
-    // Chain nodes: sine → filter → reverb → output
-    let sine_id = net.add(sine);
-    let filter_id = net.add(filter);
-    let reverb_id = net.add(reverb);
-
-    chain!(net, sine_id, filter_id, reverb_id => output);
+    chain!(net, sine, filter => output);
 });
 
 engine.transport().play();
@@ -81,50 +75,188 @@ Tutti uses a modular architecture where each subsystem is an independent crate. 
 
 ## Examples
 
-### NodeRegistry - Plugins and Neural Models
+### Loading and Instantiating Nodes
 
 ```rust
 use tutti::prelude::*;
 
-let registry = NodeRegistry::default();
-let neural = NeuralSystem::builder().sample_rate(44100.0).build()?;
+// Create tokio runtime for plugin loading (if using plugins)
+let runtime = tokio::runtime::Runtime::new()?;
 
-// Register plugins and neural models
-register_plugin_directory(&registry, tokio_handle, "path/to/plugins")?;
-register_neural_model(&registry, &neural, "my_synth", "model.mpk")?;
+// Build engine with neural subsystem and plugin support
+let engine = TuttiEngine::builder()
+    .sample_rate(44100.0)
+    .neural()  // Enable neural subsystem
+    .plugin_runtime(runtime.handle().clone())  // Enable plugin loading
+    .build()?;
 
-// Create nodes dynamically by name
-let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+// Load nodes once (explicit format methods = compile-time type safety)
+engine.load_mpk("my_synth", "model.mpk")?;      // Neural model
+engine.load_vst3("reverb", "plugin.vst3")?;     // VST3 plugin
+engine.load_wav("kick", "kick.wav")?;           // WAV sample
+
+// Add custom DSP nodes programmatically
+engine.add_node("my_filter", |params| {
+    let cutoff: f32 = get_param_or(params, "cutoff", 1000.0);
+    Ok(Box::new(lowpass_hz(cutoff)))
+});
+
+// Instantiate nodes (create instances and add to graph)
+let synth = engine.instance("my_synth", &params! {})?;
+let reverb = engine.instance("reverb", &params! { "room_size" => 0.9 })?;
+let filter = engine.instance("my_filter", &params! { "cutoff" => 2000.0 })?;
+
+// Build graph with node IDs
 engine.graph(|net| {
-    let synth = registry.create("my_synth", &params! {}).unwrap();
-    let reverb = registry.create("reverb_plugin", &params! {
-        "room_size" => 0.9
-    }).unwrap();
-
-    let synth_id = net.add(synth);
-    let reverb_id = net.add(reverb);
-
-    chain!(net, synth_id, reverb_id => output);
+    chain!(net, synth, filter, reverb => output);
 });
 ```
 
-### With MIDI and Sampler
+### Transport Control (Fluent API)
+
+```rust
+use tutti::prelude::*;
+
+let engine = TuttiEngine::builder().build()?;
+
+// Fluent transport API - chainable methods
+engine.transport()
+    .tempo(128.0)
+    .loop_range(0.0, 16.0)
+    .enable_loop()
+    .play();
+
+// Metronome control
+engine.transport()
+    .metronome()
+    .volume(0.7)
+    .accent_every(4)
+    .always();
+
+// State queries
+let transport = engine.transport();
+if transport.is_playing() {
+    let beat = transport.current_beat();
+    println!("Currently at beat: {}", beat);
+}
+
+// Locate and play
+transport.locate_and_play(8.0);
+
+// Transport modes
+transport.fast_forward();
+transport.rewind();
+transport.stop();
+```
+
+### Streaming and Recording (Butler Thread)
+
+```rust
+use tutti::prelude::*;
+
+// Enable sampler subsystem for Butler streaming
+let engine = TuttiEngine::builder()
+    .sampler()
+    .build()?;
+
+if let Some(sampler) = engine.sampler() {
+    // Stream large files from disk (no memory loading)
+    sampler.stream("huge_audio_file.wav")
+        .channel(0)
+        .gain(0.8)
+        .speed(1.5)
+        .start_sample(44100)  // Start at 1 second
+        .start();
+
+    // Record audio with ring buffer
+    let session = sampler.record("recording.wav")
+        .channels(2)
+        .buffer_seconds(5.0)
+        .start();
+
+    // Audio callback writes to session.producer
+
+    // Stop and flush to disk
+    sampler.stop_capture(session.id);
+    sampler.flush_capture(session.id, "final.wav");
+}
+```
+
+### Loading and Exporting
+
+```rust
+use tutti::prelude::*;
+
+let engine = TuttiEngine::builder().build()?;
+
+// Load audio files
+engine.load_wav("kick", "kick.wav")?;
+engine.load_flac("snare", "snare.flac")?;
+
+// Instantiate and use in graph
+let kick = engine.instance("kick", &params! {})?;
+let snare = engine.instance("snare", &params! {})?;
+
+engine.graph(|net| {
+    let mix = mix!(net, kick, snare);
+    net.pipe_output(mix);
+});
+
+// Export to file
+engine.export()
+    .duration_seconds(10.0)
+    .format(AudioFormat::Flac)
+    .normalize(NormalizationMode::Lufs(-14.0))
+    .to_file("output.flac")?;
+```
+
+### MIDI I/O (Fluent API)
+
+```rust
+use tutti::prelude::*;
+
+// Enable MIDI subsystem with hardware I/O
+let engine = TuttiEngine::builder()
+    .midi()
+    .build()?;
+
+// No Option unwrapping needed - always works!
+let midi = engine.midi();
+
+// Connect to hardware
+midi.connect_device_by_name("Keyboard")?;
+
+// Fluent MIDI output (chainable)
+midi.send()
+    .note_on(0, 60, 100)
+    .cc(0, 74, 64)
+    .pitch_bend(0, 0);
+
+// Or single messages
+midi.send().note_on(0, 60, 100);
+```
+
+### With MIDI, Sampler, and Neural
 
 ```rust
 use tutti::prelude::*;
 
 let engine = TuttiEngine::builder()
-    .midi()
-    .sampler()
+    .midi()     // Enable MIDI subsystem
+    .sampler()  // Enable sampler subsystem
+    .neural()   // Enable neural subsystem
     .build()?;
 
-// Access subsystems
-if let Some(midi) = engine.midi() {
-    // MIDI operations
+// Access subsystems - MIDI is always available (no-op if disabled)
+engine.midi().send().note_on(0, 60, 100);
+
+// Sampler and Neural return Option (for backwards compatibility)
+if let Some(sampler) = engine.sampler() {
+    sampler.stream("file.wav").start();
 }
 
-if let Some(sampler) = engine.sampler() {
-    // Sample playback
+if let Some(neural) = engine.neural() {
+    // Neural audio processing
 }
 ```
 
@@ -171,7 +303,7 @@ cargo run --example midi_synth --features "midi,synth"
 MIT OR Apache-2.0
 
 [tutti-core]: https://crates.io/crates/tutti-core
-[tutti-midi]: https://crates.io/crates/tutti-midi
+[tutti-midi-io]: https://crates.io/crates/tutti-midi-io
 [tutti-sampler]: https://crates.io/crates/tutti-sampler
 [tutti-dsp]: https://crates.io/crates/tutti-dsp
 [tutti-plugin]: https://crates.io/crates/tutti-plugin

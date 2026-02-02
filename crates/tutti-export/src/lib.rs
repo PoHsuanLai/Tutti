@@ -1,45 +1,26 @@
 //! # Tutti Export
 //!
-//! Offline audio export and rendering for the Tutti audio engine.
+//! Audio export utilities for the Tutti audio engine.
 //!
-//! This crate provides:
-//! - **Offline rendering**: Render audio graphs to memory buffers
+//! This crate provides low-level export functionality:
 //! - **Format encoding**: Export to WAV, FLAC
 //! - **DSP utilities**: Resampling, dithering, loudness metering
 //!
-//! ## Architecture
+//! ## Note
 //!
-//! The export system is instruction-driven and framework-agnostic:
-//! - Receives pre-computed sample positions (no IR dependency)
-//! - Works with synth/effect indices, not high-level objects
-//! - Frontend converts beats to samples before calling renderer
-//!
-//! ## Example
+//! This crate is typically not used directly. Instead, use the integrated
+//! export API from the main `tutti` crate:
 //!
 //! ```ignore
-//! use tutti_export::{OfflineRenderer, RenderJob, ExportOptions, AudioFormat};
+//! use tutti::prelude::*;
 //!
-//! // Create renderer
-//! let renderer = OfflineRenderer::new(44100);
+//! let engine = TuttiEngine::builder().build()?;
+//! // ... build your graph ...
 //!
-//! // Define what to render
-//! let job = RenderJob::new(44100, 44100 * 10) // 10 seconds
-//!     .with_track(RenderTrack::new(0)
-//!         .with_note(RenderNote {
-//!             synth_index: 0,
-//!             midi_note: 60,
-//!             velocity: 100,
-//!             start_sample: 0,
-//!             duration_samples: 44100,
-//!             params: None,
-//!         }));
-//!
-//! // Render to buffer
-//! let result = renderer.render(job, None)?;
-//!
-//! // Export to file
-//! let options = ExportOptions::default();
-//! tutti_export::export_wav("output.wav", &result.left, &result.right, &options)?;
+//! // Export directly from engine
+//! engine.export()
+//!     .duration_seconds(10.0)
+//!     .to_file("output.wav")?;
 //! ```
 //!
 //! ## Feature Flags
@@ -51,8 +32,7 @@
 // Core modules
 pub mod error;
 mod options;
-mod renderer;
-mod types;
+pub mod export_builder;
 
 // Advanced APIs
 pub mod dsp;
@@ -64,13 +44,10 @@ pub mod butler_export;
 
 // Re-exports
 pub use error::{ExportError, Result};
+pub use export_builder::ExportBuilder;
 pub use options::{
     AudioFormat, BitDepth, DitherType, ExportOptions, ExportRange, FlacOptions, NormalizationMode,
     SampleRateTarget,
-};
-pub use renderer::{OfflineRenderer, RenderResult};
-pub use types::{
-    RenderAudioClip, RenderJob, RenderMaster, RenderNote, RenderPatternTrigger, RenderTrack,
 };
 
 // Butler export (requires tutti-sampler)

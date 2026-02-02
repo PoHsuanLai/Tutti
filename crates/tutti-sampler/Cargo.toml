@@ -7,7 +7,20 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/PoHsuanLai/Tutti"
 
 [features]
-default = []
+# Default: All features enabled for backwards compatibility
+default = ["butler", "recording", "audio-input"]
+
+# Butler thread for disk streaming (requires std::thread)
+# When disabled, only in-memory sample playback is available
+butler = []
+
+# Recording to disk (requires butler + std::fs)
+# When disabled, recording APIs are not available
+recording = ["butler"]
+
+# Hardware audio input via CPAL
+# When disabled, only file-based input is available
+audio-input = []
 
 [dependencies]
 tutti-core = { path = "../tutti-core" }

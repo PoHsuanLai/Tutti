@@ -1,5 +1,7 @@
 //! Delay buffer for latency compensation.
 
+use crate::compat::Vec;
+
 pub struct DelayBuffer {
     left_buffer: Vec<f32>,
     right_buffer: Vec<f32>,

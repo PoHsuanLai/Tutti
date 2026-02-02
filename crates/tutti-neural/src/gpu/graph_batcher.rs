@@ -81,7 +81,7 @@ impl<B: Backend> GraphAwareBatcher<B> {
                 }
 
                 let batch_size = requests.len();
-                let responses = self.engine.infer_batch(requests)?;
+                let responses = self.engine.infer_batch(&requests)?;
 
                 self.stats.batches_processed += 1;
                 self.stats.requests_processed += batch_size;
@@ -99,7 +99,7 @@ impl<B: Backend> GraphAwareBatcher<B> {
                 }
 
                 let batch_size = requests.len();
-                let responses = self.engine.infer_batch(requests)?;
+                let responses = self.engine.infer_batch(&requests)?;
 
                 self.stats.batches_processed += 1;
                 self.stats.requests_processed += batch_size;
@@ -134,7 +134,7 @@ impl<B: Backend> GraphAwareBatcher<B> {
                 }
 
                 let batch_size = requests.len();
-                let responses = self.engine.infer_batch(requests)?;
+                let responses = self.engine.infer_batch(&requests)?;
 
                 self.stats.batches_processed += 1;
                 self.stats.requests_processed += batch_size;

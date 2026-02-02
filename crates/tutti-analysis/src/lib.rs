@@ -58,6 +58,9 @@ pub mod waveform;
 #[cfg(feature = "cache")]
 pub mod cache;
 
+// Fluent API handle
+pub mod handle;
+
 // Re-export main types at crate root for convenience
 pub use correlation::{CorrelationMeter, StereoAnalysis};
 pub use pitch::{
@@ -68,3 +71,5 @@ pub use waveform::{MultiResolutionSummary, StereoWaveformSummary, WaveformBlock,
 
 #[cfg(feature = "cache")]
 pub use cache::ThumbnailCache;
+
+pub use handle::AnalysisHandle;

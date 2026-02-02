@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 // Import MIDI types for event conversion
-use tutti_midi::{Channel, ChannelVoiceMsg, ControlChange};
+use tutti_midi_io::{Channel, ChannelVoiceMsg, ControlChange};
 
 /// Result codes from VST3
 const K_RESULT_OK: i32 = 0;
@@ -583,7 +583,7 @@ impl EventList {
     }
 
     /// Convert VST3 events back to MIDI events
-    fn to_midi_events(&self) -> Vec<MidiEvent> {
+    fn to_midi_events(&self) -> crate::protocol::MidiEventVec {
         self.events
             .iter()
             .filter_map(Self::vst3_to_midi_event)
@@ -1748,14 +1748,14 @@ impl Vst3Instance {
         &mut self,
         buffer: &mut AudioBuffer,
         midi_events: &[MidiEvent],
-    ) -> Vec<MidiEvent> {
+    ) -> crate::protocol::MidiEventVec {
         if !self.is_active {
-            return Vec::new();
+            return smallvec::SmallVec::new();
         }
 
         let num_samples = buffer.num_samples;
         if num_samples == 0 {
-            return Vec::new();
+            return smallvec::SmallVec::new();
         }
 
         // Update buffer pointers
@@ -1835,13 +1835,13 @@ impl Vst3Instance {
         note_expression: &crate::protocol::NoteExpressionChanges,
         transport: &crate::protocol::TransportInfo,
     ) -> (
-        Vec<MidiEvent>,
+        crate::protocol::MidiEventVec,
         crate::protocol::ParameterChanges,
         crate::protocol::NoteExpressionChanges,
     ) {
         if !self.is_active {
             return (
-                Vec::new(),
+                smallvec::SmallVec::new(),
                 crate::protocol::ParameterChanges::new(),
                 crate::protocol::NoteExpressionChanges::new(),
             );
@@ -1850,7 +1850,7 @@ impl Vst3Instance {
         let num_samples = buffer.num_samples;
         if num_samples == 0 {
             return (
-                Vec::new(),
+                smallvec::SmallVec::new(),
                 crate::protocol::ParameterChanges::new(),
                 crate::protocol::NoteExpressionChanges::new(),
             );
@@ -2020,13 +2020,13 @@ impl Vst3Instance {
         note_expression: &crate::protocol::NoteExpressionChanges,
         transport: &crate::protocol::TransportInfo,
     ) -> (
-        Vec<MidiEvent>,
+        crate::protocol::MidiEventVec,
         crate::protocol::ParameterChanges,
         crate::protocol::NoteExpressionChanges,
     ) {
         if !self.is_active {
             return (
-                Vec::new(),
+                smallvec::SmallVec::new(),
                 crate::protocol::ParameterChanges::new(),
                 crate::protocol::NoteExpressionChanges::new(),
             );
@@ -2035,7 +2035,7 @@ impl Vst3Instance {
         let num_samples = buffer.num_samples;
         if num_samples == 0 {
             return (
-                Vec::new(),
+                smallvec::SmallVec::new(),
                 crate::protocol::ParameterChanges::new(),
                 crate::protocol::NoteExpressionChanges::new(),
             );

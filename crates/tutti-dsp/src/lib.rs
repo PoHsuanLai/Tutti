@@ -76,5 +76,9 @@ pub use dynamics::{
 pub use envelope_follower::{EnvelopeFollowerNode, EnvelopeMode};
 pub use lfo::{LfoMode, LfoNode, LfoShape};
 pub use spatial::{
-    BinauralPanner, BinauralPannerNode, ChannelLayout, SpatialPanner, SpatialPannerNode,
+    BinauralPannerNode, ChannelLayout, SpatialPannerNode,
 };
+
+// Fluent API handles
+mod handles;
+pub use handles::{DspHandle, SidechainHandle, SpatialHandle};

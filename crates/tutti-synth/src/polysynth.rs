@@ -269,7 +269,7 @@ impl PolySynth {
     /// Uses `poll_into()` with a pre-allocated buffer — zero heap allocations.
     #[cfg(feature = "midi")]
     fn poll_midi_events(&mut self) {
-        use tutti_midi::RawMidiEvent;
+        use tutti_midi_io::RawMidiEvent;
 
         // Poll events from the registry using our get_id()
         if let Some(ref registry) = self.midi_registry {

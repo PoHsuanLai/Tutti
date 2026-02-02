@@ -1,4 +1,4 @@
-//! MIDI subsystem for Tutti audio engine.
+//! MIDI I/O subsystem for Tutti audio engine.
 //!
 //! Provides port management, hardware I/O, MPE, MIDI 2.0, CC mapping, and output collection.
 //!
@@ -14,7 +14,7 @@
 //! # Example
 //!
 //! ```ignore
-//! use tutti_midi::MidiSystem;
+//! use tutti_midi_io::MidiSystem;
 //!
 //! // Basic MIDI I/O
 //! let midi = MidiSystem::builder()
@@ -41,6 +41,13 @@ pub use error::{Error, Result};
 // Main entry point - MidiSystem
 mod system;
 pub use system::{MidiSystem, MidiSystemBuilder};
+
+// Fluent builder and handle
+mod midi_builder;
+pub use midi_builder::MidiBuilder;
+
+mod midi_handle;
+pub use midi_handle::MidiHandle;
 
 // Sub-handles
 #[cfg(feature = "midi2")]

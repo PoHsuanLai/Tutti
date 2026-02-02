@@ -45,7 +45,8 @@ impl ExponentialSmoother {
 /// Spatial audio panner using VBAP
 ///
 /// Wraps the vbap crate with DAW-friendly API and channel layout handling.
-pub struct SpatialPanner {
+/// **Internal implementation detail** - users should use `SpatialPannerNode` instead.
+pub(crate) struct SpatialPanner {
     panner: VBAPanner,
     layout: ChannelLayout,
     /// Target azimuth position in degrees (-180 to 180)
@@ -80,13 +81,13 @@ impl SpatialPanner {
     }
 
     /// Create a stereo panner
-    pub fn stereo() -> Result<Self> {
+    pub(crate) fn stereo() -> Result<Self> {
         let panner = VBAPanner::builder().stereo().build()?;
         Ok(Self::new_with_layout(panner, ChannelLayout::stereo()))
     }
 
     /// Create a quad (4.0) panner
-    pub fn quad() -> Result<Self> {
+    pub(crate) fn quad() -> Result<Self> {
         let panner = VBAPanner::builder().quad().build()?;
         Ok(Self::new_with_layout(
             panner,
@@ -108,19 +109,19 @@ impl SpatialPanner {
     }
 
     /// Create a 5.1 surround panner
-    pub fn surround_5_1() -> Result<Self> {
+    pub(crate) fn surround_5_1() -> Result<Self> {
         let panner = VBAPanner::builder().surround_5_1().build()?;
         Ok(Self::new_with_layout(panner, ChannelLayout::surround_5_1()))
     }
 
     /// Create a 7.1 surround panner
-    pub fn surround_7_1() -> Result<Self> {
+    pub(crate) fn surround_7_1() -> Result<Self> {
         let panner = VBAPanner::builder().surround_7_1().build()?;
         Ok(Self::new_with_layout(panner, ChannelLayout::surround_7_1()))
     }
 
     /// Create a Dolby Atmos 7.1.4 panner
-    pub fn atmos_7_1_4() -> Result<Self> {
+    pub(crate) fn atmos_7_1_4() -> Result<Self> {
         let panner = VBAPanner::builder().atmos_7_1_4().build()?;
         Ok(Self::new_with_layout(panner, ChannelLayout::atmos_7_1_4()))
     }
@@ -204,7 +205,7 @@ impl SpatialPanner {
     /// Uses VBAP angle convention:
     /// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left, -90 = right)
     /// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
-    pub fn set_position(&mut self, azimuth: f32, elevation: f32) {
+    pub(crate) fn set_position(&mut self, azimuth: f32, elevation: f32) {
         self.azimuth_target.set(azimuth.clamp(-180.0, 180.0));
         self.elevation_target.set(elevation.clamp(-90.0, 90.0));
     }

@@ -2,10 +2,12 @@
 
 use crate::core::TuttiSystemBuilder;
 use crate::{Result, TuttiEngine};
+use std::sync::Arc;
 
 #[cfg(feature = "midi")]
 use crate::midi::MidiSystem;
 
+#[cfg(feature = "sampler")]
 use crate::sampler::SamplerSystem;
 
 #[cfg(feature = "neural")]
@@ -32,10 +34,14 @@ pub struct TuttiEngineBuilder {
     #[cfg(feature = "midi")]
     enable_midi: bool,
 
+    #[cfg(feature = "sampler")]
     enable_sampler: bool,
 
     #[cfg(feature = "neural")]
     enable_neural: bool,
+
+    #[cfg(feature = "plugin")]
+    plugin_runtime: Option<tokio::runtime::Handle>,
 }
 
 impl Default for TuttiEngineBuilder {
@@ -49,10 +55,14 @@ impl Default for TuttiEngineBuilder {
             #[cfg(feature = "midi")]
             enable_midi: false,
 
+            #[cfg(feature = "sampler")]
             enable_sampler: false,
 
             #[cfg(feature = "neural")]
             enable_neural: false,
+
+            #[cfg(feature = "plugin")]
+            plugin_runtime: None,
         }
     }
 }
@@ -90,6 +100,7 @@ impl TuttiEngineBuilder {
     }
 
     /// Enable sampler subsystem
+    #[cfg(feature = "sampler")]
     pub fn sampler(mut self) -> Self {
         self.enable_sampler = true;
         self
@@ -99,6 +110,23 @@ impl TuttiEngineBuilder {
     #[cfg(feature = "neural")]
     pub fn neural(mut self) -> Self {
         self.enable_neural = true;
+        self
+    }
+
+    /// Set plugin runtime handle for async plugin loading
+    ///
+    /// Required for loading VST2, VST3, and CLAP plugins.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let runtime = tokio::runtime::Runtime::new()?;
+    /// let engine = TuttiEngine::builder()
+    ///     .plugin_runtime(runtime.handle().clone())
+    ///     .build()?;
+    /// ```
+    #[cfg(feature = "plugin")]
+    pub fn plugin_runtime(mut self, handle: tokio::runtime::Handle) -> Self {
+        self.plugin_runtime = Some(handle);
         self
     }
 
@@ -120,15 +148,16 @@ impl TuttiEngineBuilder {
         // Build optional subsystems
         #[cfg(feature = "midi")]
         let midi = if self.enable_midi {
-            Some(
+            Some(Arc::new(
                 MidiSystem::builder()
                     .build()
                     .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
-            )
+            ))
         } else {
             None
         };
 
+        #[cfg(feature = "sampler")]
         let sampler = if self.enable_sampler {
             Some(
                 SamplerSystem::builder(sample_rate)
@@ -150,13 +179,22 @@ impl TuttiEngineBuilder {
             None
         };
 
+        // SoundFont manager is always created if feature is enabled (lazy loading)
+        #[cfg(feature = "soundfont")]
+        let soundfont_manager = Some(Arc::new(crate::synth::SoundFontSystem::new(sample_rate as u32)));
+
         Ok(TuttiEngine::from_parts(
             core,
             #[cfg(feature = "midi")]
             midi,
+            #[cfg(feature = "sampler")]
             sampler,
             #[cfg(feature = "neural")]
             neural,
+            #[cfg(feature = "soundfont")]
+            soundfont_manager,
+            #[cfg(feature = "plugin")]
+            self.plugin_runtime,
         ))
     }
 }

@@ -35,14 +35,18 @@ pub use error::{Error, Result};
 
 // Main high-level API (most common usage)
 mod system;
-pub use system::{CaptureSession, SamplerSystem, SamplerSystemBuilder, StreamBuilder};
+pub use system::{CaptureSession, SamplerSystem, SamplerSystemBuilder};
+
+// Fluent builders
+mod stream_builder;
+pub use stream_builder::{RecordBuilder, StreamBuilder};
 
 // DSP nodes for FunDSP graph integration
 pub use audio_input::{AudioInput, AudioInputBackend};
 pub use sampler::{SamplerUnit, StreamingSamplerUnit};
 pub use time_stretch::TimeStretchUnit;
 
-// Modules for advanced usage
+// Modules - always compiled (SamplerSystem needs them internally)
 pub mod audio_input;
 pub mod butler;
 pub mod recording;

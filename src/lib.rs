@@ -20,15 +20,34 @@
 //! ```ignore
 //! use tutti::prelude::*;
 //!
+//! // Create tokio runtime for plugin loading (if using plugins)
+//! let runtime = tokio::runtime::Runtime::new()?;
+//!
 //! // Create engine (capabilities depend on enabled features)
 //! let engine = TuttiEngine::builder()
 //!     .sample_rate(44100.0)
+//!     .neural()  // Optional: enable neural subsystem
+//!     .plugin_runtime(runtime.handle().clone())  // Optional: enable plugin loading
 //!     .build()?;
 //!
-//! // Build audio graph
+//! // Load nodes once (explicit format methods = compile-time type safety)
+//! engine.load_mpk("my_synth", "model.mpk")?;      // Neural model
+//! engine.load_vst3("reverb", "plugin.vst3")?;     // VST3 plugin
+//!
+//! // Add custom DSP nodes programmatically
+//! engine.add_node("my_filter", |params| {
+//!     let cutoff = params.get("cutoff")?.as_f32().unwrap_or(1000.0);
+//!     Ok(Box::new(lowpass_hz(cutoff)))
+//! })?;
+//!
+//! // Instantiate nodes (creates instances and adds to graph)
+//! let synth = engine.instance("my_synth", &params! {})?;
+//! let filter = engine.instance("my_filter", &params! { "cutoff" => 2000.0 })?;
+//! let reverb = engine.instance("reverb", &params! { "room_size" => 0.9 })?;
+//!
+//! // Build audio graph with node IDs
 //! engine.graph(|net| {
-//!     let osc = net.add(Box::new(sine_hz(440.0)));
-//!     net.pipe_output(osc);
+//!     chain!(net, synth, filter, reverb => output);
 //! });
 //!
 //! // Control transport
@@ -75,6 +94,7 @@ pub use tutti_core::{
     Fade,
     // Metering (includes LUFS!)
     MeteringManager,
+    MetronomeHandle,
     Metronome,
     MetronomeMode,
     MotionState,
@@ -108,6 +128,7 @@ pub use tutti_core::{
     TransportClock,
 
     // Transport
+    TransportHandle,
     TransportManager,
     TuttiNet,
     BBT,
@@ -119,25 +140,28 @@ pub use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUs
 // Sample types
 pub use tutti_core::{Sample, F32, F64};
 
-// MIDI subsystem
+// MIDI I/O subsystem
 #[cfg(feature = "midi")]
-pub use tutti_midi as midi;
+pub use tutti_midi_io as midi;
 
 #[cfg(feature = "midi")]
-pub use tutti_midi::{MidiEvent, MidiSystem, MidiSystemBuilder, PortInfo, RawMidiEvent};
+pub use tutti_midi_io::{MidiEvent, MidiSystem, MidiSystemBuilder, MidiHandle, PortInfo, RawMidiEvent};
 
 #[cfg(feature = "midi")]
 pub use tutti_core::{AsMidiAudioUnit, MidiAudioUnit, MidiRegistry};
 
-// Sampler subsystem (always included)
+// Sampler subsystem (optional)
+#[cfg(feature = "sampler")]
 pub use tutti_sampler as sampler;
 
+#[cfg(feature = "sampler")]
 pub use tutti_sampler::{
     AudioInput, AudioInputBackend, SamplerSystem, SamplerSystemBuilder, SamplerUnit,
     StreamingSamplerUnit, TimeStretchUnit,
 };
 
 // Time stretch types from sampler subcrate
+#[cfg(feature = "sampler")]
 pub use tutti_sampler::time_stretch::TimeStretchParams;
 
 // Synth subsystem
@@ -148,7 +172,7 @@ pub use tutti_synth as synth;
 pub use tutti_synth::{Envelope, PolySynth, Waveform};
 
 #[cfg(feature = "soundfont")]
-pub use tutti_synth::{SoundFontManager, SoundFontSynth, SoundFontUnit};
+pub use tutti_synth::{SoundFontSystem, SoundFontSynth, SoundFontUnit};
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
@@ -158,20 +182,24 @@ pub use tutti_dsp::{
     SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate,
 };
 
-// Spatial audio (always included)
-pub use tutti_dsp::{BinauralPanner, BinauralPannerNode, SpatialPanner, SpatialPannerNode};
+// Spatial audio (always included) - only AudioUnit nodes
+pub use tutti_dsp::{BinauralPannerNode, SpatialPannerNode};
 
-// Analysis tools (always included)
+// Analysis tools (optional)
+#[cfg(feature = "analysis")]
 pub use tutti_analysis as analysis;
 
+#[cfg(feature = "analysis")]
 pub use tutti_analysis::{
     CorrelationMeter, PitchDetector, PitchResult, StereoAnalysis, Transient, TransientDetector,
 };
 
-// Export (always included)
+// Export (optional)
+#[cfg(feature = "export")]
 pub use tutti_export as export;
 
-pub use tutti_export::{AudioFormat, ExportOptions, OfflineRenderer};
+#[cfg(feature = "export")]
+pub use tutti_export::{AudioFormat, ExportBuilder, ExportOptions};
 
 // Plugin hosting
 #[cfg(feature = "plugin")]
@@ -234,36 +262,27 @@ pub mod prelude {
     // Transport
     pub use crate::core::TransportManager;
 
-    // Node registry and introspection
+    // Node parameters (for instance() calls)
     pub use crate::core::{
-        get_param, get_param_or, Connection, NodeConstructor, NodeInfo, NodeParamValue, NodeParams,
-        NodeRegistry, NodeRegistryError,
+        get_param, get_param_or, NodeParamValue, NodeParams,
     };
 
     // Re-export macros from tutti-core
-    pub use tutti_core::{chain, mix, node, params, split};
+    pub use tutti_core::{chain, mix, params, split};
 
     // MIDI (optional)
     #[cfg(feature = "midi")]
-    pub use crate::midi::{MidiEvent, MidiSystem};
+    pub use crate::midi::{MidiEvent, MidiSystem, MidiHandle};
 
-    // Sampler (always included)
+    // Sampler (optional)
+    #[cfg(feature = "sampler")]
     pub use crate::sampler::{SamplerSystem, SamplerUnit};
 
-    // Neural (optional)
-    #[cfg(feature = "neural")]
-    pub use crate::neural::NeuralSystem;
+    // Export (optional)
+    #[cfg(feature = "export")]
+    pub use crate::export::{AudioFormat, ExportBuilder};
 
-    // Plugin registration (optional)
-    #[cfg(feature = "plugin")]
-    pub use crate::plugin::{
-        register_all_system_plugins, register_plugin, register_plugin_directory,
-    };
-
-    // Neural registration (optional)
-    #[cfg(feature = "neural")]
-    pub use crate::neural::{
-        register_all_neural_models, register_neural_directory, register_neural_effects,
-        register_neural_model, register_neural_synth_models,
-    };
+    // Analysis (optional)
+    #[cfg(feature = "analysis")]
+    pub use crate::analysis::{TransientDetector, PitchDetector};
 }

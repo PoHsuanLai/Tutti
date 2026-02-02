@@ -14,14 +14,14 @@ use std::sync::Arc;
 pub struct SoundFontHandle(pub usize);
 
 /// SoundFont file manager with lock-free caching.
-pub struct SoundFontManager {
+pub struct SoundFontSystem {
     sample_rate: u32,
     soundfonts: DashMap<usize, Arc<SoundFont>>,
     path_to_handle: DashMap<PathBuf, SoundFontHandle>,
     next_handle: AtomicUsize,
 }
 
-impl SoundFontManager {
+impl SoundFontSystem {
     /// Create a new SoundFont manager
     pub fn new(sample_rate: u32) -> Self {
         Self {
@@ -110,7 +110,7 @@ mod tests {
 
     #[test]
     fn test_soundfont_manager_creation() {
-        let manager = SoundFontManager::new(44100);
+        let manager = SoundFontSystem::new(44100);
         assert_eq!(manager.sample_rate(), 44100);
         assert!(manager.is_empty());
         assert_eq!(manager.len(), 0);

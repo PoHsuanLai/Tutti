@@ -2,7 +2,7 @@
 
 use crate::Ordering;
 use atomic_float::{AtomicF32, AtomicF64};
-use std::sync::atomic::AtomicBool as StdAtomicBool;
+use crate::compat::AtomicBool as StdAtomicBool;
 
 /// Cache-line aligned atomic f32.
 #[derive(Debug)]

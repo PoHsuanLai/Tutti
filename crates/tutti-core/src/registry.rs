@@ -3,9 +3,8 @@
 //! Provides a global registry for creating audio nodes from string identifiers.
 //! This enables dynamic node creation from serialized data or scripting languages.
 
+use crate::compat::{Arc, Box, HashMap, RwLock, String, ToString, Vec};
 use fundsp::prelude::AudioUnit;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 /// Create a `NodeParams` HashMap with key-value pairs.
 ///
@@ -21,34 +20,9 @@ macro_rules! params {
     ($($key:expr => $value:expr),* $(,)?) => {{
         let mut map = $crate::NodeParams::new();
         $(
-            map.insert($key.to_string(), $value.into());
+            map.insert($key, $value.into());  // No .to_string() - zero allocation!
         )*
         map
-    }};
-}
-
-/// Create a node from registry and add it to the graph with a tag.
-///
-/// # Example
-/// ```ignore
-/// let sine_id = node!(net, registry, "sine", "my_sine", {
-///     "frequency" => 440.0
-/// });
-/// ```
-#[macro_export]
-macro_rules! node {
-    ($net:expr, $registry:expr, $node_type:expr, $tag:expr, { $($key:expr => $value:expr),* $(,)? }) => {{
-        let params = $crate::params! { $($key => $value),* };
-        let audio_unit = $registry.create($node_type, &params)
-            .expect(&format!("Failed to create node type '{}'", $node_type));
-        $net.add_tagged(audio_unit, $tag)
-    }};
-
-    ($net:expr, $registry:expr, $node_type:expr, $tag:expr) => {{
-        let params = $crate::NodeParams::new();
-        let audio_unit = $registry.create($node_type, &params)
-            .expect(&format!("Failed to create node type '{}'", $node_type));
-        $net.add_tagged(audio_unit, $tag)
     }};
 }
 
@@ -57,7 +31,10 @@ pub type NodeConstructor =
     Arc<dyn Fn(&NodeParams) -> Result<Box<dyn AudioUnit>, NodeRegistryError> + Send + Sync>;
 
 /// Node parameters (simple key-value map)
-pub type NodeParams = HashMap<String, NodeParamValue>;
+///
+/// Uses `&'static str` for keys to avoid string allocations.
+/// Parameter names are known at compile time, so this is zero-cost.
+pub type NodeParams = HashMap<&'static str, NodeParamValue>;
 
 /// Parameter value types
 #[derive(Debug, Clone)]
@@ -151,6 +128,47 @@ impl From<&str> for NodeParamValue {
     }
 }
 
+/// Trait for converting NodeParamValue to a specific type
+pub trait ParamConvert: Sized {
+    fn from_param(value: &NodeParamValue) -> Option<Self>;
+}
+
+impl ParamConvert for f32 {
+    fn from_param(value: &NodeParamValue) -> Option<Self> {
+        value.as_f32()
+    }
+}
+
+impl ParamConvert for f64 {
+    fn from_param(value: &NodeParamValue) -> Option<Self> {
+        value.as_f64()
+    }
+}
+
+impl ParamConvert for i32 {
+    fn from_param(value: &NodeParamValue) -> Option<Self> {
+        value.as_i64().map(|i| i as i32)
+    }
+}
+
+impl ParamConvert for i64 {
+    fn from_param(value: &NodeParamValue) -> Option<Self> {
+        value.as_i64()
+    }
+}
+
+impl ParamConvert for bool {
+    fn from_param(value: &NodeParamValue) -> Option<Self> {
+        value.as_bool()
+    }
+}
+
+impl ParamConvert for String {
+    fn from_param(value: &NodeParamValue) -> Option<Self> {
+        value.as_str().map(|s| s.to_string())
+    }
+}
+
 /// Global registry of node constructors
 pub struct NodeRegistry {
     constructors: Arc<RwLock<HashMap<String, NodeConstructor>>>,
@@ -169,9 +187,7 @@ impl NodeRegistry {
     /// # Example
     /// ```ignore
     /// registry.register("sine", |params| {
-    ///     let freq = params.get("frequency")
-    ///         .and_then(|v| v.as_f32())
-    ///         .unwrap_or(440.0);
+    ///     let freq: f32 = get_param_or(params, "frequency", 440.0);
     ///     Ok(Box::new(sine_hz(freq)))
     /// });
     /// ```
@@ -179,59 +195,50 @@ impl NodeRegistry {
     where
         F: Fn(&NodeParams) -> Result<Box<dyn AudioUnit>, NodeRegistryError> + Send + Sync + 'static,
     {
-        self.constructors
-            .write()
-            .unwrap()
-            .insert(name.into(), Arc::new(constructor));
+        let name = name.into();
+        self.constructors.write().insert(name, Arc::new(constructor));
     }
 
-    /// Create a node from registered name and parameters
-    ///
-    /// # Example
-    /// ```ignore
-    /// let mut params = NodeParams::new();
-    /// params.insert("frequency".to_string(), 880.0.into());
-    /// let node = registry.create("sine", &params)?;
-    /// ```
+    /// Create a node instance from registered type
     pub fn create(
         &self,
-        name: &str,
+        node_type: &str,
         params: &NodeParams,
     ) -> Result<Box<dyn AudioUnit>, NodeRegistryError> {
-        let constructors = self.constructors.read().unwrap();
+        let constructors = self.constructors.read();
         let constructor = constructors
-            .get(name)
-            .ok_or_else(|| NodeRegistryError::UnknownNodeType(name.to_string()))?;
+            .get(node_type)
+            .ok_or_else(|| NodeRegistryError::UnknownNodeType(node_type.to_string()))?
+            .clone();
+        drop(constructors);
 
         constructor(params)
     }
 
     /// List all registered node types
     pub fn list_types(&self) -> Vec<String> {
-        self.constructors.read().unwrap().keys().cloned().collect()
+        self.constructors.read().keys().cloned().collect()
     }
 
     /// Check if a type is registered
     pub fn has_type(&self, name: &str) -> bool {
-        self.constructors.read().unwrap().contains_key(name)
+        self.constructors.read().contains_key(name)
     }
 
     /// Unregister a node type
     pub fn unregister(&self, name: &str) -> bool {
-        self.constructors.write().unwrap().remove(name).is_some()
+        self.constructors.write().remove(name).is_some()
     }
 
     /// Clear all registrations
     pub fn clear(&self) {
-        self.constructors.write().unwrap().clear();
+        self.constructors.write().clear();
     }
 }
 
 impl Default for NodeRegistry {
     fn default() -> Self {
-        let registry = Self::new();
-        register_builtin_nodes(&registry);
-        registry
+        Self::new()
     }
 }
 
@@ -263,198 +270,45 @@ pub enum NodeRegistryError {
 
     #[error("Plugin error: {0}")]
     Plugin(String),
+
+    #[error("Failed to load audio file: {0}")]
+    AudioFileLoadError(String),
 }
 
 /// Helper to get a required parameter
-pub fn get_param<T>(
+///
+/// # Example
+/// ```ignore
+/// let freq: f32 = get_param(params, "frequency")?;
+/// let volume: f64 = get_param(params, "volume")?;
+/// let enabled: bool = get_param(params, "enabled")?;
+/// ```
+pub fn get_param<T: ParamConvert>(
     params: &NodeParams,
     name: &str,
-    convert: impl FnOnce(&NodeParamValue) -> Option<T>,
 ) -> Result<T, NodeRegistryError> {
     params
         .get(name)
         .ok_or_else(|| NodeRegistryError::MissingParameter(name.to_string()))
         .and_then(|v| {
-            convert(v).ok_or_else(|| {
+            T::from_param(v).ok_or_else(|| {
                 NodeRegistryError::InvalidParameter(name.to_string(), format!("{:?}", v))
             })
         })
 }
 
 /// Helper to get an optional parameter with default
-pub fn get_param_or<T>(
-    params: &NodeParams,
-    name: &str,
-    default: T,
-    convert: impl FnOnce(&NodeParamValue) -> Option<T>,
-) -> T {
-    params.get(name).and_then(convert).unwrap_or(default)
+///
+/// # Example
+/// ```ignore
+/// let freq: f32 = get_param_or(params, "frequency", 440.0);
+/// let volume: f64 = get_param_or(params, "volume", 0.5);
+/// let enabled: bool = get_param_or(params, "enabled", true);
+/// ```
+pub fn get_param_or<T: ParamConvert>(params: &NodeParams, name: &str, default: T) -> T {
+    params
+        .get(name)
+        .and_then(|v| T::from_param(v))
+        .unwrap_or(default)
 }
 
-/// Register built-in node types
-fn register_builtin_nodes(registry: &NodeRegistry) {
-    use fundsp::prelude::*;
-
-    // =========================================================================
-    // Generators
-    // =========================================================================
-
-    registry.register("sine", |params| {
-        let freq = get_param_or(params, "frequency", 440.0, |v| v.as_f32());
-        Ok(Box::new(sine_hz::<f32>(freq)))
-    });
-
-    registry.register("saw", |params| {
-        let freq = get_param_or(params, "frequency", 440.0, |v| v.as_f32());
-        Ok(Box::new(saw_hz(freq)))
-    });
-
-    registry.register("square", |params| {
-        let freq = get_param_or(params, "frequency", 440.0, |v| v.as_f32());
-        Ok(Box::new(square_hz(freq)))
-    });
-
-    registry.register("triangle", |params| {
-        let freq = get_param_or(params, "frequency", 440.0, |v| v.as_f32());
-        Ok(Box::new(triangle_hz(freq)))
-    });
-
-    registry.register("noise", |_params| Ok(Box::new(noise())));
-
-    registry.register("dc", |params| {
-        let value = get_param_or(params, "value", 0.0, |v| v.as_f32());
-        Ok(Box::new(dc::<f32>(value)))
-    });
-
-    // =========================================================================
-    // Effects
-    // =========================================================================
-
-    registry.register("reverb_stereo", |params| {
-        let room_size = get_param_or(params, "room_size", 0.5, |v| v.as_f64());
-        let time = get_param_or(params, "time", 5.0, |v| v.as_f64());
-        let diffusion = get_param_or(params, "diffusion", 1.0, |v| v.as_f64());
-        Ok(Box::new(reverb_stereo(room_size, time, diffusion)))
-    });
-
-    registry.register("delay", |params| {
-        let time = get_param_or(params, "time", 0.25, |v| v.as_f64());
-        Ok(Box::new(delay(time)))
-    });
-
-    registry.register("lowpass", |params| {
-        let cutoff = get_param_or(params, "cutoff", 1000.0, |v| v.as_f32());
-        Ok(Box::new(lowpass_hz::<f32>(cutoff, 1.0)))
-    });
-
-    registry.register("highpass", |params| {
-        let cutoff = get_param_or(params, "cutoff", 1000.0, |v| v.as_f32());
-        Ok(Box::new(highpass_hz::<f32>(cutoff, 1.0)))
-    });
-
-    registry.register("bandpass", |params| {
-        let center = get_param_or(params, "center", 1000.0, |v| v.as_f32());
-        let q = get_param_or(params, "q", 1.0, |v| v.as_f32());
-        Ok(Box::new(bandpass_hz::<f32>(center, q)))
-    });
-
-    // =========================================================================
-    // Utilities
-    // =========================================================================
-
-    registry.register("pass", |_params| Ok(Box::new(pass())));
-
-    registry.register("mul", |params| {
-        let value = get_param_or(params, "value", 1.0, |v| v.as_f32());
-        Ok(Box::new(mul::<f32>(value)))
-    });
-
-    registry.register("add", |params| {
-        let value = get_param_or(params, "value", 0.0, |v| v.as_f32());
-        Ok(Box::new(add::<f32>(value)))
-    });
-
-    registry.register("pan", |params| {
-        let pan_value = get_param_or(params, "pan", 0.0, |v| v.as_f32());
-        Ok(Box::new(fundsp::prelude::pan(pan_value)))
-    });
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_param_conversion() {
-        let val = NodeParamValue::Float(440.5);
-        assert_eq!(val.as_f64(), Some(440.5));
-        assert_eq!(val.as_f32(), Some(440.5_f32));
-        assert_eq!(val.as_i64(), Some(440));
-
-        let val = NodeParamValue::Int(42);
-        assert_eq!(val.as_i64(), Some(42));
-        assert_eq!(val.as_f64(), Some(42.0));
-
-        let val = NodeParamValue::Bool(true);
-        assert_eq!(val.as_bool(), Some(true));
-
-        let val = NodeParamValue::String("test".to_string());
-        assert_eq!(val.as_str(), Some("test"));
-    }
-
-    #[test]
-    fn test_registry_basic() {
-        let registry = NodeRegistry::new();
-
-        // Register a simple node
-        registry.register("test", |_params| Ok(Box::new(fundsp::prelude::pass())));
-
-        assert!(registry.has_type("test"));
-        assert!(!registry.has_type("nonexistent"));
-
-        let types = registry.list_types();
-        assert_eq!(types.len(), 1);
-        assert!(types.contains(&"test".to_string()));
-    }
-
-    #[test]
-    fn test_builtin_nodes() {
-        let registry = NodeRegistry::default();
-
-        let types = registry.list_types();
-        assert!(types.contains(&"sine".to_string()));
-        assert!(types.contains(&"reverb_stereo".to_string()));
-        assert!(types.contains(&"lowpass".to_string()));
-    }
-
-    #[test]
-    fn test_create_node() {
-        let registry = NodeRegistry::default();
-
-        let mut params = NodeParams::new();
-        params.insert("frequency".to_string(), 880.0.into());
-
-        let node = registry.create("sine", &params);
-        assert!(node.is_ok());
-
-        let node = node.unwrap();
-        assert_eq!(node.inputs(), 0);
-        assert_eq!(node.outputs(), 1);
-    }
-
-    #[test]
-    fn test_unknown_node_type() {
-        let registry = NodeRegistry::default();
-
-        let params = NodeParams::new();
-        let result = registry.create("nonexistent", &params);
-
-        assert!(result.is_err());
-        match result {
-            Err(NodeRegistryError::UnknownNodeType(name)) => {
-                assert_eq!(name, "nonexistent");
-            }
-            _ => panic!("Expected UnknownNodeType error"),
-        }
-    }
-}

@@ -1,8 +1,10 @@
 //! Graph analysis for neural batching optimization.
 
 use super::metadata::{NeuralModelId, NeuralNodeManager};
+use crate::compat::{HashMap, Vec};
+use alloc::collections::VecDeque;
 use fundsp::net::{Net, NodeId, Source};
-use std::collections::{HashMap, HashSet, VecDeque};
+use hashbrown::HashSet;
 
 /// Result of graph analysis for neural batching.
 #[derive(Debug, Clone, Default)]
@@ -85,8 +87,10 @@ impl<'a> GraphAnalyzer<'a> {
             return Vec::new();
         }
 
-        let mut visited = HashSet::new();
-        let mut groups = Vec::new();
+        // Pre-size collections based on neural node count (typical graphs have few groups)
+        let node_count = neural_nodes.len();
+        let mut visited = HashSet::with_capacity(node_count);
+        let mut groups = Vec::with_capacity(node_count.min(8));  // Rarely >8 parallel groups
 
         for &node_id in &neural_nodes {
             if visited.contains(&node_id) {
@@ -110,9 +114,11 @@ impl<'a> GraphAnalyzer<'a> {
         neural_nodes: &HashSet<NodeId>,
         visited: &mut HashSet<NodeId>,
     ) -> Vec<NodeId> {
-        let mut component = Vec::new();
-        let mut queue = VecDeque::new();
-        let mut seen_in_traversal = HashSet::new();
+        // Pre-size for typical component size (most groups are small, <16 nodes)
+        let estimated_size = neural_nodes.len().min(16);
+        let mut component = Vec::with_capacity(estimated_size);
+        let mut queue = VecDeque::with_capacity(estimated_size);
+        let mut seen_in_traversal = HashSet::with_capacity(estimated_size);
 
         queue.push_back(start);
         seen_in_traversal.insert(start);
@@ -166,11 +172,12 @@ impl<'a> GraphAnalyzer<'a> {
     /// Compute topological execution order for neural nodes.
     fn compute_execution_order(&self) -> HashMap<NodeId, usize> {
         let neural_nodes: HashSet<NodeId> = self.manager.all_nodes().into_iter().collect();
-        let mut order = HashMap::new();
+        let node_count = neural_nodes.len();
 
-        // Build dependency graph for neural nodes only
-        let mut deps: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-        let mut indegree: HashMap<NodeId, usize> = HashMap::new();
+        // Pre-size maps to avoid rehashing during graph construction
+        let mut order = HashMap::with_capacity(node_count);
+        let mut deps: HashMap<NodeId, Vec<NodeId>> = HashMap::with_capacity(node_count);
+        let mut indegree: HashMap<NodeId, usize> = HashMap::with_capacity(node_count);
 
         for &node_id in &neural_nodes {
             deps.entry(node_id).or_default();
@@ -220,9 +227,11 @@ impl<'a> GraphAnalyzer<'a> {
         target: NodeId,
         neural_nodes: &HashSet<NodeId>,
     ) -> Vec<NodeId> {
-        let mut upstream_neural = Vec::new();
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::new();
+        // Pre-size for typical upstream depth (most nodes have <8 upstream neural nodes)
+        let estimated_size = neural_nodes.len().min(8);
+        let mut upstream_neural = Vec::with_capacity(estimated_size);
+        let mut visited = HashSet::with_capacity(estimated_size);
+        let mut queue = VecDeque::with_capacity(estimated_size);
 
         // Start with immediate inputs
         if self.net.contains(target) {

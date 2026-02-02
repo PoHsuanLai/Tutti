@@ -120,7 +120,7 @@ impl AudioUnit for SoundFontUnit {
         {
             // Process pending MIDI events
             for event in self.pending_midi.drain(..) {
-                use tutti_midi::RawMidiEvent;
+                use tutti_midi_io::RawMidiEvent;
                 let raw: RawMidiEvent = event.into();
                 let status = raw.data[0];
                 let data1 = raw.data[1];

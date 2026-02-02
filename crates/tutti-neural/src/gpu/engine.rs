@@ -132,6 +132,10 @@ pub struct InferenceStats {
 }
 
 /// Inference request for a single track
+///
+/// **Allocation strategy:** Features are stored as `Vec<f32>` since requests
+/// are sent through channels and stored in batchers. Use `from_features_slice()`
+/// to avoid unnecessary copies when you already have owned features.
 #[derive(Debug, Clone)]
 pub struct InferenceRequest {
     /// Track ID
@@ -149,6 +153,38 @@ pub struct InferenceRequest {
 
     /// Buffer size (for output parameter resampling)
     pub buffer_size: usize,
+}
+
+impl InferenceRequest {
+    /// Create request from pre-owned features (zero-copy when caller already owns Vec)
+    pub fn from_owned(
+        track_id: VoiceId,
+        model_id: NeuralModelId,
+        features: Vec<f32>,
+        buffer_size: usize,
+    ) -> Self {
+        Self {
+            track_id,
+            model_id,
+            features,
+            buffer_size,
+        }
+    }
+
+    /// Create request from feature slice (allocates Vec)
+    pub fn from_slice(
+        track_id: VoiceId,
+        model_id: NeuralModelId,
+        features: &[f32],
+        buffer_size: usize,
+    ) -> Self {
+        Self {
+            track_id,
+            model_id,
+            features: features.to_vec(),
+            buffer_size,
+        }
+    }
 }
 
 /// Inference result
@@ -370,7 +406,7 @@ impl<B: Backend> NeuralInferenceEngine<B> {
     /// 1. Group requests by model_id (can't batch different models)
     /// 2. For each group: stack MIDI tensors → single forward pass → split outputs
     /// 3. Convert each output to ControlParams and push to voice queues
-    pub fn infer_batch(&self, requests: Vec<InferenceRequest>) -> Result<Vec<InferenceResponse>> {
+    pub fn infer_batch(&self, requests: &[InferenceRequest]) -> Result<Vec<InferenceResponse>> {
         if requests.is_empty() {
             return Ok(vec![]);
         }
@@ -381,7 +417,7 @@ impl<B: Backend> NeuralInferenceEngine<B> {
         tracing::debug!("Running batched inference on {} tracks", total_requests);
 
         // Group requests by model_id (can only batch same model together)
-        let grouped = Self::group_by_model(requests);
+        let grouped = Self::group_by_model(requests.to_vec());
         let num_batches = grouped.len();
 
         let mut all_responses = Vec::with_capacity(total_requests);
@@ -564,7 +600,7 @@ mod tests {
 
         // Build features from MidiState (the new pattern)
         let mut state = MidiState::default();
-        let event = tutti_midi::MidiEvent::note_on_builder(60, 100)
+        let event = tutti_midi_io::MidiEvent::note_on_builder(60, 100)
             .channel(0)
             .offset(0)
             .build();

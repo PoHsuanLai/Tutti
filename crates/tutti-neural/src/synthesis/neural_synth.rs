@@ -69,12 +69,13 @@ impl tutti_core::MidiAudioUnit for NeuralSynth {
             let triggers_inference = self.midi_state.apply(event);
 
             if triggers_inference {
-                let request = InferenceRequest {
-                    track_id: self.track_id,
-                    model_id: self.model_id,
-                    features: self.midi_state.to_features().to_vec(),
-                    buffer_size: self.buffer_size,
-                };
+                let features = self.midi_state.to_features();
+                let request = InferenceRequest::from_slice(
+                    self.track_id,
+                    self.model_id,
+                    &features,
+                    self.buffer_size,
+                );
 
                 // Drop MIDI event if queue is full (non-blocking)
                 let _ = self.midi_tx.try_send(request);

@@ -1,11 +1,10 @@
 //! Real-time audio metering and CPU tracking.
 
+use crate::compat::{Arc, HashMap, Mutex, ToString};
 use crate::{AtomicBool, AtomicFloat, AtomicU32, AtomicU64, Ordering};
+use core::time::Duration;
 use crossbeam_channel::Receiver;
 use ebur128::{EbuR128, Mode};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 type AnalysisReceiver = Receiver<(f32, f32)>;
 type ChannelAnalysisReceivers = HashMap<usize, Receiver<(f32, f32)>>;
@@ -298,8 +297,7 @@ impl MeteringManager {
     pub fn set_master_consumer(&self, receiver: Receiver<(f32, f32)>) -> crate::Result<()> {
         *self
             .analysis_buffer_rx
-            .lock()
-            .map_err(|_| crate::Error::LockPoisoned)? = Some(receiver);
+            .lock() = Some(receiver);
         Ok(())
     }
 
@@ -351,7 +349,6 @@ impl MeteringManager {
         let receiver = self
             .analysis_buffer_rx
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .take();
         Ok(receiver.map(|r| (r, self.sample_rate)))
     }
@@ -359,12 +356,7 @@ impl MeteringManager {
     pub fn take_channel_analysis_consumers(
         &self,
     ) -> crate::Result<HashMap<usize, Receiver<(f32, f32)>>> {
-        Ok(std::mem::take(
-            &mut *self
-                .channel_analysis_rxs
-                .lock()
-                .map_err(|_| crate::Error::LockPoisoned)?,
-        ))
+        Ok(core::mem::take(&mut *self.channel_analysis_rxs.lock()))
     }
 
     pub fn create_channel_analysis_buffer(
@@ -374,7 +366,6 @@ impl MeteringManager {
         let (tx, rx) = crossbeam_channel::bounded::<(f32, f32)>(8192);
         self.channel_analysis_rxs
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .insert(channel_index, rx);
         Ok(tx)
     }
@@ -382,7 +373,6 @@ impl MeteringManager {
     pub fn remove_channel_analysis_buffer(&self, channel_index: usize) -> crate::Result<()> {
         self.channel_analysis_rxs
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .remove(&channel_index);
         Ok(())
     }
@@ -438,7 +428,6 @@ impl MeteringManager {
     pub fn loudness_global(&self) -> crate::Result<f64> {
         self.ebur128
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .loudness_global()
             .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
     }
@@ -446,7 +435,6 @@ impl MeteringManager {
     pub fn loudness_shortterm(&self) -> crate::Result<f64> {
         self.ebur128
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .loudness_shortterm()
             .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
     }
@@ -454,7 +442,6 @@ impl MeteringManager {
     pub fn loudness_range(&self) -> crate::Result<f64> {
         self.ebur128
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .loudness_range()
             .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
     }
@@ -462,7 +449,6 @@ impl MeteringManager {
     pub fn true_peak(&self, channel: u32) -> crate::Result<f64> {
         self.ebur128
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .true_peak(channel)
             .map_err(|_| crate::Error::NotImplemented("LUFS measurement not ready".to_string()))
     }
@@ -470,7 +456,6 @@ impl MeteringManager {
     pub fn reset_lufs(&self) -> crate::Result<()> {
         self.ebur128
             .lock()
-            .map_err(|_| crate::Error::LockPoisoned)?
             .reset();
         Ok(())
     }

@@ -2,7 +2,7 @@
 
 use super::position::{LoopRange, MusicalPosition};
 use crate::AtomicFlag;
-use std::sync::Arc;
+use crate::compat::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MotionState {

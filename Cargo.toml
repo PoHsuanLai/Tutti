@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/tutti-core",
-    "crates/tutti-midi",
+    "crates/tutti-midi-io",
     "crates/tutti-sampler",
     "crates/tutti-synth",
     "crates/tutti-dsp",
@@ -32,32 +32,70 @@ exclude = [
 ]
 
 [features]
-# Default: Core DAW functionality (export, sampler, analysis, spatial audio always included)
-default = []
+# Default: Full feature set for backwards compatibility
+# Note: Enables std for audio I/O (CPAL) - use default-features = false for no_std
+default = ["full", "std"]
+
+# Enable std on tutti-core (needed for CPAL audio I/O and neural processing)
+std = ["tutti-core/std"]
 
 # Full feature set (everything enabled)
-full = ["midi", "synth", "soundfont", "plugin", "neural"]
+full = [
+    "midi", "midi-io", "mpe", "midi2",
+    "synth", "soundfont",
+    "plugin",
+    "neural",
+    "sampler", "sampler-butler", "sampler-recording", "sampler-audio-input",
+    "export", "analysis"
+]
 
-# Optional subsystems (heavy/complex dependencies)
-midi = ["dep:tutti-midi", "tutti-core/midi", "tutti-synth?/midi"]
+# === MIDI Features ===
+midi = ["dep:tutti-midi-io", "tutti-core/midi", "tutti-synth?/midi"]
+midi-io = ["midi", "tutti-midi-io/midi-io"]  # Hardware MIDI I/O
+mpe = ["midi", "tutti-midi-io/mpe"]          # MPE support
+midi2 = ["midi", "tutti-midi-io/midi2"]      # MIDI 2.0
+
+# === Synth Features ===
 synth = ["dep:tutti-synth"]
 soundfont = ["synth", "tutti-synth/soundfont", "tutti-synth/midi"]
-plugin = ["dep:tutti-plugin"]
-neural = ["dep:tutti-neural", "tutti-core/neural"]
+
+# === Plugin Hosting ===
+plugin = ["dep:tutti-plugin", "dep:tokio"]
+vst2 = ["plugin", "tutti-plugin/vst2"]    # VST2 support (requires VST SDK)
+vst3 = ["plugin", "tutti-plugin/vst3"]    # VST3 support
+clap = ["plugin", "tutti-plugin/clap"]    # CLAP support
+
+# === Neural Audio ===
+# Neural requires std for GPU (wgpu) and model loading (filesystem)
+neural = ["std", "dep:tutti-neural", "tutti-core/neural"]
+
+# === Sampler Features ===
+sampler = ["dep:tutti-sampler"]
+sampler-butler = ["sampler", "tutti-sampler/butler"]           # Disk streaming
+sampler-recording = ["sampler", "tutti-sampler/recording"]     # Recording to disk
+sampler-audio-input = ["sampler", "tutti-sampler/audio-input"] # Hardware audio input
+
+# === Export & Analysis ===
+export = ["dep:tutti-export"]
+analysis = ["dep:tutti-analysis"]
 
 [dependencies]
-# Core subsystems (always included)
+# Core (always included - minimal DSP)
+# Note: default-features = false means no_std by default, features enable std when needed
 tutti-core = { version = "0.0.1", path = "crates/tutti-core", default-features = false }
 tutti-dsp = { version = "0.0.1", path = "crates/tutti-dsp", default-features = false }
-tutti-sampler = { version = "0.0.1", path = "crates/tutti-sampler", default-features = false }
-tutti-analysis = { version = "0.0.1", path = "crates/tutti-analysis" }
-tutti-export = { version = "0.0.1", path = "crates/tutti-export", default-features = false }
 
-# Optional subsystems (heavy/complex dependencies)
-tutti-midi = { version = "0.0.1", path = "crates/tutti-midi", optional = true, default-features = false }
+# Optional subsystems
+tutti-sampler = { version = "0.0.1", path = "crates/tutti-sampler", optional = true, default-features = false }
+tutti-analysis = { version = "0.0.1", path = "crates/tutti-analysis", optional = true }
+tutti-export = { version = "0.0.1", path = "crates/tutti-export", optional = true, default-features = false }
+tutti-midi-io = { version = "0.0.1", path = "crates/tutti-midi-io", optional = true, default-features = false }
 tutti-synth = { version = "0.0.1", path = "crates/tutti-synth", optional = true, default-features = false }
 tutti-plugin = { version = "0.0.1", path = "crates/tutti-plugin", optional = true }
 tutti-neural = { version = "0.0.1", path = "crates/tutti-neural", optional = true }
+
+# Tokio runtime for plugin loading
+tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 approx = "0.5"

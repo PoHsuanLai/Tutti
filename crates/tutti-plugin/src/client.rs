@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command};
 use std::sync::Arc;
 use tutti_core::{AudioUnit, BufferMut, BufferRef, Sample, SignalFrame, F64};
-use tutti_midi::MidiEvent;
+use tutti_midi_io::MidiEvent;
 
 /// Batch size for tick() accumulation (matches fundsp MAX_BUFFER_SIZE).
 const TICK_BATCH_SIZE: usize = 64;
@@ -85,7 +85,7 @@ pub struct PluginClient {
     midi_producer: Arc<UnsafeCell<ringbuf::HeapProd<MidiEvent>>>,
     midi_consumer: Arc<UnsafeCell<ringbuf::HeapCons<MidiEvent>>>,
     /// Pre-allocated buffer for RT-safe MIDI event draining (avoids per-call allocation)
-    midi_drain_buffer: Vec<MidiEvent>,
+    midi_drain_buffer: crate::protocol::MidiEventVec,
 }
 
 // Safety: SPSC queues - producer and consumer never accessed concurrently
@@ -205,7 +205,7 @@ impl PluginClient {
             tick_f64: TickBuffer::new(inputs, outputs),
             midi_producer,
             midi_consumer,
-            midi_drain_buffer: Vec::with_capacity(64),
+            midi_drain_buffer: smallvec::SmallVec::new(),
         };
 
         let handle = PluginClientHandle {

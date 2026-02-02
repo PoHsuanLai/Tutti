@@ -54,7 +54,7 @@ pub fn register_plugin<P: AsRef<Path>>(
 
     registry.register(plugin_name, move |params| {
         // Get sample rate from params (required for plugin loading)
-        let sample_rate = get_param_or(params, "sample_rate", 44100.0, |v| v.as_f64());
+        let sample_rate: f64 = get_param_or(params, "sample_rate", 44100.0);
 
         // Load plugin using runtime.block_on
         let (client, _handle) = runtime.block_on(PluginClient::load(

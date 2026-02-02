@@ -49,7 +49,9 @@ impl ExponentialSmoother {
 /// - OpenAL Soft's HRTF dataset
 /// - MIT KEMAR HRTF
 /// - SADIE HRTF database
-pub struct BinauralPanner {
+///
+/// **Internal implementation detail** - users should use `BinauralPannerNode` instead.
+pub(crate) struct BinauralPanner {
     /// Target azimuth position in degrees (-180 to 180)
     azimuth_target: Arc<AtomicFloat>,
     /// Target elevation position in degrees (-90 to 90)
@@ -70,7 +72,7 @@ impl BinauralPanner {
     /// Create a new binaural panner
     ///
     /// `sample_rate` is needed for ITD (Interaural Time Difference) calculation
-    pub fn new(sample_rate: f32) -> Self {
+    pub(crate) fn new(sample_rate: f32) -> Self {
         const MAX_ITD_SAMPLES: usize = 64; // ~1.3ms at 48kHz (enough for max ITD)
 
         Self {
@@ -89,18 +91,18 @@ impl BinauralPanner {
     ///
     /// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left, -90 = right)
     /// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
-    pub fn set_position(&mut self, azimuth: f32, elevation: f32) {
+    pub(crate) fn set_position(&mut self, azimuth: f32, elevation: f32) {
         self.azimuth_target.set(azimuth.clamp(-180.0, 180.0));
         self.elevation_target.set(elevation.clamp(-90.0, 90.0));
     }
 
     /// Get current azimuth (target value)
-    pub fn azimuth(&self) -> f32 {
+    pub(crate) fn azimuth(&self) -> f32 {
         self.azimuth_target.get()
     }
 
     /// Get current elevation (target value)
-    pub fn elevation(&self) -> f32 {
+    pub(crate) fn elevation(&self) -> f32 {
         self.elevation_target.get()
     }
 
@@ -111,7 +113,7 @@ impl BinauralPanner {
     /// - ILD (Interaural Level Difference): Sound is quieter at far ear
     ///
     /// Returns (left, right) stereo samples
-    pub fn process_mono(&mut self, input: f32) -> (f32, f32) {
+    pub(crate) fn process_mono(&mut self, input: f32) -> (f32, f32) {
         let target_azimuth = self.azimuth_target.get();
         let target_elevation = self.elevation_target.get();
 

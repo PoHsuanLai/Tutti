@@ -1,8 +1,8 @@
 //! Sample-accurate transport clock.
 
+use crate::compat::{any, Arc, Vec};
 use crate::lockfree::{AtomicDouble, AtomicFlag, AtomicFloat};
 use fundsp::prelude::*;
-use std::sync::Arc;
 
 pub struct TransportClock {
     current_beat: f64,
@@ -304,11 +304,11 @@ impl AudioUnit for TransportClock {
         TRANSPORT_CLOCK_ID
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn any::Any {
         self
     }
 
@@ -510,11 +510,11 @@ impl AudioUnit for AutomationReaderInput {
         AUTOMATION_INPUT_ID
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn any::Any {
         self
     }
 
@@ -614,7 +614,7 @@ pub mod curves {
         let center = (max_value + min_value) / 2.0;
 
         Arc::new(move |beat: f64| {
-            let phase = std::f32::consts::TAU * (beat / frequency_beats) as f32 + phase_offset;
+            let phase = core::f32::consts::TAU * (beat / frequency_beats) as f32 + phase_offset;
             center + amplitude * phase.sin()
         })
     }

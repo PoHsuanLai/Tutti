@@ -3,7 +3,7 @@
 use crate::pdc::DelayBuffer;
 use crate::{AudioUnit, BufferMut, BufferRef};
 use fundsp::signal::SignalFrame;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::compat::{any, AtomicUsize, Ordering};
 
 /// PDC delay compensation as an AudioUnit.
 pub struct PdcDelayUnit {
@@ -109,11 +109,11 @@ impl AudioUnit for PdcDelayUnit {
         0x5044434445_u64 // "PDCDE" in hex
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn any::Any {
         self
     }
 
@@ -122,8 +122,8 @@ impl AudioUnit for PdcDelayUnit {
     }
 
     fn footprint(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.delay_buffer.delay_samples() * 2 * std::mem::size_of::<f32>()
+        core::mem::size_of::<Self>()
+            + self.delay_buffer.delay_samples() * 2 * core::mem::size_of::<f32>()
     }
 }
 

@@ -3,7 +3,7 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use tutti_midi::{MidiSystem, MpeMode, MpeZoneConfig};
+//! use tutti_midi_io::{MidiSystem, MpeMode, MpeZoneConfig};
 //!
 //! // Create MIDI system with I/O and MPE
 //! let midi = MidiSystem::builder()
@@ -276,6 +276,20 @@ impl MidiSystem {
         Ok(())
     }
 
+    /// Fluent MIDI output builder.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Chain multiple messages
+    /// midi.send()
+    ///     .note_on(0, 60, 100)
+    ///     .cc(0, 74, 64)
+    ///     .pitch_bend(0, 0);
+    /// ```
+    pub fn send(&self) -> crate::midi_builder::MidiBuilder<'_> {
+        crate::midi_builder::MidiBuilder::new(Some(self))
+    }
+
     // ==================== MIDI 1.0 Event Creation ====================
 
     /// Create a Note On event (for scheduling, recording, etc.)
@@ -351,9 +365,7 @@ impl MidiSystem {
     /// Get the MPE sub-handle for per-note expression
     #[cfg(feature = "mpe")]
     pub fn mpe(&self) -> MpeHandle {
-        MpeHandle {
-            processor: self.inner.mpe_processor.clone(),
-        }
+        MpeHandle::new(self.inner.mpe_processor.clone())
     }
 
     /// Get the shared per-note expression state (for synth voices)
@@ -557,6 +569,11 @@ pub struct MpeHandle {
 
 #[cfg(feature = "mpe")]
 impl MpeHandle {
+    /// Create a new MPE handle (internal use only)
+    pub(crate) fn new(processor: Option<Arc<RwLock<MpeProcessor>>>) -> Self {
+        Self { processor }
+    }
+
     /// Get the shared per-note expression state
     pub fn expression(&self) -> Option<Arc<PerNoteExpression>> {
         self.processor.as_ref().map(|p| p.read().expression())

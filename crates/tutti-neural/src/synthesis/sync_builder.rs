@@ -312,7 +312,7 @@ impl SyncNeuralSynthBuilder {
             if let Ok(response) = engine.infer(request) {
                 push_response_to_voice(engine, track_id, response.params);
             }
-        } else if let Ok(responses) = engine.infer_batch(batch) {
+        } else if let Ok(responses) = engine.infer_batch(&batch) {
             for response in responses {
                 push_response_to_voice(engine, response.track_id, response.params);
             }
@@ -356,12 +356,12 @@ impl SyncNeuralSynthBuilder {
     /// # Returns
     /// `true` if queued successfully, `false` if queue is full
     pub fn send_features_rt(&self, track_id: VoiceId, features: Vec<f32>) -> bool {
-        let request = crate::gpu::InferenceRequest {
+        let request = crate::gpu::InferenceRequest::from_owned(
             track_id,
-            model_id: self.model_id,
+            self.model_id,
             features,
-            buffer_size: self.buffer_size,
-        };
+            self.buffer_size,
+        );
 
         self.midi_tx.try_send(request).is_ok()
     }

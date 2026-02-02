@@ -9,9 +9,16 @@ keywords = ["audio", "dsp", "real-time", "daw", "fundsp"]
 categories = ["multimedia::audio"]
 
 [features]
-default = []
+# Default: Enable audio I/O via CPAL (requires std)
+default = ["std"]
+
+# std feature: Only needed for CPAL audio I/O
+# Everything else works with no_std + alloc
+std = ["fundsp/std", "fundsp/files", "dep:cpal"]
+
+# Optional subsystems
 neural = []
-midi = ["dep:tutti-midi"]
+midi = ["dep:tutti-midi-io"]
 
 [dependencies]
 thiserror = "2"
@@ -20,18 +27,20 @@ tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
 
 # Audio
-cpal = "0.15"
-fundsp = { package = "fundsp-tutti", version = "0.23.0", path = "../fundsp-tutti", default-features = false, features = ["std", "files"] }
+cpal = { version = "0.15", optional = true }
+fundsp = { package = "fundsp-tutti", version = "0.23.0", path = "../fundsp-tutti", default-features = false }
 audio-automation = "0.1"
 
 # MIDI types (for trait only, no I/O dependency)
-tutti-midi = { path = "../tutti-midi", default-features = false, optional = true }
+tutti-midi-io = { path = "../tutti-midi-io", default-features = false, optional = true }
 
-# Lock-free
+# Lock-free (no_std compatible)
 crossbeam-channel = "0.5"
 atomic_float = "1.1"
 arc-swap = "1.7"
 dashmap = "6.1"
+hashbrown = { version = "0.16", default-features = false }
+parking_lot = { version = "0.12", default-features = false }
 
 # DSP (for future LUFS metering implementation)
 ebur128 = "0.1"

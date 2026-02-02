@@ -1,8 +1,8 @@
 [package]
-name = "tutti-midi"
+name = "tutti-midi-io"
 version = "0.0.1"
 edition = "2021"
-description = "MIDI subsystem - I/O, MPE, MIDI 2.0, CC mapping"
+description = "MIDI I/O subsystem - Hardware I/O, ports, MPE, MIDI 2.0, CC mapping"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/PoHsuanLai/Tutti"
 

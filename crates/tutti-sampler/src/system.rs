@@ -215,6 +215,41 @@ impl SamplerSystem {
     pub fn audio_input(&self) -> &std::sync::Arc<crate::audio_input::manager::AudioInputManager> {
         &self.audio_input
     }
+
+    // Fluent API
+
+    /// Stream an audio file with fluent API.
+    ///
+    /// # Example
+    /// ```ignore
+    /// sampler.stream("long_audio.wav")
+    ///     .channel(0)
+    ///     .gain(0.8)
+    ///     .speed(1.5)
+    ///     .start();
+    /// ```
+    pub fn stream(&self, file_path: impl Into<std::path::PathBuf>) -> crate::stream_builder::StreamBuilder<'_> {
+        crate::stream_builder::StreamBuilder::new(self, file_path)
+    }
+
+    /// Record audio with fluent API.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let session = sampler.record("output.wav")
+    ///     .channels(2)
+    ///     .buffer_seconds(5.0)
+    ///     .start();
+    ///
+    /// // Audio callback writes to session.producer
+    ///
+    /// // Later...
+    /// sampler.stop_capture(session.id);
+    /// sampler.flush_capture(session.id, "final.wav");
+    /// ```
+    pub fn record(&self, file_path: impl Into<std::path::PathBuf>) -> crate::stream_builder::RecordBuilder<'_> {
+        crate::stream_builder::RecordBuilder::new(self, file_path)
+    }
 }
 
 impl Drop for SamplerSystem {
