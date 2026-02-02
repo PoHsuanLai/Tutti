@@ -80,6 +80,45 @@ impl UnifiedInputProducerHandle {
     }
 }
 
+/// Lock-free producer handle for MIDI output (used by audio thread).
+///
+/// # Safety
+/// This handle must only be used from a single thread (the audio thread).
+/// SPSC ring buffers require exactly one producer - concurrent pushes are undefined behavior.
+///
+/// Clone is safe because we're just copying the pointer. The safety invariant is that
+/// only one thread actually calls push() at a time, which is enforced by documentation.
+#[derive(Clone)]
+pub struct OutputProducerHandle {
+    producer: *mut ringbuf::HeapProd<MidiEvent>,
+}
+
+// SAFETY: OutputProducerHandle is Send because the underlying HeapProd is Send.
+// It's used to transfer ownership to the audio thread.
+unsafe impl Send for OutputProducerHandle {}
+
+// SAFETY: OutputProducerHandle is Sync because we document that only one thread
+// may call push() at a time (the audio thread). This is the SPSC invariant.
+// While the handle can be shared (via Arc), the safety contract requires that
+// only the audio thread actually calls push().
+unsafe impl Sync for OutputProducerHandle {}
+
+impl OutputProducerHandle {
+    /// Push a MIDI event to the output buffer (lock-free).
+    ///
+    /// # Safety
+    /// Must only be called from a single thread (the audio thread).
+    /// Even though this handle can be cloned, you must ensure that only
+    /// one thread calls push() at any given time (SPSC invariant).
+    #[inline]
+    pub fn push(&self, event: MidiEvent) -> bool {
+        // SAFETY: We have exclusive access as the single producer (SPSC invariant).
+        // The caller guarantees single-threaded access.
+        let prod = unsafe { &mut *self.producer };
+        prod.try_push(event).is_ok()
+    }
+}
+
 /// Lock-free MIDI port using SPSC ring buffers.
 ///
 /// Uses UnsafeCell for zero-overhead access on both producer and consumer sides.
@@ -163,6 +202,17 @@ impl AsyncMidiPort {
         }
     }
 
+    /// Get a lock-free producer handle for MIDI output.
+    ///
+    /// # Safety
+    /// The returned handle must only be used from a single thread (typically
+    /// the audio thread). This is the SPSC invariant.
+    pub fn output_producer_handle(&self) -> OutputProducerHandle {
+        OutputProducerHandle {
+            producer: self.output_producer.get(),
+        }
+    }
+
     // ==================== RT Thread Methods ====================
 
     pub fn cycle_start_read_input(&self, _nframes: usize) -> Vec<MidiEvent> {
@@ -183,11 +233,6 @@ impl AsyncMidiPort {
             events.push(event);
         }
         events
-    }
-
-    pub fn write_event(&self, event: MidiEvent) -> bool {
-        let producer = unsafe { &mut *self.output_producer.get() };
-        producer.try_push(event).is_ok()
     }
 
     pub fn cycle_end_flush_output(&self) -> Vec<MidiEvent> {
@@ -248,10 +293,11 @@ mod tests {
     #[test]
     fn test_output_flow() {
         let port = AsyncMidiPort::new("Output", 256);
+        let output_handle = port.output_producer_handle();
 
         // Audio thread writes an event
         let event = MidiEvent::note_off(10, 0, 0x3C, 0); // Note Off at frame 10, channel 0, note 60
-        assert!(port.write_event(event));
+        assert!(output_handle.push(event));
 
         // Flush output (audio thread sends to hardware)
         let events = port.cycle_end_flush_output();
@@ -263,15 +309,16 @@ mod tests {
     #[test]
     fn test_fifo_full() {
         let port = AsyncMidiPort::new("Full", 4); // Small FIFO
+        let output_handle = port.output_producer_handle();
 
         // Fill the output FIFO
         for i in 0..4 {
             let event = MidiEvent::note_on(i, 0, 0x3C, 0x7F);
-            assert!(port.write_event(event), "Failed to write event {}", i);
+            assert!(output_handle.push(event), "Failed to write event {}", i);
         }
 
         // Next write should fail (FIFO full)
         let event = MidiEvent::note_on(5, 0, 0x3C, 0x7F);
-        assert!(!port.write_event(event), "FIFO should be full");
+        assert!(!output_handle.push(event), "FIFO should be full");
     }
 }

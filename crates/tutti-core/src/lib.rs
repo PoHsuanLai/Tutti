@@ -7,6 +7,9 @@
 // Always no_std + alloc (only enable std for CPAL audio I/O)
 #![no_std]
 
+#[cfg(feature = "std")]
+extern crate std;
+
 #[macro_use]
 extern crate alloc;
 

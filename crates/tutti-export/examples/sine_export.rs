@@ -1,39 +1,36 @@
 //! Export a simple sine wave to WAV
 
-use fundsp::prelude::*;
-use tutti_export::{
-    export_wav, ExportOptions, OfflineRenderer, RenderJob, RenderNote, RenderTrack,
-};
+use tutti_export::{export_wav, ExportOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sample_rate = 44100;
-    let mut renderer = OfflineRenderer::new(sample_rate);
+    let duration_seconds = 2.0;
+    let num_samples = (sample_rate as f64 * duration_seconds) as usize;
 
-    // Register a simple sine wave synth (stereo)
-    let synth_idx = renderer.register_synth(Box::new(|note, _vel, _params| {
-        let freq = 440.0 * 2.0f32.powf((note as f32 - 69.0) / 12.0);
-        Box::new(sine_hz::<f32>(freq) | sine_hz::<f32>(freq))
-    }));
+    // Generate 440Hz sine wave (stereo)
+    let mut left = Vec::with_capacity(num_samples);
+    let mut right = Vec::with_capacity(num_samples);
 
-    // Create a 1-second render job
-    let job = RenderJob::new(sample_rate, sample_rate as usize).with_track(
-        RenderTrack::new(0).with_note(RenderNote {
-            synth_index: synth_idx,
-            midi_note: 60, // C4
-            velocity: 100,
-            start_sample: 0,
-            duration_samples: sample_rate as usize,
-            params: None,
-        }),
-    );
+    for i in 0..num_samples {
+        let t = i as f64 / sample_rate as f64;
+        let sample = (t * 440.0 * 2.0 * std::f64::consts::PI).sin() as f32;
+        
+        // Simple fade out
+        let env = if t > duration_seconds - 0.1 {
+            (duration_seconds - t) / 0.1
+        } else {
+            1.0
+        } as f32;
 
-    // Render
-    let result = renderer.render(job, None)?;
+        left.push(sample * 0.5 * env);
+        right.push(sample * 0.5 * env);
+    }
 
     // Export
     let options = ExportOptions::default();
-    export_wav("sine.wav", &result.left, &result.right, &options)?;
+    let filename = "sine.wav";
+    export_wav(filename, &left, &right, &options)?;
 
-    println!("Exported sine.wav ({:.2}s)", result.duration_seconds());
+    println!("Exported {} ({:.2}s)", filename, duration_seconds);
     Ok(())
 }

@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_concurrent_access() {
-        use crate::compat::Arc;
+        use crate::compat::{Arc, Vec};
         use std::thread;
 
         let manager = Arc::new(TransportManager::new(48000.0));

@@ -386,7 +386,12 @@ impl ClapInstance {
                 stage: LoadStage::Opening,
                 reason: "No init function".to_string(),
             })?;
-            if !unsafe { init_fn(path.to_str().unwrap().as_ptr() as *const i8) } {
+            let path_str = path.to_str().ok_or_else(|| BridgeError::LoadFailed {
+                path: path.to_path_buf(),
+                stage: LoadStage::Opening,
+                reason: "Path contains invalid UTF-8".to_string(),
+            })?;
+            if !unsafe { init_fn(path_str.as_ptr() as *const i8) } {
                 return Err(BridgeError::LoadFailed {
                     path: path.to_path_buf(),
                     stage: LoadStage::Opening,
@@ -455,7 +460,13 @@ impl ClapInstance {
 
             // Create plugin instance
             let plugin_id = unsafe { CStr::from_ptr(descriptor.id) }.to_string_lossy();
-            let plugin_id_cstr = CString::new(plugin_id.as_ref()).unwrap();
+            let plugin_id_cstr = CString::new(plugin_id.as_ref()).map_err(|e| {
+                BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Instantiation,
+                    reason: format!("Invalid plugin ID (contains null byte): {}", e),
+                }
+            })?;
 
             let create_fn = factory.create_plugin.ok_or_else(|| BridgeError::LoadFailed {
                 path: path.to_path_buf(),

@@ -122,6 +122,7 @@ impl TuttiEngineBuilder {
             .inputs(self.inputs)
             .outputs(self.outputs);
 
+        #[cfg(feature = "std")]
         if let Some(device) = self.output_device {
             core_builder = core_builder.output_device(device);
         }

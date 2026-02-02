@@ -307,7 +307,11 @@ impl SyncNeuralSynthBuilder {
         batch_size: usize,
     ) {
         if batch_size == 1 {
-            let request = batch.into_iter().next().unwrap();
+            // SAFETY: batch_size == 1 guarantees batch is non-empty
+            let request = batch
+                .into_iter()
+                .next()
+                .expect("BUG: batch should be non-empty when batch_size == 1");
             let track_id = request.track_id;
             if let Ok(response) = engine.infer(request) {
                 push_response_to_voice(engine, track_id, response.params);

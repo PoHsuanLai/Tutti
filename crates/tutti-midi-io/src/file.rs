@@ -101,7 +101,11 @@ impl ParsedMidiFile {
         }
 
         // Sort events by time
-        all_events.sort_by(|a, b| a.time_beats.partial_cmp(&b.time_beats).unwrap());
+        all_events.sort_by(|a, b| {
+            a.time_beats
+                .partial_cmp(&b.time_beats)
+                .expect("MIDI event time_beats should never be NaN")
+        });
 
         // Calculate total duration
         let duration_beats = all_events.last().map(|e| e.time_beats).unwrap_or(0.0);
@@ -211,7 +215,11 @@ impl ParsedMidiFile {
         // Binary search for start
         let start_idx = self
             .events
-            .binary_search_by(|e| e.time_beats.partial_cmp(&start_beats).unwrap())
+            .binary_search_by(|e| {
+                e.time_beats
+                    .partial_cmp(&start_beats)
+                    .expect("MIDI event time_beats should never be NaN")
+            })
             .unwrap_or_else(|idx| idx);
 
         // Linear search for end (events are sorted)

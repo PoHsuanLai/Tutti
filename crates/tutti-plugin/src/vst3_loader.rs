@@ -516,61 +516,7 @@ struct EventList {
 }
 
 impl EventList {
-    /// Create a new event list from MIDI events
-    fn from_midi_events(midi_events: &[MidiEvent]) -> Box<Self> {
-        let vst3_events: Vec<Vst3Event> = midi_events
-            .iter()
-            .filter_map(Self::midi_to_vst3_event)
-            .collect();
-
-        let mut event_list = Box::new(EventList {
-            vtable: &EVENT_LIST_VTABLE,
-            ref_count: std::sync::atomic::AtomicU32::new(1),
-            events: vst3_events,
-        });
-
-        // Ensure vtable pointer is correct
-        event_list.vtable = &EVENT_LIST_VTABLE;
-        event_list
-    }
-
-    /// Create event list from MIDI and note expression events
-    fn from_midi_and_expression(
-        midi_events: &[MidiEvent],
-        note_expression: &crate::protocol::NoteExpressionChanges,
-    ) -> Box<Self> {
-        // Convert MIDI events
-        let mut vst3_events: Vec<Vst3Event> = midi_events
-            .iter()
-            .filter_map(Self::midi_to_vst3_event)
-            .collect();
-
-        // Add note expression events
-        for expr in &note_expression.changes {
-            vst3_events.push(Self::note_expression_to_vst3_event(expr));
-        }
-
-        // Sort by sample offset for proper event ordering
-        vst3_events.sort_by_key(|event| match event {
-            Vst3Event::NoteOn(e) => e.header.sample_offset,
-            Vst3Event::NoteOff(e) => e.header.sample_offset,
-            Vst3Event::Data(e) => e.header.sample_offset,
-            Vst3Event::PolyPressure(e) => e.header.sample_offset,
-            Vst3Event::NoteExpression(e) => e.header.sample_offset,
-        });
-
-        let mut event_list = Box::new(EventList {
-            vtable: &EVENT_LIST_VTABLE,
-            ref_count: std::sync::atomic::AtomicU32::new(1),
-            events: vst3_events,
-        });
-
-        // Ensure vtable pointer is correct
-        event_list.vtable = &EVENT_LIST_VTABLE;
-        event_list
-    }
-
-    /// Create an empty event list for collecting output events
+    /// Create an empty event list for initialization only
     fn new_empty() -> Box<Self> {
         let mut event_list = Box::new(EventList {
             vtable: &EVENT_LIST_VTABLE,
@@ -615,6 +561,51 @@ impl EventList {
         }
 
         changes
+    }
+
+    /// Update existing event list from MIDI events (RT-safe: reuses allocation)
+    fn update_from_midi(&mut self, midi_events: &[MidiEvent]) {
+        self.events.clear();
+        self.events.extend(
+            midi_events
+                .iter()
+                .filter_map(Self::midi_to_vst3_event)
+        );
+    }
+
+    /// Update from MIDI and note expression (RT-safe: reuses allocation)
+    fn update_from_midi_and_expression(
+        &mut self,
+        midi_events: &[MidiEvent],
+        note_expression: &crate::protocol::NoteExpressionChanges,
+    ) {
+        self.events.clear();
+
+        // Add MIDI events
+        self.events.extend(
+            midi_events
+                .iter()
+                .filter_map(Self::midi_to_vst3_event)
+        );
+
+        // Add note expression events
+        for expr in &note_expression.changes {
+            self.events.push(Self::note_expression_to_vst3_event(expr));
+        }
+
+        // Sort by sample offset for proper event ordering
+        self.events.sort_by_key(|event| match event {
+            Vst3Event::NoteOn(e) => e.header.sample_offset,
+            Vst3Event::NoteOff(e) => e.header.sample_offset,
+            Vst3Event::Data(e) => e.header.sample_offset,
+            Vst3Event::PolyPressure(e) => e.header.sample_offset,
+            Vst3Event::NoteExpression(e) => e.header.sample_offset,
+        });
+    }
+
+    /// Clear events (RT-safe: keeps allocation)
+    fn clear(&mut self) {
+        self.events.clear();
     }
 
     /// Convert VST3 Event to Tutti MidiEvent
@@ -1454,6 +1445,12 @@ pub struct Vst3Instance {
 
     /// Editor size (cached from last open)
     editor_size: (u32, u32),
+
+    // RT-safe event list pool (reused across process calls)
+    /// Reusable event list for input events
+    input_event_list: Option<Box<EventList>>,
+    /// Reusable event list for output events
+    output_event_list: Option<Box<EventList>>,
 }
 
 unsafe impl Send for Vst3Instance {}
@@ -1591,6 +1588,9 @@ impl Vst3Instance {
             output_buffer_ptrs_f64: vec![std::ptr::null_mut(); 2],
             sample_format: crate::protocol::SampleFormat::Float32,
             editor_size: (800, 600), // Default size
+            // Initialize event list pool for RT-safe reuse
+            input_event_list: Some(EventList::new_empty()),
+            output_event_list: Some(EventList::new_empty()),
         };
 
         // Initialize the plugin
@@ -1816,21 +1816,27 @@ impl Vst3Instance {
             buffers: self.output_buffer_ptrs.as_mut_ptr() as *mut *mut c_void,
         };
 
-        // Create event list from MIDI events
-        let mut event_list_box: Option<Box<EventList>> = if !midi_events.is_empty() {
-            Some(EventList::from_midi_events(midi_events))
+        // Reuse pre-allocated event lists (RT-safe: no heap allocation)
+        let mut input_event_list = self.input_event_list.take().expect(
+            "BUG: input_event_list should always be Some (initialized in Vst3Instance::new())",
+        );
+        if !midi_events.is_empty() {
+            input_event_list.update_from_midi(midi_events);
         } else {
-            None
-        };
+            input_event_list.clear();
+        }
 
-        let input_events = if let Some(ref mut event_list) = event_list_box {
-            event_list.as_mut() as *mut EventList as *mut c_void
+        let input_events = if !midi_events.is_empty() {
+            input_event_list.as_mut() as *mut EventList as *mut c_void
         } else {
             std::ptr::null_mut()
         };
 
-        // Create empty output event list to collect plugin-generated MIDI
-        let mut output_event_list = EventList::new_empty();
+        // Reuse pre-allocated output event list (RT-safe: no heap allocation)
+        let mut output_event_list = self.output_event_list.take().expect(
+            "BUG: output_event_list should always be Some (initialized in Vst3Instance::new())",
+        );
+        output_event_list.clear();
 
         // Create process data
         let mut process_data = ProcessData {
@@ -1857,11 +1863,20 @@ impl Vst3Instance {
             for output_slice in buffer.outputs.iter_mut() {
                 output_slice.fill(0.0);
             }
+            // Return event lists to pool before early exit
+            self.input_event_list = Some(input_event_list);
+            self.output_event_list = Some(output_event_list);
             return crate::protocol::MidiEventVec::new(); // Return empty MIDI events on error
         }
 
         // Collect output MIDI events from the plugin (e.g., synths, arpeggiators)
-        output_event_list.to_midi_events()
+        let midi_out = output_event_list.to_midi_events();
+
+        // Return event lists to pool
+        self.input_event_list = Some(input_event_list);
+        self.output_event_list = Some(output_event_list);
+
+        midi_out
     }
 
     /// Process audio with full automation (MIDI + parameter changes)
@@ -1920,25 +1935,27 @@ impl Vst3Instance {
             buffers: self.output_buffer_ptrs.as_mut_ptr() as *mut *mut c_void,
         };
 
-        // Create event list from MIDI and note expression events
-        let mut input_event_list_box: Option<Box<EventList>> =
-            if !midi_events.is_empty() || !note_expression.is_empty() {
-                Some(EventList::from_midi_and_expression(
-                    midi_events,
-                    note_expression,
-                ))
-            } else {
-                None
-            };
+        // Reuse pre-allocated event lists (RT-safe: no heap allocation)
+        let mut input_event_list = self.input_event_list.take().expect(
+            "BUG: input_event_list should always be Some (initialized in Vst3Instance::new())",
+        );
+        if !midi_events.is_empty() || !note_expression.is_empty() {
+            input_event_list.update_from_midi_and_expression(midi_events, note_expression);
+        } else {
+            input_event_list.clear();
+        }
 
-        let input_events = if let Some(ref mut event_list) = input_event_list_box {
-            event_list.as_mut() as *mut EventList as *mut c_void
+        let input_events = if !midi_events.is_empty() || !note_expression.is_empty() {
+            input_event_list.as_mut() as *mut EventList as *mut c_void
         } else {
             std::ptr::null_mut()
         };
 
-        // Create output event list for MIDI
-        let mut output_event_list = EventList::new_empty();
+        // Reuse pre-allocated output event list (RT-safe: no heap allocation)
+        let mut output_event_list = self.output_event_list.take().expect(
+            "BUG: output_event_list should always be Some (initialized in Vst3Instance::new())",
+        );
+        output_event_list.clear();
 
         // Create parameter changes from input
         let mut input_param_changes_box: Option<Box<ParameterChanges>> =
@@ -1994,6 +2011,10 @@ impl Vst3Instance {
         let midi_output = output_event_list.to_midi_events();
         let param_output = output_param_changes.to_protocol();
         let note_expression_output = output_event_list.to_note_expression_changes();
+
+        // Return event lists to pool
+        self.input_event_list = Some(input_event_list);
+        self.output_event_list = Some(output_event_list);
 
         (midi_output, param_output, note_expression_output)
     }
@@ -2109,24 +2130,27 @@ impl Vst3Instance {
             buffers: self.output_buffer_ptrs_f64.as_mut_ptr() as *mut *mut c_void,
         };
 
-        // Create event list from MIDI and note expression events
-        let mut input_event_list_box: Option<Box<EventList>> =
-            if !midi_events.is_empty() || !note_expression.is_empty() {
-                Some(EventList::from_midi_and_expression(
-                    midi_events,
-                    note_expression,
-                ))
-            } else {
-                None
-            };
+        // Reuse pre-allocated event lists (RT-safe: no heap allocation)
+        let mut input_event_list = self.input_event_list.take().expect(
+            "BUG: input_event_list should always be Some (initialized in Vst3Instance::new())",
+        );
+        if !midi_events.is_empty() || !note_expression.is_empty() {
+            input_event_list.update_from_midi_and_expression(midi_events, note_expression);
+        } else {
+            input_event_list.clear();
+        }
 
-        let input_events = if let Some(ref mut event_list) = input_event_list_box {
-            event_list.as_mut() as *mut EventList as *mut c_void
+        let input_events = if !midi_events.is_empty() || !note_expression.is_empty() {
+            input_event_list.as_mut() as *mut EventList as *mut c_void
         } else {
             std::ptr::null_mut()
         };
 
-        let mut output_event_list = EventList::new_empty();
+        // Reuse pre-allocated output event list (RT-safe: no heap allocation)
+        let mut output_event_list = self.output_event_list.take().expect(
+            "BUG: output_event_list should always be Some (initialized in Vst3Instance::new())",
+        );
+        output_event_list.clear();
 
         let mut input_param_changes_box: Option<Box<ParameterChanges>> =
             if !param_changes.is_empty() {
@@ -2175,6 +2199,10 @@ impl Vst3Instance {
         let midi_output = output_event_list.to_midi_events();
         let param_output = output_param_changes.to_protocol();
         let note_expression_output = output_event_list.to_note_expression_changes();
+
+        // Return event lists to pool
+        self.input_event_list = Some(input_event_list);
+        self.output_event_list = Some(output_event_list);
 
         (midi_output, param_output, note_expression_output)
     }

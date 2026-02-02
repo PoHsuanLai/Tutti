@@ -31,7 +31,8 @@ impl ThumbnailCache {
     /// # Arguments
     /// * `max_entries` - Maximum number of thumbnails to keep in memory
     pub fn new(max_entries: usize) -> Self {
-        let capacity = NonZeroUsize::new(max_entries.max(1)).unwrap();
+        let capacity = NonZeroUsize::new(max_entries.max(1))
+            .expect("BUG: max(1) should always be non-zero");
         Self {
             memory_cache: LruCache::new(capacity),
             disk_path: None,
@@ -47,7 +48,8 @@ impl ThumbnailCache {
         // Ensure disk cache directory exists
         fs::create_dir_all(&disk_path)?;
 
-        let capacity = NonZeroUsize::new(max_memory_entries.max(1)).unwrap();
+        let capacity = NonZeroUsize::new(max_memory_entries.max(1))
+            .expect("BUG: max(1) should always be non-zero");
         Ok(Self {
             memory_cache: LruCache::new(capacity),
             disk_path: Some(disk_path),
@@ -67,14 +69,20 @@ impl ThumbnailCache {
     {
         // Check memory cache
         if self.memory_cache.contains(&hash) {
-            return self.memory_cache.get(&hash).unwrap();
+            return self
+                .memory_cache
+                .get(&hash)
+                .expect("BUG: entry should exist (checked with contains)");
         }
 
         // Check disk cache
         if let Some(ref disk_path) = self.disk_path {
             if let Some(summary) = self.load_from_disk(disk_path, hash) {
                 self.memory_cache.put(hash, summary);
-                return self.memory_cache.get(&hash).unwrap();
+                return self
+                    .memory_cache
+                    .get(&hash)
+                    .expect("BUG: entry should exist (just put)");
             }
         }
 
@@ -87,7 +95,9 @@ impl ThumbnailCache {
         }
 
         self.memory_cache.put(hash, summary);
-        self.memory_cache.get(&hash).unwrap()
+        self.memory_cache
+            .get(&hash)
+            .expect("BUG: entry should exist (just put)")
     }
 
     /// Get a cached thumbnail without computing

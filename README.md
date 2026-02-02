@@ -13,6 +13,14 @@ A real-time audio engine for DAW applications in Rust. Tutti provides an audio g
 
 For audio UI components, see [Armas](https://github.com/PoHsuanLai/Armas).
 
+## Design
+
+- **Audio graph**: Uses FunDSP's `Net` with macros (`chain!`, `mix!`, `stack!`)
+- **NodeRegistry**: Load resources once (`load_*`), create instances many times (`instance()`)
+- **Lock-free audio**: No allocations or mutexes in audio callback
+- **Feature gates**: Only compile what you need (core ~500KB)
+- **Fluent API**: Handles always available, no-op if subsystem disabled
+
 ## Overview
 
 Umbrella crate that coordinates multiple audio subsystems:
@@ -71,7 +79,8 @@ engine.transport().play();
 
 ## Architecture
 
-Tutti uses a modular architecture where each subsystem is an independent crate. The `NodeRegistry` provides dynamic node creation from plugins, neural models, and builtin DSP nodes.
+Each subsystem is an independent crate. TuttiEngine provides fluent handles to coordinate them.
+
 
 ## Examples
 

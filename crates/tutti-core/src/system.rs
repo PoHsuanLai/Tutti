@@ -2,7 +2,7 @@
 
 #[cfg(feature = "std")]
 use crate::callback::AudioCallbackState;
-use crate::compat::{Arc, Mutex};
+use crate::compat::{Arc, Mutex, Box};
 #[cfg(feature = "std")]
 use crate::compat::{String, Vec};
 use crate::error::Result;

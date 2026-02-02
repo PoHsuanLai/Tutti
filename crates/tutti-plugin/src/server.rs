@@ -32,6 +32,23 @@ pub struct PluginServer {
 
     /// Negotiated sample format for processing
     negotiated_format: crate::protocol::SampleFormat,
+
+    // Pre-allocated audio buffers (RT-safe: resize only on config change)
+    /// Pre-allocated f32 input buffers (one per channel)
+    input_buffers_f32: Vec<Vec<f32>>,
+    /// Pre-allocated f32 output buffers (one per channel)
+    output_buffers_f32: Vec<Vec<f32>>,
+    /// Pre-allocated f64 input buffers (one per channel)
+    input_buffers_f64: Vec<Vec<f64>>,
+    /// Pre-allocated f64 output buffers (one per channel)
+    output_buffers_f64: Vec<Vec<f64>>,
+
+    /// Current buffer configuration
+    current_num_channels: usize,
+    current_buffer_size: usize,
+
+    /// Pre-allocated MIDI output buffer (RT-safe: clear() reuses allocation)
+    midi_output_buffer: crate::protocol::MidiEventVec,
 }
 
 // Compile-time error if no plugin formats enabled
@@ -62,7 +79,42 @@ impl PluginServer {
             shared_buffer: None,
             editor_open: false,
             negotiated_format: crate::protocol::SampleFormat::Float32,
+            // Initialize empty buffers (will resize on first process call)
+            input_buffers_f32: Vec::new(),
+            output_buffers_f32: Vec::new(),
+            input_buffers_f64: Vec::new(),
+            output_buffers_f64: Vec::new(),
+            current_num_channels: 0,
+            current_buffer_size: 0,
+            midi_output_buffer: smallvec::SmallVec::new(),
         })
+    }
+
+    /// Ensure audio buffers are sized correctly
+    /// Only reallocates if channel count or buffer size changed
+    fn ensure_buffers_sized(&mut self, num_channels: usize, buffer_size: usize) {
+        if self.current_num_channels != num_channels
+            || self.current_buffer_size != buffer_size
+        {
+            // Resize f32 buffers
+            self.input_buffers_f32.clear();
+            self.output_buffers_f32.clear();
+            for _ in 0..num_channels {
+                self.input_buffers_f32.push(vec![0.0f32; buffer_size]);
+                self.output_buffers_f32.push(vec![0.0f32; buffer_size]);
+            }
+
+            // Resize f64 buffers
+            self.input_buffers_f64.clear();
+            self.output_buffers_f64.clear();
+            for _ in 0..num_channels {
+                self.input_buffers_f64.push(vec![0.0f64; buffer_size]);
+                self.output_buffers_f64.push(vec![0.0f64; buffer_size]);
+            }
+
+            self.current_num_channels = num_channels;
+            self.current_buffer_size = buffer_size;
+        }
     }
 
     /// Run the bridge server
@@ -80,14 +132,19 @@ impl PluginServer {
 
         // Message loop
         loop {
-            let msg = self.transport.as_mut().unwrap().recv_host_message().await?;
+            let msg = self
+                .transport
+                .as_mut()
+                .expect("BUG: transport should be Some (set on line 131)")
+                .recv_host_message()
+                .await?;
 
             let response = self.handle_message(msg).await?;
 
             if let Some(response) = response {
                 self.transport
                     .as_mut()
-                    .unwrap()
+                    .expect("BUG: transport should be Some (set on line 131)")
                     .send_bridge_message(&response)
                     .await?;
             }
@@ -352,8 +409,33 @@ impl PluginServer {
 
         let start = std::time::Instant::now();
 
-        // Collect MIDI output (will be populated by plugins that support it)
-        let mut midi_output = smallvec::SmallVec::new();
+        // Reuse pre-allocated MIDI output buffer (RT-safe)
+        self.midi_output_buffer.clear();
+
+        // Ensure buffers are sized before processing (avoids borrow checker issues)
+        if let (Some(_), Some(ref plugin)) = (&self.shared_buffer, &self.plugin) {
+            let num_channels = match plugin {
+                #[cfg(feature = "vst2")]
+                LoadedPlugin::Vst2(p) => p
+                    .metadata()
+                    .audio_io
+                    .inputs
+                    .max(p.metadata().audio_io.outputs),
+                #[cfg(feature = "vst3")]
+                LoadedPlugin::Vst3(p) => p
+                    .metadata()
+                    .audio_io
+                    .inputs
+                    .max(p.metadata().audio_io.outputs),
+                #[cfg(feature = "clap")]
+                LoadedPlugin::Clap(p) => p
+                    .metadata()
+                    .audio_io
+                    .inputs
+                    .max(p.metadata().audio_io.outputs),
+            };
+            self.ensure_buffers_sized(num_channels, num_samples);
+        }
 
         // Process audio through plugin
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
@@ -382,21 +464,26 @@ impl PluginServer {
 
             match self.negotiated_format {
                 crate::protocol::SampleFormat::Float64 => {
-                    // f64 path: read/write f64 from shared memory
-                    let mut input_vecs: Vec<Vec<f64>> = Vec::new();
-                    let mut output_vecs: Vec<Vec<f64>> = Vec::new();
+                    // f64 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
+                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel_f64(ch) {
-                            input_vecs.push(data[..num_samples].to_vec());
-                            output_vecs.push(vec![0.0f64; num_samples]);
+                            self.input_buffers_f64[ch][..num_samples]
+                                .copy_from_slice(&data[..num_samples]);
+                            self.output_buffers_f64[ch][..num_samples].fill(0.0);
                         }
                     }
 
-                    let input_slices: Vec<&[f64]> =
-                        input_vecs.iter().map(|v| v.as_slice()).collect();
-                    let mut output_slices: Vec<&mut [f64]> =
-                        output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
+                    // Create slice views (no allocation)
+                    let input_slices: Vec<&[f64]> = self.input_buffers_f64[..num_channels]
+                        .iter()
+                        .map(|v| &v[..num_samples])
+                        .collect();
+                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64[..num_channels]
+                        .iter_mut()
+                        .map(|v| &mut v[..num_samples])
+                        .collect();
 
                     let sample_rate = match plugin {
                         #[cfg(feature = "vst2")]
@@ -414,7 +501,7 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    midi_output = match plugin {
+                    self.midi_output_buffer = match plugin {
                         #[cfg(feature = "vst2")]
                         LoadedPlugin::Vst2(p) => {
                             p.process_with_midi_f64(&mut audio_buffer, midi_events)
@@ -431,26 +518,32 @@ impl PluginServer {
                         }
                     };
 
-                    for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel_f64(ch, output) {}
+                    // Write output from pre-allocated buffers
+                    for ch in 0..num_channels {
+                        if let Err(_e) = shared_buffer.write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]) {}
                     }
                 }
                 crate::protocol::SampleFormat::Float32 => {
-                    // f32 path: existing code
-                    let mut input_vecs: Vec<Vec<f32>> = Vec::new();
-                    let mut output_vecs: Vec<Vec<f32>> = Vec::new();
+                    // f32 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
+                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel(ch) {
-                            input_vecs.push(data[..num_samples].to_vec());
-                            output_vecs.push(vec![0.0; num_samples]);
+                            self.input_buffers_f32[ch][..num_samples]
+                                .copy_from_slice(&data[..num_samples]);
+                            self.output_buffers_f32[ch][..num_samples].fill(0.0);
                         }
                     }
 
-                    let input_slices: Vec<&[f32]> =
-                        input_vecs.iter().map(|v| v.as_slice()).collect();
-                    let mut output_slices: Vec<&mut [f32]> =
-                        output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
+                    // Create slice views (no allocation)
+                    let input_slices: Vec<&[f32]> = self.input_buffers_f32[..num_channels]
+                        .iter()
+                        .map(|v| &v[..num_samples])
+                        .collect();
+                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32[..num_channels]
+                        .iter_mut()
+                        .map(|v| &mut v[..num_samples])
+                        .collect();
 
                     let sample_rate = match plugin {
                         #[cfg(feature = "vst2")]
@@ -468,7 +561,7 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    midi_output = match plugin {
+                    self.midi_output_buffer = match plugin {
                         #[cfg(feature = "vst2")]
                         LoadedPlugin::Vst2(p) => {
                             p.process_with_midi(&mut audio_buffer, midi_events)
@@ -483,8 +576,9 @@ impl PluginServer {
                         }
                     };
 
-                    for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel(ch, output) {}
+                    // Write output from pre-allocated buffers
+                    for ch in 0..num_channels {
+                        if let Err(_e) = shared_buffer.write_channel(ch, &self.output_buffers_f32[ch][..num_samples]) {}
                     }
                 }
             }
@@ -493,10 +587,10 @@ impl PluginServer {
         let latency_us = start.elapsed().as_micros() as u64;
 
         // Return appropriate response based on whether we have MIDI output
-        if !midi_output.is_empty() {
+        if !self.midi_output_buffer.is_empty() {
             Ok(Some(BridgeMessage::AudioProcessedMidi {
                 latency_us,
-                midi_output,
+                midi_output: self.midi_output_buffer.clone(),
             }))
         } else {
             Ok(Some(BridgeMessage::AudioProcessed { latency_us }))
@@ -521,7 +615,8 @@ impl PluginServer {
 
         let start = std::time::Instant::now();
 
-        let mut midi_output = smallvec::SmallVec::new();
+        // Reuse pre-allocated MIDI output buffer (RT-safe)
+        self.midi_output_buffer.clear();
         let mut param_output = crate::protocol::ParameterChanges::new();
         let mut note_expression_output = crate::protocol::NoteExpressionChanges::new();
 
@@ -552,21 +647,26 @@ impl PluginServer {
 
             match self.negotiated_format {
                 crate::protocol::SampleFormat::Float64 => {
-                    // f64 path
-                    let mut input_vecs: Vec<Vec<f64>> = Vec::new();
-                    let mut output_vecs: Vec<Vec<f64>> = Vec::new();
+                    // f64 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
+                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel_f64(ch) {
-                            input_vecs.push(data[..num_samples].to_vec());
-                            output_vecs.push(vec![0.0f64; num_samples]);
+                            self.input_buffers_f64[ch][..num_samples]
+                                .copy_from_slice(&data[..num_samples]);
+                            self.output_buffers_f64[ch][..num_samples].fill(0.0);
                         }
                     }
 
-                    let input_slices: Vec<&[f64]> =
-                        input_vecs.iter().map(|v| v.as_slice()).collect();
-                    let mut output_slices: Vec<&mut [f64]> =
-                        output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
+                    // Create slice views (no allocation)
+                    let input_slices: Vec<&[f64]> = self.input_buffers_f64[..num_channels]
+                        .iter()
+                        .map(|v| &v[..num_samples])
+                        .collect();
+                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64[..num_channels]
+                        .iter_mut()
+                        .map(|v| &mut v[..num_samples])
+                        .collect();
 
                     let sample_rate = match plugin {
                         #[cfg(feature = "vst2")]
@@ -587,7 +687,7 @@ impl PluginServer {
                     match plugin {
                         #[cfg(feature = "vst2")]
                         LoadedPlugin::Vst2(p) => {
-                            midi_output = p.process_with_transport_f64(
+                            self.midi_output_buffer = p.process_with_transport_f64(
                                 &mut audio_buffer,
                                 midi_events,
                                 transport,
@@ -603,7 +703,7 @@ impl PluginServer {
                                     note_expression,
                                     transport,
                                 );
-                            midi_output = midi_out;
+                            self.midi_output_buffer = midi_out;
                             param_output = param_out;
                             note_expression_output = note_expr_out;
                         }
@@ -617,32 +717,38 @@ impl PluginServer {
                                     note_expression,
                                     transport,
                                 );
-                            midi_output = midi_out;
+                            self.midi_output_buffer = midi_out;
                             param_output = param_out;
                             note_expression_output = note_expr_out;
                         }
                     };
 
-                    for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel_f64(ch, output) {}
+                    // Write output from pre-allocated buffers
+                    for ch in 0..num_channels {
+                        if let Err(_e) = shared_buffer.write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]) {}
                     }
                 }
                 crate::protocol::SampleFormat::Float32 => {
-                    // f32 path: existing code
-                    let mut input_vecs: Vec<Vec<f32>> = Vec::new();
-                    let mut output_vecs: Vec<Vec<f32>> = Vec::new();
+                    // f32 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
+                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel(ch) {
-                            input_vecs.push(data[..num_samples].to_vec());
-                            output_vecs.push(vec![0.0; num_samples]);
+                            self.input_buffers_f32[ch][..num_samples]
+                                .copy_from_slice(&data[..num_samples]);
+                            self.output_buffers_f32[ch][..num_samples].fill(0.0);
                         }
                     }
 
-                    let input_slices: Vec<&[f32]> =
-                        input_vecs.iter().map(|v| v.as_slice()).collect();
-                    let mut output_slices: Vec<&mut [f32]> =
-                        output_vecs.iter_mut().map(|v| v.as_mut_slice()).collect();
+                    // Create slice views (no allocation)
+                    let input_slices: Vec<&[f32]> = self.input_buffers_f32[..num_channels]
+                        .iter()
+                        .map(|v| &v[..num_samples])
+                        .collect();
+                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32[..num_channels]
+                        .iter_mut()
+                        .map(|v| &mut v[..num_samples])
+                        .collect();
 
                     let sample_rate = match plugin {
                         #[cfg(feature = "vst2")]
@@ -663,7 +769,7 @@ impl PluginServer {
                     match plugin {
                         #[cfg(feature = "vst2")]
                         LoadedPlugin::Vst2(p) => {
-                            midi_output =
+                            self.midi_output_buffer =
                                 p.process_with_transport(&mut audio_buffer, midi_events, transport);
                         }
                         #[cfg(feature = "vst3")]
@@ -675,7 +781,7 @@ impl PluginServer {
                                 note_expression,
                                 transport,
                             );
-                            midi_output = midi_out;
+                            self.midi_output_buffer = midi_out;
                             param_output = param_out;
                             note_expression_output = note_expr_out;
                         }
@@ -688,14 +794,15 @@ impl PluginServer {
                                 note_expression,
                                 transport,
                             );
-                            midi_output = midi_out;
+                            self.midi_output_buffer = midi_out;
                             param_output = param_out;
                             note_expression_output = note_expr_out;
                         }
                     };
 
-                    for (ch, output) in output_vecs.iter().enumerate() {
-                        if let Err(_e) = shared_buffer.write_channel(ch, output) {}
+                    // Write output from pre-allocated buffers
+                    for ch in 0..num_channels {
+                        if let Err(_e) = shared_buffer.write_channel(ch, &self.output_buffers_f32[ch][..num_samples]) {}
                     }
                 }
             }
@@ -706,7 +813,7 @@ impl PluginServer {
         // Return full automation response
         Ok(Some(BridgeMessage::AudioProcessedFull {
             latency_us,
-            midi_output,
+            midi_output: self.midi_output_buffer.clone(),
             param_output,
             note_expression_output,
         }))

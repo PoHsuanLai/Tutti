@@ -84,7 +84,11 @@ impl NeuralSystem {
         // Each thread gets its own receiver so all threads receive every update.
         let strategy_rx = if inference_config.use_graph_aware_batching {
             let (tx, rx) = crossbeam_channel::bounded(4);
-            self.inner.strategy_senders.lock().unwrap().push(tx);
+            self.inner
+                .strategy_senders
+                .lock()
+                .expect("strategy_senders mutex poisoned (previous thread panicked)")
+                .push(tx);
             Some(rx)
         } else {
             None
@@ -214,7 +218,11 @@ impl NeuralSystem {
             return;
         }
 
-        let mut senders = self.inner.strategy_senders.lock().unwrap();
+        let mut senders = self
+            .inner
+            .strategy_senders
+            .lock()
+            .expect("strategy_senders mutex poisoned (previous thread panicked)");
         // Remove disconnected senders (inference thread exited) while broadcasting
         senders.retain(|tx| tx.try_send(strategy.clone()).is_ok());
     }

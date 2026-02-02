@@ -81,13 +81,17 @@ impl Clone for SpatialPannerNode {
         // Create a new panner with same configuration
         // Note: We can't clone SpatialPanner directly, so we create a new one
         // This is fine for Net cloning since each clone will have independent state
+        //
+        // SAFETY: Clone is only called from UI thread during Net snapshotting, never on audio thread.
+        // All standard speaker layouts use hardcoded validated configurations that cannot fail.
+        // These .expect() calls will only panic if there's a bug in the VBAP library's presets.
         let mut new_panner = match self.num_outputs {
-            2 => SpatialPanner::stereo().expect("stereo panner"),
-            4 => SpatialPanner::quad().expect("quad panner"),
-            6 => SpatialPanner::surround_5_1().expect("5.1 panner"),
-            8 => SpatialPanner::surround_7_1().expect("7.1 panner"),
-            12 => SpatialPanner::atmos_7_1_4().expect("atmos panner"),
-            _ => SpatialPanner::stereo().expect("stereo panner"),
+            2 => SpatialPanner::stereo().expect("stereo preset"),
+            4 => SpatialPanner::quad().expect("quad preset"),
+            6 => SpatialPanner::surround_5_1().expect("5.1 preset"),
+            8 => SpatialPanner::surround_7_1().expect("7.1 preset"),
+            12 => SpatialPanner::atmos_7_1_4().expect("Atmos preset"),
+            _ => SpatialPanner::stereo().expect("stereo fallback"),
         };
 
         // Copy position

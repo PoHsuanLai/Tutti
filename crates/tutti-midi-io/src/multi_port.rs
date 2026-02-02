@@ -27,6 +27,7 @@ pub struct PortInfo {
 pub struct MidiPortManager {
     input_ports: Arc<ArcSwap<Vec<Arc<AsyncMidiPort>>>>,
     output_ports: Arc<ArcSwap<Vec<Arc<AsyncMidiPort>>>>,
+    output_handles: Arc<ArcSwap<Vec<super::async_port::OutputProducerHandle>>>,
     port_info: Arc<RwLock<Vec<PortInfo>>>,
     fifo_size: usize,
     event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
@@ -43,6 +44,7 @@ impl MidiPortManager {
         Self {
             input_ports: Arc::new(ArcSwap::from_pointee(Vec::new())),
             output_ports: Arc::new(ArcSwap::from_pointee(Vec::new())),
+            output_handles: Arc::new(ArcSwap::from_pointee(Vec::new())),
             port_info: Arc::new(RwLock::new(Vec::new())),
             fifo_size,
             event_buffer: std::cell::UnsafeCell::new(Vec::with_capacity(256)),
@@ -74,11 +76,21 @@ impl MidiPortManager {
     pub fn create_output_port(&self, name: impl Into<String>) -> usize {
         let name = name.into();
         let port = Arc::new(AsyncMidiPort::new(&name, self.fifo_size));
+
+        // Get output producer handle before storing the port
+        let output_handle = port.output_producer_handle();
+
         let current_ports = self.output_ports.load();
         let mut new_ports = (**current_ports).clone();
         let port_index = new_ports.len();
         new_ports.push(port);
         self.output_ports.store(Arc::new(new_ports));
+
+        // Store the output handle
+        let current_handles = self.output_handles.load();
+        let mut new_handles = (**current_handles).clone();
+        new_handles.push(output_handle);
+        self.output_handles.store(Arc::new(new_handles));
 
         let mut port_info = self.port_info.write();
         let info = PortInfo {
@@ -160,10 +172,15 @@ impl MidiPortManager {
         self.output_ports.load()
     }
 
+    /// Write an event to an output port (RT-safe: lock-free).
+    ///
+    /// # Safety
+    /// This method must only be called from a single thread (the audio thread).
+    /// The underlying SPSC queue requires a single producer.
     pub fn write_output_event(&self, port_index: usize, event: MidiEvent) -> bool {
-        let output_ports = self.output_ports.load();
-        if let Some(port) = output_ports.get(port_index) {
-            port.write_event(event)
+        let output_handles = self.output_handles.load();
+        if let Some(handle) = output_handles.get(port_index) {
+            handle.push(event)
         } else {
             false
         }
@@ -210,6 +227,11 @@ impl MidiPortManager {
         all_output_events
     }
 
+    /// Write an event to a specific output port (RT-safe: lock-free).
+    ///
+    /// # Safety
+    /// This method must only be called from a single thread (the audio thread).
+    /// The underlying SPSC queue requires a single producer.
     pub fn write_event_to_port(&self, port_index: usize, event: MidiEvent) -> bool {
         let output_ports = self.output_ports.load();
         if let Some(port) = output_ports.get(port_index) {
@@ -217,7 +239,13 @@ impl MidiPortManager {
             if !port.is_active() {
                 return false;
             }
-            port.write_event(event)
+        } else {
+            return false;
+        }
+
+        let output_handles = self.output_handles.load();
+        if let Some(handle) = output_handles.get(port_index) {
+            handle.push(event)
         } else {
             false
         }

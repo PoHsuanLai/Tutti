@@ -92,21 +92,25 @@ impl TuttiEngine {
     }
 
     /// Check if audio is running
+    #[cfg(feature = "std")]
     pub fn is_running(&self) -> bool {
         self.core.is_running()
     }
 
     /// List available output devices
+    #[cfg(feature = "std")]
     pub fn list_output_devices() -> Result<Vec<String>> {
         TuttiSystem::list_output_devices()
     }
 
     /// Get current output device name
+    #[cfg(feature = "std")]
     pub fn current_output_device_name(&self) -> Result<String> {
         self.core.current_output_device_name()
     }
 
     /// Set output device
+    #[cfg(feature = "std")]
     pub fn set_output_device(&self, index: Option<usize>) {
         self.core.set_output_device(index);
     }
