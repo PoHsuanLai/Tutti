@@ -16,19 +16,12 @@ impl From<BridgeError> for NodeRegistryError {
     }
 }
 
-/// Register a single plugin by path
+/// Register a single plugin by path.
 ///
-/// # Example
-/// ```ignore
-/// let registry = NodeRegistry::default();
-/// register_plugin(&registry, "my_reverb", "/path/to/reverb.vst3")?;
+/// # Supported Parameters
 ///
-/// // Later, create instances:
-/// let reverb = registry.create("my_reverb", &params! {
-///     "preset" => "Large Hall"
-/// })?;
-/// ```
-/// Register a plugin with a tokio runtime handle
+/// - `sample_rate` - Sample rate in Hz (default: 44100.0)
+/// - `param_<id>` - Set parameter by native ID (e.g., `param_0`, `param_1`)
 ///
 /// # Example
 /// ```ignore
@@ -37,9 +30,11 @@ impl From<BridgeError> for NodeRegistryError {
 ///
 /// register_plugin(&registry, runtime.handle(), "reverb", "/path/to/reverb.vst3")?;
 ///
-/// // Later, create instances:
+/// // Create instance with custom parameters:
 /// let reverb = registry.create("reverb", &params! {
-///     "sample_rate" => 44100.0
+///     "sample_rate" => "48000.0",
+///     "param_0" => "0.75",  // Set first parameter to 0.75
+///     "param_1" => "0.5",   // Set second parameter to 0.5
 /// })?;
 /// ```
 pub fn register_plugin<P: AsRef<Path>>(
@@ -63,7 +58,24 @@ pub fn register_plugin<P: AsRef<Path>>(
             sample_rate,
         ))?;
 
-        // TODO: Apply other parameters (preset, etc.)
+        // Apply initial parameter values from params
+        // Format: "param_<id>" => value (e.g., "param_0" => 0.5)
+        for (key, value) in params {
+            if let Some(id_str) = key.strip_prefix("param_") {
+                if let Ok(param_id) = id_str.parse::<u32>() {
+                    if let Some(param_value) = value.as_f32() {
+                        client.set_parameter(param_id, param_value);
+                    }
+                }
+            }
+        }
+
+        // Note: Preset/state loading requires async request-response which is not
+        // supported in the current lock-free bridge architecture. To support presets,
+        // we would need to either:
+        // 1. Add a separate MessageTransport handle for non-RT operations
+        // 2. Load state during the async `PluginClient::load()` before returning
+        // For now, use "param_<id>" => value to set individual parameters.
 
         Ok(Box::new(client))
     });

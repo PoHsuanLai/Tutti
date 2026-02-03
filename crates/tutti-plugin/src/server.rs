@@ -3,7 +3,8 @@
 //! The server loads and runs plugins in a sandboxed environment.
 
 use crate::error::{BridgeError, LoadStage, Result};
-use crate::protocol::{BridgeConfig, BridgeMessage, HostMessage, PluginMetadata};
+use crate::instance::{PluginInstance, ProcessContext};
+use crate::protocol::{BridgeConfig, BridgeMessage, HostMessage, IpcMidiEvent, PluginMetadata};
 use crate::shared_memory::SharedAudioBuffer;
 use crate::transport::{MessageTransport, TransportListener};
 use std::path::PathBuf;
@@ -32,6 +33,9 @@ pub struct PluginServer {
 
     /// Negotiated sample format for processing
     negotiated_format: crate::protocol::SampleFormat,
+
+    /// Current sample rate (f64 for precision, matches VST3/CLAP)
+    sample_rate: f64,
 
     // Pre-allocated audio buffers (RT-safe: resize only on config change)
     /// Pre-allocated f32 input buffers (one per channel)
@@ -69,6 +73,32 @@ enum LoadedPlugin {
     Clap(ClapInstance),
 }
 
+impl LoadedPlugin {
+    /// Get mutable reference to plugin as trait object
+    fn as_instance_mut(&mut self) -> &mut dyn PluginInstance {
+        match self {
+            #[cfg(feature = "vst2")]
+            LoadedPlugin::Vst2(p) => p,
+            #[cfg(feature = "vst3")]
+            LoadedPlugin::Vst3(p) => p,
+            #[cfg(feature = "clap")]
+            LoadedPlugin::Clap(p) => p,
+        }
+    }
+
+    /// Get immutable reference to plugin as trait object
+    fn as_instance(&self) -> &dyn PluginInstance {
+        match self {
+            #[cfg(feature = "vst2")]
+            LoadedPlugin::Vst2(p) => p,
+            #[cfg(feature = "vst3")]
+            LoadedPlugin::Vst3(p) => p,
+            #[cfg(feature = "clap")]
+            LoadedPlugin::Clap(p) => p,
+        }
+    }
+}
+
 impl PluginServer {
     /// Create new bridge server
     pub async fn new(config: BridgeConfig) -> Result<Self> {
@@ -79,6 +109,7 @@ impl PluginServer {
             shared_buffer: None,
             editor_open: false,
             negotiated_format: crate::protocol::SampleFormat::Float32,
+            sample_rate: 44100.0, // Default, updated when plugin is loaded
             // Initialize empty buffers (will resize on first process call)
             input_buffers_f32: Vec::new(),
             output_buffers_f32: Vec::new(),
@@ -165,9 +196,10 @@ impl PluginServer {
             HostMessage::LoadPlugin {
                 path,
                 sample_rate,
+                block_size,
                 preferred_format,
             } => {
-                let metadata = self.load_plugin(path, sample_rate, preferred_format)?;
+                let metadata = self.load_plugin(path, sample_rate, block_size, preferred_format)?;
 
                 Ok(Some(BridgeMessage::PluginLoaded {
                     metadata: Box::new(metadata),
@@ -193,8 +225,12 @@ impl PluginServer {
                 num_samples,
                 midi_events,
             } => {
+                let midi: crate::protocol::MidiEventVec = midi_events
+                    .iter()
+                    .filter_map(|e| e.to_midi_event())
+                    .collect();
                 return self
-                    .handle_process_audio(buffer_id, num_samples, &midi_events)
+                    .handle_process_audio(buffer_id, num_samples, &midi)
                     .await;
             }
 
@@ -206,11 +242,15 @@ impl PluginServer {
                 note_expression,
                 transport,
             } => {
+                let midi: crate::protocol::MidiEventVec = midi_events
+                    .iter()
+                    .filter_map(|e| e.to_midi_event())
+                    .collect();
                 return self
                     .handle_process_audio_full(
                         buffer_id,
                         num_samples,
-                        &midi_events,
+                        &midi,
                         &param_changes,
                         &note_expression,
                         &transport,
@@ -218,56 +258,51 @@ impl PluginServer {
                     .await;
             }
 
-            HostMessage::SetParameter { id, value } => {
+            HostMessage::SetParameter { param_id, value } => {
                 if let Some(ref mut plugin) = self.plugin {
-                    // Parse parameter ID as index
-                    if let Ok(index) = id.parse::<u32>() {
-                        match plugin {
-                            #[cfg(feature = "vst2")]
-                            LoadedPlugin::Vst2(p) => p.set_parameter(index as i32, value),
-                            #[cfg(feature = "vst3")]
-                            LoadedPlugin::Vst3(p) => p.set_parameter(index, value as f64),
-                            #[cfg(feature = "clap")]
-                            LoadedPlugin::Clap(p) => p.set_parameter(index, value as f64),
-                        }
-                    }
+                    // Use unified trait method - all loaders use param_id directly
+                    plugin.as_instance_mut().set_parameter(param_id, value as f64);
                 }
 
                 Ok(None)
             }
 
-            HostMessage::GetParameter { id } => {
-                if let Some(ref mut plugin) = self.plugin {
-                    // Parse parameter ID as index
-                    if let Ok(index) = id.parse::<u32>() {
-                        let value = match plugin {
-                            #[cfg(feature = "vst2")]
-                            LoadedPlugin::Vst2(p) => Some(p.get_parameter(index as i32)),
-                            #[cfg(feature = "vst3")]
-                            LoadedPlugin::Vst3(p) => Some(p.get_parameter(index) as f32),
-                            #[cfg(feature = "clap")]
-                            LoadedPlugin::Clap(p) => Some(p.get_parameter(index) as f32),
-                        };
-                        return Ok(Some(BridgeMessage::ParameterValue { value }));
-                    }
-                }
+            HostMessage::GetParameter { param_id } => {
+                let value = if let Some(ref mut plugin) = self.plugin {
+                    // Use unified trait method
+                    Some(plugin.as_instance_mut().get_parameter(param_id) as f32)
+                } else {
+                    None
+                };
 
-                Ok(Some(BridgeMessage::ParameterValue { value: None }))
+                Ok(Some(BridgeMessage::ParameterValue { value }))
+            }
+
+            HostMessage::GetParameterList => {
+                let parameters = if let Some(ref mut plugin) = self.plugin {
+                    plugin.as_instance_mut().get_parameter_list()
+                } else {
+                    Vec::new()
+                };
+
+                Ok(Some(BridgeMessage::ParameterList { parameters }))
+            }
+
+            HostMessage::GetParameterInfo { param_id } => {
+                let info = if let Some(ref mut plugin) = self.plugin {
+                    plugin.as_instance_mut().get_parameter_info(param_id)
+                } else {
+                    None
+                };
+
+                Ok(Some(BridgeMessage::ParameterInfoResponse { info }))
             }
 
             HostMessage::OpenEditor { parent_handle } => {
                 if let Some(ref mut plugin) = self.plugin {
                     // Convert parent_handle u64 to raw pointer
                     let parent_ptr = parent_handle as *mut std::ffi::c_void;
-
-                    let result: Result<(u32, u32)> = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.open_editor(parent_ptr),
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => unsafe { p.open_editor(parent_ptr) },
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.open_editor(parent_ptr),
-                    };
+                    let result = plugin.as_instance_mut().open_editor(parent_ptr);
 
                     match result {
                         Ok((width, height)) => {
@@ -287,14 +322,7 @@ impl PluginServer {
 
             HostMessage::CloseEditor => {
                 if let Some(ref mut plugin) = self.plugin {
-                    match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.close_editor(),
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.close_editor(),
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.close_editor(),
-                    }
+                    plugin.as_instance_mut().close_editor();
                     self.editor_open = false;
                 }
 
@@ -305,14 +333,7 @@ impl PluginServer {
                 // Call editor idle for VST2 (VST3 uses own event loop)
                 if self.editor_open {
                     if let Some(ref mut plugin) = self.plugin {
-                        match plugin {
-                            #[cfg(feature = "vst2")]
-                            LoadedPlugin::Vst2(p) => p.editor_idle(),
-                            #[cfg(feature = "vst3")]
-                            LoadedPlugin::Vst3(p) => p.editor_idle(),
-                            #[cfg(feature = "clap")]
-                            LoadedPlugin::Clap(p) => p.editor_idle(),
-                        }
+                        plugin.as_instance_mut().editor_idle();
                     }
                 }
                 Ok(None)
@@ -320,14 +341,7 @@ impl PluginServer {
 
             HostMessage::SetSampleRate { rate } => {
                 if let Some(ref mut plugin) = self.plugin {
-                    match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.set_sample_rate(rate),
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.set_sample_rate(rate),
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.set_sample_rate(rate),
-                    }
+                    plugin.as_instance_mut().set_sample_rate(rate);
                 }
 
                 Ok(None)
@@ -343,16 +357,7 @@ impl PluginServer {
 
             HostMessage::SaveState => {
                 if let Some(ref mut plugin) = self.plugin {
-                    let state_result: Result<Vec<u8>> = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.get_state(),
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.get_state(),
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.get_state(),
-                    };
-
-                    match state_result {
+                    match plugin.as_instance_mut().get_state() {
                         Ok(data) => Ok(Some(BridgeMessage::StateData { data })),
                         Err(e) => Ok(Some(BridgeMessage::Error {
                             message: format!("Failed to save state: {}", e),
@@ -365,16 +370,7 @@ impl PluginServer {
 
             HostMessage::LoadState { data } => {
                 if let Some(ref mut plugin) = self.plugin {
-                    let result: Result<()> = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.set_state(&data),
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.set_state(&data),
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.set_state(&data),
-                    };
-
-                    match result {
+                    match plugin.as_instance_mut().set_state(&data) {
                         Ok(()) => Ok(None),
                         Err(e) => Ok(Some(BridgeMessage::Error {
                             message: format!("Failed to load state: {}", e),
@@ -412,26 +408,8 @@ impl PluginServer {
 
         // Ensure buffers are sized before processing (avoids borrow checker issues)
         if let (Some(_), Some(ref plugin)) = (&self.shared_buffer, &self.plugin) {
-            let num_channels = match plugin {
-                #[cfg(feature = "vst2")]
-                LoadedPlugin::Vst2(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-                #[cfg(feature = "vst3")]
-                LoadedPlugin::Vst3(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-                #[cfg(feature = "clap")]
-                LoadedPlugin::Clap(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-            };
+            let metadata = plugin.as_instance().metadata();
+            let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
             self.ensure_buffers_sized(num_channels, num_samples);
         }
 
@@ -439,26 +417,11 @@ impl PluginServer {
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
             (&mut self.shared_buffer, &mut self.plugin)
         {
-            let num_channels = match plugin {
-                #[cfg(feature = "vst2")]
-                LoadedPlugin::Vst2(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-                #[cfg(feature = "vst3")]
-                LoadedPlugin::Vst3(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-                #[cfg(feature = "clap")]
-                LoadedPlugin::Clap(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-            };
+            let metadata = plugin.as_instance().metadata();
+            let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
+
+            // Create process context with MIDI events
+            let ctx = ProcessContext::new().midi(midi_events);
 
             match self.negotiated_format {
                 crate::protocol::SampleFormat::Float64 => {
@@ -484,14 +447,7 @@ impl PluginServer {
                         .map(|v| &mut v[..num_samples])
                         .collect();
 
-                    let sample_rate = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.metadata().audio_io.inputs as f32,
-                    };
+                    let sample_rate = self.sample_rate;
 
                     let mut audio_buffer = crate::protocol::AudioBuffer64 {
                         inputs: &input_slices,
@@ -500,22 +456,8 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    self.midi_output_buffer = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => {
-                            p.process_with_midi_f64(&mut audio_buffer, midi_events)
-                        }
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => {
-                            p.process_f64(&mut audio_buffer);
-                            smallvec::SmallVec::new()
-                        }
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => {
-                            p.process_f64(&mut audio_buffer);
-                            smallvec::SmallVec::new()
-                        }
-                    };
+                    let output = plugin.as_instance_mut().process_f64(&mut audio_buffer, &ctx);
+                    self.midi_output_buffer = output.midi_events;
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
@@ -548,14 +490,7 @@ impl PluginServer {
                         .map(|v| &mut v[..num_samples])
                         .collect();
 
-                    let sample_rate = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.metadata().audio_io.inputs as f32,
-                    };
+                    let sample_rate = self.sample_rate;
 
                     let mut audio_buffer = crate::protocol::AudioBuffer {
                         inputs: &input_slices,
@@ -564,20 +499,8 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    self.midi_output_buffer = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => {
-                            p.process_with_midi(&mut audio_buffer, midi_events)
-                        }
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => {
-                            p.process_with_midi(&mut audio_buffer, midi_events)
-                        }
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => {
-                            p.process_with_midi(&mut audio_buffer, midi_events)
-                        }
-                    };
+                    let output = plugin.as_instance_mut().process_f32(&mut audio_buffer, &ctx);
+                    self.midi_output_buffer = output.midi_events;
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
@@ -596,7 +519,11 @@ impl PluginServer {
         if !self.midi_output_buffer.is_empty() {
             Ok(Some(BridgeMessage::AudioProcessedMidi {
                 latency_us,
-                midi_output: self.midi_output_buffer.clone(),
+                midi_output: self
+                    .midi_output_buffer
+                    .iter()
+                    .map(IpcMidiEvent::from)
+                    .collect(),
             }))
         } else {
             Ok(Some(BridgeMessage::AudioProcessed { latency_us }))
@@ -630,26 +557,15 @@ impl PluginServer {
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
             (&mut self.shared_buffer, &mut self.plugin)
         {
-            let num_channels = match plugin {
-                #[cfg(feature = "vst2")]
-                LoadedPlugin::Vst2(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-                #[cfg(feature = "vst3")]
-                LoadedPlugin::Vst3(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-                #[cfg(feature = "clap")]
-                LoadedPlugin::Clap(p) => p
-                    .metadata()
-                    .audio_io
-                    .inputs
-                    .max(p.metadata().audio_io.outputs),
-            };
+            let metadata = plugin.as_instance().metadata();
+            let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
+
+            // Create process context with all data
+            let ctx = ProcessContext::new()
+                .midi(midi_events)
+                .params(param_changes)
+                .note_expression(note_expression)
+                .transport(transport);
 
             match self.negotiated_format {
                 crate::protocol::SampleFormat::Float64 => {
@@ -675,14 +591,7 @@ impl PluginServer {
                         .map(|v| &mut v[..num_samples])
                         .collect();
 
-                    let sample_rate = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.metadata().audio_io.inputs as f32,
-                    };
+                    let sample_rate = self.sample_rate;
 
                     let mut audio_buffer = crate::protocol::AudioBuffer64 {
                         inputs: &input_slices,
@@ -691,44 +600,10 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => {
-                            self.midi_output_buffer = p.process_with_transport_f64(
-                                &mut audio_buffer,
-                                midi_events,
-                                transport,
-                            );
-                        }
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => {
-                            let (midi_out, param_out, note_expr_out) = p
-                                .process_with_automation_f64(
-                                    &mut audio_buffer,
-                                    midi_events,
-                                    param_changes,
-                                    note_expression,
-                                    transport,
-                                );
-                            self.midi_output_buffer = midi_out;
-                            param_output = param_out;
-                            note_expression_output = note_expr_out;
-                        }
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => {
-                            let (midi_out, param_out, note_expr_out) = p
-                                .process_with_automation_f64(
-                                    &mut audio_buffer,
-                                    midi_events,
-                                    param_changes,
-                                    note_expression,
-                                    transport,
-                                );
-                            self.midi_output_buffer = midi_out;
-                            param_output = param_out;
-                            note_expression_output = note_expr_out;
-                        }
-                    };
+                    let output = plugin.as_instance_mut().process_f64(&mut audio_buffer, &ctx);
+                    self.midi_output_buffer = output.midi_events;
+                    param_output = output.param_changes;
+                    note_expression_output = output.note_expression;
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
@@ -761,14 +636,7 @@ impl PluginServer {
                         .map(|v| &mut v[..num_samples])
                         .collect();
 
-                    let sample_rate = match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => p.metadata().audio_io.inputs as f32,
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => p.metadata().audio_io.inputs as f32,
-                    };
+                    let sample_rate = self.sample_rate;
 
                     let mut audio_buffer = crate::protocol::AudioBuffer {
                         inputs: &input_slices,
@@ -777,39 +645,10 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    match plugin {
-                        #[cfg(feature = "vst2")]
-                        LoadedPlugin::Vst2(p) => {
-                            self.midi_output_buffer =
-                                p.process_with_transport(&mut audio_buffer, midi_events, transport);
-                        }
-                        #[cfg(feature = "vst3")]
-                        LoadedPlugin::Vst3(p) => {
-                            let (midi_out, param_out, note_expr_out) = p.process_with_automation(
-                                &mut audio_buffer,
-                                midi_events,
-                                param_changes,
-                                note_expression,
-                                transport,
-                            );
-                            self.midi_output_buffer = midi_out;
-                            param_output = param_out;
-                            note_expression_output = note_expr_out;
-                        }
-                        #[cfg(feature = "clap")]
-                        LoadedPlugin::Clap(p) => {
-                            let (midi_out, param_out, note_expr_out) = p.process_with_automation(
-                                &mut audio_buffer,
-                                midi_events,
-                                param_changes,
-                                note_expression,
-                                transport,
-                            );
-                            self.midi_output_buffer = midi_out;
-                            param_output = param_out;
-                            note_expression_output = note_expr_out;
-                        }
-                    };
+                    let output = plugin.as_instance_mut().process_f32(&mut audio_buffer, &ctx);
+                    self.midi_output_buffer = output.midi_events;
+                    param_output = output.param_changes;
+                    note_expression_output = output.note_expression;
 
                     // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
@@ -827,7 +666,11 @@ impl PluginServer {
         // Return full automation response
         Ok(Some(BridgeMessage::AudioProcessedFull {
             latency_us,
-            midi_output: self.midi_output_buffer.clone(),
+            midi_output: self
+                .midi_output_buffer
+                .iter()
+                .map(IpcMidiEvent::from)
+                .collect(),
             param_output,
             note_expression_output,
         }))
@@ -855,9 +698,12 @@ impl PluginServer {
     fn load_plugin(
         &mut self,
         path: PathBuf,
-        sample_rate: f32,
+        sample_rate: f64,
+        block_size: usize,
         preferred_format: crate::protocol::SampleFormat,
     ) -> Result<PluginMetadata> {
+        // Store sample rate for use during processing
+        self.sample_rate = sample_rate;
         // Validate plugin exists
         if !path.exists() {
             return Err(BridgeError::LoadFailed {
@@ -877,7 +723,7 @@ impl PluginServer {
             #[cfg(feature = "vst3")]
             "vst3" => {
                 // Load as VST3
-                let mut vst = Vst3Instance::load(&path, sample_rate)?;
+                let mut vst = Vst3Instance::load(&path, sample_rate, block_size)?;
                 // Negotiate format: use f64 if preferred AND plugin supports it
                 if preferred_format == crate::protocol::SampleFormat::Float64
                     && vst.can_process_f64()
@@ -891,7 +737,7 @@ impl PluginServer {
             #[cfg(feature = "vst2")]
             "vst" | "dll" | "so" => {
                 // Load as VST2
-                let vst = Vst2Instance::load(&path, sample_rate)?;
+                let vst = Vst2Instance::load(&path, sample_rate, block_size)?;
                 let metadata = vst.metadata().clone();
                 (LoadedPlugin::Vst2(vst), metadata)
             }
@@ -899,7 +745,7 @@ impl PluginServer {
             #[cfg(feature = "clap")]
             "clap" => {
                 // Load as CLAP
-                let clap = ClapInstance::load(&path, sample_rate)?;
+                let clap = ClapInstance::load(&path, sample_rate, block_size)?;
                 let metadata = clap.metadata().clone();
                 (LoadedPlugin::Clap(clap), metadata)
             }

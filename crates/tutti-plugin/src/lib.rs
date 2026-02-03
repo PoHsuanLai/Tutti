@@ -85,6 +85,7 @@
 
 pub mod client;
 pub mod error;
+pub mod instance;
 pub mod lockfree_bridge;
 pub mod metadata;
 pub mod protocol;
@@ -101,13 +102,23 @@ pub mod vst2_loader;
 #[cfg(feature = "vst3")]
 pub mod vst3_loader;
 
-// CLAP loader (optional)
+// CLAP loader (optional) - thin wrapper around clap-host crate
 #[cfg(feature = "clap")]
-pub mod clap_loader;
+mod clap;
+
+#[cfg(feature = "clap")]
+pub use clap::ClapInstance;
+
+// Backwards compatibility alias
+#[cfg(feature = "clap")]
+pub mod clap_loader {
+    pub use super::clap::ClapInstance;
+}
 
 // Re-exports
 pub use client::PluginClient;
 pub use error::{BridgeError, Result};
+pub use instance::{PluginInstance, ProcessContext, ProcessOutput};
 pub use protocol::{BridgeConfig, BridgeMessage, HostMessage, SharedBuffer};
 pub use server::PluginServer;
 pub use shared_memory::SharedAudioBuffer;

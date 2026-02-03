@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use tutti_core::{AudioUnit, MidiAudioUnit};
-use tutti_midi::MidiEvent;
+use tutti_midi_io::MidiEvent;
 use tutti_plugin::protocol::BridgeConfig;
 use tutti_plugin::PluginClient;
 

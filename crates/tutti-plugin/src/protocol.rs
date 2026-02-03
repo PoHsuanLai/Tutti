@@ -1,32 +1,71 @@
-//! Bridge protocol - messages between host and plugin process
-//!
-//! This defines the IPC protocol for communication between the main DAWAI
-//! process and the sandboxed plugin bridge process.
+//! IPC protocol for the plugin bridge process.
 
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::path::PathBuf;
 
-/// MIDI event capacity on stack (256 events = ~4KB).
-/// Typical plugins rarely exceed 64 events per buffer, so this avoids heap allocations.
 const MIDI_STACK_CAPACITY: usize = 256;
 
-// Use local metadata type for IPC
-pub use crate::metadata::PluginMetadata;
+fn default_block_size() -> usize {
+    512
+}
 
-// Re-export MIDI event from tutti-midi (now serializable!)
+pub use crate::metadata::PluginMetadata;
 pub use tutti_midi_io::MidiEvent;
 
-/// Stack-allocated MIDI event buffer (256 events = ~4KB on stack).
-/// Used throughout the plugin bridge to avoid heap allocations for typical MIDI traffic.
+/// IPC-serializable MIDI event (raw bytes format for cross-process communication).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IpcMidiEvent {
+    pub frame_offset: usize,
+    pub data: [u8; 3],
+    pub len: u8,
+}
+
+impl IpcMidiEvent {
+    pub fn from_bytes(frame_offset: usize, bytes: &[u8]) -> Self {
+        let mut data = [0u8; 3];
+        let len = bytes.len().min(3);
+        data[..len].copy_from_slice(&bytes[..len]);
+        Self {
+            frame_offset,
+            data,
+            len: len as u8,
+        }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.data[..self.len as usize]
+    }
+
+    pub fn to_midi_event(&self) -> Option<MidiEvent> {
+        MidiEvent::from_bytes(self.as_bytes())
+            .ok()
+            .map(|mut e| {
+                e.frame_offset = self.frame_offset;
+                e
+            })
+    }
+}
+
+impl From<&MidiEvent> for IpcMidiEvent {
+    fn from(event: &MidiEvent) -> Self {
+        let bytes = event.to_bytes();
+        Self::from_bytes(event.frame_offset, &bytes)
+    }
+}
+
+impl From<MidiEvent> for IpcMidiEvent {
+    fn from(event: MidiEvent) -> Self {
+        Self::from(&event)
+    }
+}
+
+pub type IpcMidiEventVec = SmallVec<[IpcMidiEvent; MIDI_STACK_CAPACITY]>;
 pub type MidiEventVec = SmallVec<[MidiEvent; MIDI_STACK_CAPACITY]>;
 
-/// Audio sample format
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SampleFormat {
-    /// 32-bit floating point (most common)
     Float32,
-    /// 64-bit floating point (high precision)
     Float64,
 }
 
@@ -37,21 +76,18 @@ impl Default for SampleFormat {
     }
 }
 
-/// Single parameter automation point
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct ParameterPoint {
-    /// Sample offset within the current buffer (0 = first sample)
     pub sample_offset: i32,
-    /// Normalized parameter value (0.0 to 1.0)
     pub value: f64,
 }
 
-/// Parameter automation queue for a single parameter
+/// Parameter automation queue.
+///
+/// `param_id` is the format-native identifier (VST3 ParamID, CLAP clap_id, or VST2 index).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterQueue {
-    /// Parameter ID (VST3 uses u32, called ParamID)
     pub param_id: u32,
-    /// Automation points sorted by sample_offset
     pub points: Vec<ParameterPoint>,
 }
 
@@ -71,10 +107,8 @@ impl ParameterQueue {
     }
 }
 
-/// Collection of parameter changes for a processing block
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParameterChanges {
-    /// All parameter queues (one per parameter that changed)
     pub queues: Vec<ParameterQueue>,
 }
 
@@ -92,38 +126,64 @@ impl ParameterChanges {
     }
 }
 
-/// Note expression type (VST3-style per-note modulation)
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParameterFlags {
+    pub automatable: bool,
+    pub read_only: bool,
+    pub wrap: bool,
+    pub is_bypass: bool,
+    pub hidden: bool,
+}
+
+/// Parameter metadata.
+///
+/// `id` is the format-native identifier (VST3 ParamID, CLAP clap_id, or VST2 index).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParameterInfo {
+    pub id: u32,
+    pub name: String,
+    pub unit: String,
+    pub min_value: f64,
+    pub max_value: f64,
+    pub default_value: f64,
+    pub step_count: u32,
+    pub flags: ParameterFlags,
+}
+
+impl ParameterInfo {
+    pub fn new(id: u32, name: String) -> Self {
+        Self {
+            id,
+            name,
+            unit: String::new(),
+            min_value: 0.0,
+            max_value: 1.0,
+            default_value: 0.0,
+            step_count: 0,
+            flags: ParameterFlags::default(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NoteExpressionType {
-    /// Volume (0.0 = silent, 0.5 = default, 1.0 = max)
     Volume,
-    /// Pan (-1.0 = left, 0.0 = center, 1.0 = right)
     Pan,
-    /// Tuning in semitones (-120.0 to +120.0, default 0.0)
     Tuning,
-    /// Vibrato depth (0.0 = none, 1.0 = max)
     Vibrato,
-    /// Brightness/timbre (0.0 = dark, 0.5 = default, 1.0 = bright)
     Brightness,
 }
 
-/// Single note expression value change
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct NoteExpressionValue {
-    /// Sample offset within the current buffer
     pub sample_offset: i32,
-    /// Note ID (for VST3, this is the unique note identifier)
     pub note_id: i32,
-    /// Expression type
     pub expression_type: NoteExpressionType,
-    /// Normalized value (meaning depends on expression_type)
     pub value: f64,
 }
 
-/// Collection of note expression changes for a processing block
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NoteExpressionChanges {
-    /// All note expression changes
     pub changes: Vec<NoteExpressionValue>,
 }
 
@@ -141,30 +201,18 @@ impl NoteExpressionChanges {
     }
 }
 
-/// Transport and timing information for audio processing
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct TransportInfo {
-    /// Is transport playing?
     pub playing: bool,
-    /// Is recording active?
     pub recording: bool,
-    /// Is cycle/loop active?
     pub cycle_active: bool,
-    /// Tempo in BPM
     pub tempo: f64,
-    /// Time signature numerator (e.g., 4 in 4/4)
     pub time_sig_numerator: i32,
-    /// Time signature denominator (e.g., 4 in 4/4)
     pub time_sig_denominator: i32,
-    /// Position in samples from project start
     pub position_samples: i64,
-    /// Musical position in quarter notes
     pub position_quarters: f64,
-    /// Last bar start position in quarter notes
     pub bar_position_quarters: f64,
-    /// Cycle/loop start in quarter notes (if cycle active)
     pub cycle_start_quarters: f64,
-    /// Cycle/loop end in quarter notes (if cycle active)
     pub cycle_end_quarters: f64,
 }
 
@@ -186,183 +234,117 @@ impl Default for TransportInfo {
     }
 }
 
-/// Audio buffer for plugin processing (generic over sample type)
-///
-/// This is a simple buffer type used internally by the plugin loaders
-/// in the bridge process. It's not the same as FunDSP's buffer types.
 pub struct AudioBuffer<'a, T = f32> {
-    /// Input channel slices
     pub inputs: &'a [&'a [T]],
-    /// Output channel slices (mutable)
     pub outputs: &'a mut [&'a mut [T]],
-    /// Number of samples per channel
     pub num_samples: usize,
-    /// Sample rate
-    pub sample_rate: f32,
+    pub sample_rate: f64,
 }
 
-/// Type alias for 32-bit audio buffer (most common)
 pub type AudioBuffer32<'a> = AudioBuffer<'a, f32>;
-
-/// Type alias for 64-bit audio buffer (high precision)
 pub type AudioBuffer64<'a> = AudioBuffer<'a, f64>;
 
-/// Message from host to bridge
+/// Host to bridge message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HostMessage {
-    /// Load a plugin from path
     LoadPlugin {
         path: PathBuf,
-        sample_rate: f32,
-        /// Preferred sample format (f32 or f64). Server will negotiate based on plugin capability.
+        sample_rate: f64,
+        #[serde(default = "default_block_size")]
+        block_size: usize,
         #[serde(default)]
         preferred_format: SampleFormat,
     },
-
-    /// Unload the current plugin
     UnloadPlugin,
-
-    /// Process audio (buffer ID in shared memory)
-    ProcessAudio { buffer_id: u32, num_samples: usize },
-
-    /// Process audio with MIDI events (sample-accurate)
+    ProcessAudio {
+        buffer_id: u32,
+        num_samples: usize,
+    },
     ProcessAudioMidi {
         buffer_id: u32,
         num_samples: usize,
-        midi_events: MidiEventVec,
+        midi_events: IpcMidiEventVec,
     },
-
-    /// Process audio with full automation (MIDI + parameter changes + transport + note expression)
     ProcessAudioFull {
         buffer_id: u32,
         num_samples: usize,
-        midi_events: MidiEventVec,
+        midi_events: IpcMidiEventVec,
         param_changes: ParameterChanges,
         note_expression: NoteExpressionChanges,
         transport: TransportInfo,
     },
-
-    /// Set a parameter
-    SetParameter { id: String, value: f32 },
-
-    /// Get a parameter value
-    GetParameter { id: String },
-
-    /// Set sample rate
-    SetSampleRate { rate: f32 },
-
-    /// Reset plugin state
+    SetParameter {
+        param_id: u32,
+        value: f32,
+    },
+    GetParameter {
+        param_id: u32,
+    },
+    GetParameterList,
+    GetParameterInfo {
+        param_id: u32,
+    },
+    SetSampleRate {
+        rate: f64,
+    },
     Reset,
-
-    /// Save plugin state
     SaveState,
-
-    /// Load plugin state
-    LoadState { data: Vec<u8> },
-
-    /// Open editor GUI
-    OpenEditor { parent_handle: u64 },
-
-    /// Close editor GUI
+    LoadState {
+        data: Vec<u8>,
+    },
+    OpenEditor {
+        parent_handle: u64,
+    },
     CloseEditor,
-
-    /// Editor idle (for legacy plugins)
     EditorIdle,
-
-    /// Shutdown the bridge
     Shutdown,
 }
 
-/// Message from bridge to host
+/// Bridge to host message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BridgeMessage {
-    /// Plugin loaded successfully
     PluginLoaded { metadata: Box<PluginMetadata> },
-
-    /// Plugin unloaded
     PluginUnloaded,
-
-    /// Audio processing complete
     AudioProcessed { latency_us: u64 },
-
-    /// Audio processing complete with MIDI output
     AudioProcessedMidi {
         latency_us: u64,
-        midi_output: MidiEventVec,
+        midi_output: IpcMidiEventVec,
     },
-
-    /// Audio processing complete with full output (MIDI + parameter changes + note expression)
     AudioProcessedFull {
         latency_us: u64,
-        midi_output: MidiEventVec,
+        midi_output: IpcMidiEventVec,
         param_output: ParameterChanges,
         note_expression_output: NoteExpressionChanges,
     },
-
-    /// Parameter value response
     ParameterValue { value: Option<f32> },
-
-    /// Plugin state data
+    ParameterList { parameters: Vec<ParameterInfo> },
+    ParameterInfoResponse { info: Option<ParameterInfo> },
     StateData { data: Vec<u8> },
-
-    /// Editor opened
     EditorOpened { width: u32, height: u32 },
-
-    /// Editor closed
     EditorClosed,
-
-    /// Parameter changed by plugin (automation)
     ParameterChanged { index: i32, value: f32 },
-
-    /// Error occurred
     Error { message: String },
-
-    /// Bridge ready
     Ready,
-
-    /// Bridge shutting down
     Shutdown,
 }
 
-/// Shared memory buffer descriptor
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedBuffer {
-    /// Unique buffer ID
     pub id: u32,
-
-    /// Size in bytes
     pub size: usize,
-
-    /// Number of channels
     pub channels: usize,
-
-    /// Number of samples per channel
     pub samples: usize,
-
-    /// Shared memory name/path
     pub shm_name: String,
-
-    /// Sample format used in this buffer
     #[serde(default)]
     pub sample_format: SampleFormat,
 }
 
-/// Bridge configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BridgeConfig {
-    /// Socket path for IPC
     pub socket_path: PathBuf,
-
-    /// Shared memory prefix
     pub shm_prefix: String,
-
-    /// Maximum buffer size
     pub max_buffer_size: usize,
-
-    /// Timeout for operations (milliseconds)
     pub timeout_ms: u64,
-
-    /// Preferred sample format (f32 or f64). Default: Float32.
     #[serde(default)]
     pub preferred_format: SampleFormat,
 }
@@ -388,6 +370,7 @@ mod tests {
         let msg = HostMessage::LoadPlugin {
             path: PathBuf::from("/test/plugin.vst3"),
             sample_rate: 44100.0,
+            block_size: 512,
             preferred_format: SampleFormat::Float32,
         };
 
@@ -413,24 +396,34 @@ mod tests {
     }
 
     #[test]
+    fn test_ipc_midi_event_roundtrip() {
+        let event = MidiEvent::note_on_builder(60, 100).channel(0).offset(128).build();
+        let ipc_event = IpcMidiEvent::from(&event);
+        assert_eq!(ipc_event.frame_offset, 128);
+        assert_eq!(ipc_event.len, 3);
+
+        let restored = ipc_event.to_midi_event().unwrap();
+        assert_eq!(restored.frame_offset, 128);
+        assert!(restored.is_note_on());
+        assert_eq!(restored.note(), Some(60));
+        assert_eq!(restored.velocity(), Some(100));
+    }
+
+    #[test]
     fn test_midi_message_serialization() {
-        // Create MIDI events
-        let midi_events = vec![
-            MidiEvent::note_on_builder(60, 100)
-                .channel(0)
-                .offset(0)
-                .build(),
-            MidiEvent::note_on_builder(64, 100)
-                .channel(0)
-                .offset(128)
-                .build(),
+        let midi_events: IpcMidiEventVec = vec![
+            MidiEvent::note_on_builder(60, 100).channel(0).offset(0).build(),
+            MidiEvent::note_on_builder(64, 100).channel(0).offset(128).build(),
             MidiEvent::cc_builder(7, 64).channel(0).offset(256).build(),
-        ];
+        ]
+        .iter()
+        .map(IpcMidiEvent::from)
+        .collect();
 
         let msg = HostMessage::ProcessAudioMidi {
             buffer_id: 42,
             num_samples: 512,
-            midi_events: midi_events.clone(),
+            midi_events,
         };
 
         let encoded = bincode::serialize(&msg).unwrap();
@@ -446,18 +439,16 @@ mod tests {
                 assert_eq!(num_samples, 512);
                 assert_eq!(decoded_events.len(), 3);
 
-                // Verify first note on
-                assert_eq!(decoded_events[0].frame_offset, 0);
-                assert!(decoded_events[0].is_note_on());
-                assert_eq!(decoded_events[0].note(), Some(60));
-
-                // Verify second note on
-                assert_eq!(decoded_events[1].frame_offset, 128);
-                assert!(decoded_events[1].is_note_on());
-                assert_eq!(decoded_events[1].note(), Some(64));
-
-                // Verify CC
-                assert_eq!(decoded_events[2].frame_offset, 256);
+                let events: Vec<MidiEvent> =
+                    decoded_events.iter().filter_map(|e| e.to_midi_event()).collect();
+                assert_eq!(events.len(), 3);
+                assert_eq!(events[0].frame_offset, 0);
+                assert!(events[0].is_note_on());
+                assert_eq!(events[0].note(), Some(60));
+                assert_eq!(events[1].frame_offset, 128);
+                assert!(events[1].is_note_on());
+                assert_eq!(events[1].note(), Some(64));
+                assert_eq!(events[2].frame_offset, 256);
             }
             _ => panic!("Wrong message type"),
         }
@@ -465,20 +456,17 @@ mod tests {
 
     #[test]
     fn test_midi_output_response_serialization() {
-        let midi_output = vec![
-            MidiEvent::note_off_builder(60)
-                .channel(0)
-                .offset(512)
-                .build(),
-            MidiEvent::note_off_builder(64)
-                .channel(0)
-                .offset(640)
-                .build(),
-        ];
+        let midi_output: IpcMidiEventVec = vec![
+            MidiEvent::note_off_builder(60).channel(0).offset(512).build(),
+            MidiEvent::note_off_builder(64).channel(0).offset(640).build(),
+        ]
+        .iter()
+        .map(IpcMidiEvent::from)
+        .collect();
 
         let msg = BridgeMessage::AudioProcessedMidi {
             latency_us: 1500,
-            midi_output: midi_output.clone(),
+            midi_output,
         };
 
         let encoded = bincode::serialize(&msg).unwrap();
@@ -491,8 +479,11 @@ mod tests {
             } => {
                 assert_eq!(latency_us, 1500);
                 assert_eq!(decoded_output.len(), 2);
-                assert!(decoded_output[0].is_note_off());
-                assert!(decoded_output[1].is_note_off());
+
+                let events: Vec<MidiEvent> =
+                    decoded_output.iter().filter_map(|e| e.to_midi_event()).collect();
+                assert!(events[0].is_note_off());
+                assert!(events[1].is_note_off());
             }
             _ => panic!("Wrong message type"),
         }
@@ -503,6 +494,7 @@ mod tests {
         let msg = HostMessage::LoadPlugin {
             path: PathBuf::from("/test/reverb.vst3"),
             sample_rate: 96000.0,
+            block_size: 1024,
             preferred_format: SampleFormat::Float64,
         };
 
@@ -513,10 +505,12 @@ mod tests {
             HostMessage::LoadPlugin {
                 path,
                 sample_rate,
+                block_size,
                 preferred_format,
             } => {
                 assert_eq!(path, PathBuf::from("/test/reverb.vst3"));
                 assert_eq!(sample_rate, 96000.0);
+                assert_eq!(block_size, 1024);
                 assert_eq!(preferred_format, SampleFormat::Float64);
             }
             _ => panic!("Wrong message type"),

@@ -18,11 +18,11 @@ default = ["clap", "midi-io"]
 # VST2 support (requires VST SDK)
 vst2 = ["dep:vst"]
 
-# VST3 support
-vst3 = []
+# VST3 support (uses vst3-host crate)
+vst3 = ["dep:vst3-host"]
 
 # CLAP support
-clap = ["dep:clap-sys"]
+clap = ["dep:clap-host"]
 
 # Hardware MIDI I/O support
 midi-io = ["tutti-midi-io/midi-io"]
@@ -66,8 +66,11 @@ tracing = "0.1"
 # VST2 plugin loading (optional)
 vst = { version = "0.3", optional = true }
 
-# CLAP plugin loading (optional)
-clap-sys = { version = "0.5", optional = true }
+# CLAP plugin hosting (optional)
+clap-host = { path = "../../../clap-host", optional = true }
+
+# VST3 plugin hosting (optional)
+vst3-host = { path = "../../../vst3-host", optional = true }
 
 libloading = "0.8"
 

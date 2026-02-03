@@ -3,7 +3,7 @@
 //! Audio thread → lock-free queues → bridge thread → IPC → plugin server.
 
 use crate::error::Result;
-use crate::protocol::{BridgeMessage, HostMessage, MidiEvent, PluginMetadata};
+use crate::protocol::{BridgeMessage, HostMessage, IpcMidiEvent, MidiEvent, PluginMetadata};
 use crate::shared_memory::SharedAudioBuffer;
 use crate::transport::MessageTransport;
 use crossbeam::queue::ArrayQueue;
@@ -32,15 +32,15 @@ pub enum BridgeCommand {
         transport: crate::protocol::TransportInfo,
     },
     SetParameter {
-        index: i32,
+        param_id: u32,
         value: f32,
     },
     GetParameter {
-        index: i32,
+        param_id: u32,
         response_id: u32,
     },
     SetSampleRate {
-        rate: f32,
+        rate: f64,
     },
     Reset,
     Shutdown,
@@ -201,7 +201,7 @@ impl LockFreeBridge {
                     HostMessage::ProcessAudioMidi {
                         buffer_id,
                         num_samples,
-                        midi_events,
+                        midi_events: midi_events.iter().map(IpcMidiEvent::from).collect(),
                     }
                 };
 
@@ -218,7 +218,10 @@ impl LockFreeBridge {
                     BridgeMessage::AudioProcessedMidi { midi_output, .. } => {
                         let _ = response_queue.push(BridgeResponse::AudioProcessed {
                             buffer_id,
-                            midi_output,
+                            midi_output: midi_output
+                                .iter()
+                                .filter_map(|e| e.to_midi_event())
+                                .collect(),
                         });
                     }
                     BridgeMessage::Error { message } => {
@@ -228,20 +231,18 @@ impl LockFreeBridge {
                 }
             }
 
-            BridgeCommand::SetParameter { index, value } => {
+            BridgeCommand::SetParameter { param_id, value } => {
                 transport
-                    .send_host_message(&HostMessage::SetParameter {
-                        id: index.to_string(),
-                        value,
-                    })
+                    .send_host_message(&HostMessage::SetParameter { param_id, value })
                     .await?;
             }
 
-            BridgeCommand::GetParameter { index, response_id } => {
+            BridgeCommand::GetParameter {
+                param_id,
+                response_id,
+            } => {
                 transport
-                    .send_host_message(&HostMessage::GetParameter {
-                        id: index.to_string(),
-                    })
+                    .send_host_message(&HostMessage::GetParameter { param_id })
                     .await?;
 
                 let response = transport.recv_bridge_message().await?;
@@ -269,7 +270,7 @@ impl LockFreeBridge {
                 let message = HostMessage::ProcessAudioFull {
                     buffer_id,
                     num_samples,
-                    midi_events,
+                    midi_events: midi_events.iter().map(IpcMidiEvent::from).collect(),
                     param_changes,
                     note_expression,
                     transport: transport_info,
@@ -287,7 +288,10 @@ impl LockFreeBridge {
                     } => {
                         let _ = response_queue.push(BridgeResponse::AudioProcessedFull {
                             buffer_id,
-                            midi_output,
+                            midi_output: midi_output
+                                .iter()
+                                .filter_map(|e| e.to_midi_event())
+                                .collect(),
                             param_output,
                             note_expression_output,
                         });
@@ -295,7 +299,10 @@ impl LockFreeBridge {
                     BridgeMessage::AudioProcessedMidi { midi_output, .. } => {
                         let _ = response_queue.push(BridgeResponse::AudioProcessed {
                             buffer_id,
-                            midi_output,
+                            midi_output: midi_output
+                                .iter()
+                                .filter_map(|e| e.to_midi_event())
+                                .collect(),
                         });
                     }
                     BridgeMessage::AudioProcessed { .. } => {
@@ -434,13 +441,13 @@ impl LockFreeBridge {
         false
     }
 
-    pub fn set_parameter_rt(&self, index: i32, value: f32) -> bool {
+    pub fn set_parameter_rt(&self, param_id: u32, value: f32) -> bool {
         self.command_queue
-            .push(BridgeCommand::SetParameter { index, value })
+            .push(BridgeCommand::SetParameter { param_id, value })
             .is_ok()
     }
 
-    pub fn set_sample_rate_rt(&self, rate: f32) -> bool {
+    pub fn set_sample_rate_rt(&self, rate: f64) -> bool {
         self.command_queue
             .push(BridgeCommand::SetSampleRate { rate })
             .is_ok()
@@ -589,7 +596,7 @@ mod tests {
         for i in 0..COMMAND_QUEUE_SIZE {
             assert!(queue
                 .push(BridgeCommand::SetParameter {
-                    index: i as i32,
+                    param_id: i as u32,
                     value: 0.0
                 })
                 .is_ok());
@@ -598,7 +605,7 @@ mod tests {
         // Next push should fail
         assert!(queue
             .push(BridgeCommand::SetParameter {
-                index: 0,
+                param_id: 0,
                 value: 0.0
             })
             .is_err());
