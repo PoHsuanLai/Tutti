@@ -12,7 +12,7 @@ use crate::pdc::PdcManager;
 use crate::transport::{Metronome, TransportHandle, TransportManager};
 
 #[cfg(feature = "std")]
-use crate::output::{AudioEngine, AudioEngineConfig};
+use crate::output::AudioEngine;
 
 #[cfg(feature = "neural")]
 use crate::neural::NeuralNodeManager;
@@ -53,19 +53,19 @@ impl TuttiSystem {
     /// List available output devices.
     #[cfg(feature = "std")]
     pub fn list_output_devices() -> Result<Vec<String>> {
-        AudioEngine::list_output_devices()
+        AudioEngine::list_devices()
     }
 
     /// Get the name of the current output device.
     #[cfg(feature = "std")]
     pub fn current_output_device_name(&self) -> Result<String> {
-        self.engine.lock().current_output_device_name()
+        self.engine.lock().device_name()
     }
 
     /// Set output device (requires restart to take effect).
     #[cfg(feature = "std")]
     pub fn set_output_device(&self, index: Option<usize>) {
-        self.engine.lock().set_output_device(index);
+        self.engine.lock().set_device(index);
     }
 
     /// Get number of output channels.
@@ -177,26 +177,14 @@ impl TuttiSystem {
 }
 
 /// Builder for TuttiSystem.
+#[derive(Default)]
 pub struct TuttiSystemBuilder {
     #[cfg(feature = "std")]
-    engine_config: AudioEngineConfig,
+    device_index: Option<usize>,
     #[cfg_attr(feature = "std", allow(dead_code))]
     sample_rate: Option<f64>,
     inputs: usize,
     outputs: usize,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for TuttiSystemBuilder {
-    fn default() -> Self {
-        Self {
-            #[cfg(feature = "std")]
-            engine_config: AudioEngineConfig::default(),
-            sample_rate: None,
-            inputs: 0,
-            outputs: 0,
-        }
-    }
 }
 
 impl TuttiSystemBuilder {
@@ -210,7 +198,7 @@ impl TuttiSystemBuilder {
     /// Set output device index (only for std mode with CPAL).
     #[cfg(feature = "std")]
     pub fn output_device(mut self, index: usize) -> Self {
-        self.engine_config.output_device_index = Some(index);
+        self.device_index = Some(index);
         self
     }
 
@@ -230,7 +218,7 @@ impl TuttiSystemBuilder {
     pub fn build(self) -> Result<TuttiSystem> {
         #[cfg(feature = "std")]
         let (sample_rate, mut engine) = {
-            let engine = AudioEngine::new(self.engine_config)?;
+            let engine = AudioEngine::new(self.device_index)?;
             let sample_rate = engine.sample_rate();
             (sample_rate, engine)
         };
@@ -303,6 +291,7 @@ mod tests {
         let system = TuttiSystem::builder().build().unwrap();
 
         system.graph(|net| {
+            use crate::compat::Box;
             use fundsp::prelude::*;
             let _node = net.add(Box::new(sine_hz::<f32>(440.0)));
         });

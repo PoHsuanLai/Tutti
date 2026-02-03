@@ -5,14 +5,14 @@ use crate::compat::{Arc, Vec};
 pub const SUPERCLOCK_TICKS_PER_SECOND: u64 = 282_240_000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct TempoPoint {
-    pub beat: f64,
-    pub bpm: f32,
+pub(crate) struct TempoPoint {
+    pub(crate) beat: f64,
+    pub(crate) bpm: f32,
     superclock: u64,
 }
 
 impl TempoPoint {
-    pub fn new(beat: f64, bpm: f32) -> Self {
+    pub(crate) fn new(beat: f64, bpm: f32) -> Self {
         Self {
             beat,
             bpm,

@@ -3,7 +3,6 @@
 use crate::compat::String;
 use thiserror::Error;
 
-// std is needed for CPAL errors and std::io::Error
 #[cfg(feature = "std")]
 #[allow(unused_extern_crates)]
 extern crate std;
@@ -65,3 +64,28 @@ pub enum Error {
 
 /// Result type alias.
 pub type Result<T> = core::result::Result<T, Error>;
+
+/// Errors from node registry operations.
+#[derive(Error, Debug)]
+pub enum NodeRegistryError {
+    #[error("Unknown node type: {0}")]
+    UnknownNodeType(String),
+
+    #[error("Missing parameter: {0}")]
+    MissingParameter(String),
+
+    #[error("Invalid parameter '{0}': {1}")]
+    InvalidParameter(String, String),
+
+    #[error("Construction failed: {0}")]
+    ConstructionFailed(String),
+
+    #[error("Neural: {0}")]
+    Neural(String),
+
+    #[error("Plugin: {0}")]
+    Plugin(String),
+
+    #[error("Audio file: {0}")]
+    AudioFile(String),
+}

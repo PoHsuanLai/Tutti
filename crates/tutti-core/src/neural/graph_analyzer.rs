@@ -43,7 +43,7 @@ impl BatchingStrategy {
 }
 
 /// Analyzes the Net graph to compute optimal neural batching.
-pub struct GraphAnalyzer<'a> {
+pub(crate) struct GraphAnalyzer<'a> {
     net: &'a Net,
     manager: &'a NeuralNodeManager,
 }
@@ -273,6 +273,7 @@ impl<'a> GraphAnalyzer<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compat::Box;
     use crate::neural::metadata::{NeuralModelId, NeuralNodeInfo};
     use fundsp::prelude::*;
 

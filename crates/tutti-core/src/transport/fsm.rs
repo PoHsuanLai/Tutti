@@ -16,21 +16,21 @@ pub enum MotionState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Direction {
+pub(crate) enum Direction {
     #[default]
     Forwards,
     Backwards,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DeclickState {
-    pub gain: f32,
-    pub fading_out: bool,
-    pub samples_remaining: usize,
+pub(crate) struct DeclickState {
+    pub(crate) gain: f32,
+    pub(crate) fading_out: bool,
+    pub(crate) samples_remaining: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum LocateState {
+pub(crate) enum LocateState {
     #[default]
     Idle,
     LocateAndStop,
@@ -38,7 +38,7 @@ pub enum LocateState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TransportEvent {
+pub(crate) enum TransportEvent {
     Play,
     Stop,
     StopWithDeclick,
@@ -55,7 +55,7 @@ pub enum TransportEvent {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum TransitionResult {
+pub(crate) enum TransitionResult {
     None,
     MotionChanged(MotionState),
     Locating(MusicalPosition),
@@ -64,9 +64,9 @@ pub enum TransitionResult {
     DeclickStarted,
 }
 
-pub const DEFAULT_DECLICK_SAMPLES: usize = 480;
+pub(crate) const DEFAULT_DECLICK_SAMPLES: usize = 480;
 
-pub struct TransportFSM {
+pub(crate) struct TransportFSM {
     motion: MotionState,
     locate: LocateState,
     pending_locate: Option<MusicalPosition>,

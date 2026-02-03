@@ -42,9 +42,10 @@ impl core::fmt::Display for NeuralModelId {
     }
 }
 
-/// Metadata for a neural node in the graph.
+/// Metadata for a neural node in the graph (used in tests for GraphAnalyzer).
 #[derive(Debug, Clone)]
-pub struct NeuralNodeInfo {
+#[allow(dead_code)] // Used in tests only
+pub(crate) struct NeuralNodeInfo {
     pub model_id: NeuralModelId,
     pub buffer_size: usize,
     pub sample_rate: f32,
@@ -52,6 +53,7 @@ pub struct NeuralNodeInfo {
     pub latency_samples: usize,
 }
 
+#[allow(dead_code)] // Used in tests only
 impl NeuralNodeInfo {
     /// Creates metadata for a neural synthesizer.
     pub fn synth(model_id: NeuralModelId, buffer_size: usize, sample_rate: f32) -> Self {
@@ -95,8 +97,9 @@ impl NeuralNodeManager {
         }
     }
 
-    /// Registers a neural node with its metadata.
-    pub fn register(&self, node_id: NodeId, info: NeuralNodeInfo) {
+    /// Registers a neural node with its metadata (used in tests only).
+    #[allow(dead_code)]
+    pub(crate) fn register(&self, node_id: NodeId, info: NeuralNodeInfo) {
         tracing::debug!(
             "Registering neural node {:?} with model {}",
             node_id,
@@ -106,7 +109,7 @@ impl NeuralNodeManager {
     }
 
     /// Unregisters a neural node.
-    pub fn unregister(&self, node_id: &NodeId) -> Option<NeuralNodeInfo> {
+    pub(crate) fn unregister(&self, node_id: &NodeId) -> Option<NeuralNodeInfo> {
         let result = self.nodes.remove(node_id).map(|(_, v)| v);
         if result.is_some() {
             tracing::debug!("Unregistered neural node {:?}", node_id);
@@ -119,13 +122,14 @@ impl NeuralNodeManager {
         self.nodes.contains_key(node_id)
     }
 
-    /// Retrieves metadata for a neural node.
-    pub fn get(&self, node_id: &NodeId) -> Option<NeuralNodeInfo> {
+    /// Retrieves metadata for a neural node (used in tests only).
+    #[allow(dead_code)]
+    pub(crate) fn get(&self, node_id: &NodeId) -> Option<NeuralNodeInfo> {
         self.nodes.get(node_id).map(|r| r.clone())
     }
 
     /// Get all neural nodes grouped by model_id.
-    pub fn group_by_model(&self) -> HashMap<NeuralModelId, Vec<NodeId>> {
+    pub(crate) fn group_by_model(&self) -> HashMap<NeuralModelId, Vec<NodeId>> {
         let mut groups: HashMap<NeuralModelId, Vec<NodeId>> = HashMap::new();
         for entry in self.nodes.iter() {
             groups.entry(entry.model_id).or_default().push(*entry.key());
@@ -133,30 +137,8 @@ impl NeuralNodeManager {
         groups
     }
 
-    /// Get all synth nodes grouped by model.
-    pub fn synths_by_model(&self) -> HashMap<NeuralModelId, Vec<NodeId>> {
-        let mut groups: HashMap<NeuralModelId, Vec<NodeId>> = HashMap::new();
-        for entry in self.nodes.iter() {
-            if entry.is_synth {
-                groups.entry(entry.model_id).or_default().push(*entry.key());
-            }
-        }
-        groups
-    }
-
-    /// Get all effect nodes grouped by model.
-    pub fn effects_by_model(&self) -> HashMap<NeuralModelId, Vec<NodeId>> {
-        let mut groups: HashMap<NeuralModelId, Vec<NodeId>> = HashMap::new();
-        for entry in self.nodes.iter() {
-            if !entry.is_synth {
-                groups.entry(entry.model_id).or_default().push(*entry.key());
-            }
-        }
-        groups
-    }
-
     /// Get all registered node IDs.
-    pub fn all_nodes(&self) -> Vec<NodeId> {
+    pub(crate) fn all_nodes(&self) -> Vec<NodeId> {
         self.nodes.iter().map(|e| *e.key()).collect()
     }
 
@@ -273,16 +255,6 @@ mod tests {
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[&model_a].len(), 2);
         assert_eq!(groups[&model_b].len(), 1);
-
-        // Test synths_by_model
-        let synths = registry.synths_by_model();
-        assert_eq!(synths.len(), 1);
-        assert_eq!(synths[&model_a].len(), 2);
-
-        // Test effects_by_model
-        let effects = registry.effects_by_model();
-        assert_eq!(effects.len(), 1);
-        assert_eq!(effects[&model_b].len(), 1);
     }
 
     #[test]

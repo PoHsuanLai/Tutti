@@ -4,13 +4,13 @@
 
 /// Represents a position in musical time
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
-pub struct MusicalPosition {
-    pub beats: f64,
+pub(crate) struct MusicalPosition {
+    pub(crate) beats: f64,
 }
 
 impl MusicalPosition {
     #[inline]
-    pub const fn from_beats(beats: f64) -> Self {
+    pub(crate) const fn from_beats(beats: f64) -> Self {
         Self { beats }
     }
 }
@@ -55,14 +55,14 @@ impl core::ops::Sub<MusicalPosition> for MusicalPosition {
 
 /// A loop range defined by start and end positions in beats
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LoopRange {
-    pub start: f64,
-    pub end: f64,
+pub(crate) struct LoopRange {
+    pub(crate) start: f64,
+    pub(crate) end: f64,
 }
 
 impl LoopRange {
     #[inline]
-    pub const fn new(start: f64, end: f64) -> Self {
+    pub(crate) const fn new(start: f64, end: f64) -> Self {
         Self { start, end }
     }
 }

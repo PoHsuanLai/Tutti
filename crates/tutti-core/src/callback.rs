@@ -8,19 +8,19 @@ use fundsp::realnet::NetBackend;
 
 /// State for the real-time audio callback.
 /// Uses `UnsafeCell` for interior mutability. Only access from the audio thread.
-pub struct AudioCallbackState {
-    pub transport: Arc<TransportManager>,
+pub(crate) struct AudioCallbackState {
+    pub(crate) transport: Arc<TransportManager>,
     net_backend: UnsafeCell<Option<NetBackend>>,
-    pub metering: Arc<MeteringManager>,
-    pub sample_position: AtomicU64,
-    pub sample_rate: f64,
+    pub(crate) metering: Arc<MeteringManager>,
+    pub(crate) sample_position: AtomicU64,
+    pub(crate) sample_rate: f64,
 }
 
 unsafe impl Send for AudioCallbackState {}
 unsafe impl Sync for AudioCallbackState {}
 
 impl AudioCallbackState {
-    pub fn new(
+    pub(crate) fn new(
         transport: Arc<TransportManager>,
         metering: Arc<MeteringManager>,
         sample_rate: f64,
@@ -34,13 +34,13 @@ impl AudioCallbackState {
         }
     }
 
-    pub fn set_net_backend(&mut self, backend: NetBackend) {
+    pub(crate) fn set_net_backend(&mut self, backend: NetBackend) {
         unsafe { *self.net_backend.get() = Some(backend) }
     }
 
     #[inline]
     #[allow(clippy::mut_from_ref)]
-    pub unsafe fn net_backend_mut(&self) -> &mut Option<NetBackend> {
+    pub(crate) unsafe fn net_backend_mut(&self) -> &mut Option<NetBackend> {
         &mut *self.net_backend.get()
     }
 }

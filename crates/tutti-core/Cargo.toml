@@ -18,7 +18,7 @@ std = ["fundsp/std", "fundsp/files", "dep:cpal"]
 
 # Optional subsystems
 neural = []
-midi = ["dep:tutti-midi-io"]
+midi = ["dep:midi-msg"]
 
 [dependencies]
 thiserror = "2"
@@ -31,8 +31,8 @@ cpal = { version = "0.15", optional = true }
 fundsp = { package = "fundsp-tutti", version = "0.23.0", path = "../fundsp-tutti", default-features = false }
 audio-automation = "0.1"
 
-# MIDI types (for trait only, no I/O dependency)
-tutti-midi-io = { path = "../tutti-midi-io", default-features = false, optional = true }
+# MIDI types (for MidiEvent definition)
+midi-msg = { version = "0.8", default-features = false, optional = true }
 
 # Lock-free (no_std compatible)
 crossbeam-channel = "0.5"

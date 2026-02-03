@@ -6,9 +6,7 @@
 use crate::compat::Vec;
 use fundsp::prelude::AudioUnit;
 
-/// MIDI event type re-exported from tutti-midi-io
-/// This avoids tutti-core depending directly on tutti-midi-io for the trait definition
-pub type MidiEvent = tutti_midi_io::MidiEvent;
+use super::MidiEvent;
 
 /// Trait for audio units that can process MIDI events alongside audio.
 ///

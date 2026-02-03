@@ -1,211 +1,212 @@
 //! CPAL audio output wrapper (requires std).
 
-// CPAL requires std, so we need it here
 #[allow(unused_extern_crates)]
 extern crate std;
 
 use crate::callback::AudioCallbackState;
-use crate::compat::{String, ToString, Vec};
+use crate::compat::{String, Vec};
 use crate::{Error, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
-#[derive(Clone, Default)]
-pub struct AudioEngineConfig {
-    pub output_device_index: Option<usize>,
-}
-
-/// Wrapper to hold a `cpal::Stream` in a `Send` context.
+/// Wrapper to hold `cpal::Stream` in a `Send` context.
 ///
-/// `cpal::Stream` is `!Send` due to platform internals (`*mut ()`, non-Send closures).
-/// This is safe because `AudioEngine` is only accessed behind a `Mutex` in `TuttiSystem`,
-/// ensuring single-threaded access. The stream is never moved across threads directly —
-/// it lives for the lifetime of the engine and is dropped when the engine stops.
+/// # Safety
+/// `cpal::Stream` is `!Send` due to platform internals. This is safe because
+/// `AudioEngine` is only accessed behind a `Mutex` in `TuttiSystem`.
 struct StreamHandle(#[allow(dead_code)] cpal::Stream);
 
-// SAFETY: The stream is only accessed behind a Mutex<AudioEngine> in TuttiSystem,
-// so it's never concurrently accessed. It stays on the thread that created it
-// until AudioEngine is dropped.
 unsafe impl Send for StreamHandle {}
 
-pub struct AudioEngine {
+pub(crate) struct AudioEngine {
     sample_rate: f64,
     channels: usize,
     is_running: bool,
-    output_device_index: Option<usize>,
+    device_index: Option<usize>,
     _stream: Option<StreamHandle>,
 }
 
 impl AudioEngine {
-    pub fn new(config: AudioEngineConfig) -> Result<Self> {
-        let device = Self::get_device(config.output_device_index)?;
-        let output_config = device.default_output_config()?;
+    pub(crate) fn new(device_index: Option<usize>) -> Result<Self> {
+        let device = get_device(device_index)?;
+        let config = device.default_output_config()?;
 
         Ok(Self {
-            sample_rate: output_config.sample_rate().0 as f64,
-            channels: output_config.channels() as usize,
+            sample_rate: config.sample_rate().0 as f64,
+            channels: config.channels() as usize,
             is_running: false,
-            output_device_index: config.output_device_index,
+            device_index,
             _stream: None,
         })
     }
 
-    pub fn start(&mut self, state: AudioCallbackState) -> Result<()> {
+    pub(crate) fn start(&mut self, state: AudioCallbackState) -> Result<()> {
         if self.is_running {
             return Ok(());
         }
 
-        let device = Self::get_device(self.output_device_index)?;
+        let device = get_device(self.device_index)?;
         let config = device.default_output_config()?;
 
         let stream = match config.sample_format() {
-            cpal::SampleFormat::F32 => self.build_stream::<f32>(&device, &config.into(), state)?,
-            cpal::SampleFormat::I16 => self.build_stream::<i16>(&device, &config.into(), state)?,
-            cpal::SampleFormat::U16 => self.build_stream::<u16>(&device, &config.into(), state)?,
+            cpal::SampleFormat::F32 => build_stream::<f32>(&device, &config.into(), state)?,
+            cpal::SampleFormat::I16 => build_stream::<i16>(&device, &config.into(), state)?,
+            cpal::SampleFormat::U16 => build_stream::<u16>(&device, &config.into(), state)?,
             format => {
                 return Err(Error::InvalidConfig(format!(
-                    "Unsupported sample format: {:?}",
-                    format
+                    "Unsupported sample format: {format:?}"
                 )));
             }
         };
 
         stream.play()?;
-
         self._stream = Some(StreamHandle(stream));
         self.is_running = true;
 
         Ok(())
     }
 
-    fn get_device(index: Option<usize>) -> Result<cpal::Device> {
-        let host = cpal::default_host();
-
-        if let Some(idx) = index {
-            let devices: Vec<_> = host.output_devices()?.collect();
-
-            let device_count = devices.len();
-            devices.into_iter().nth(idx).ok_or_else(|| {
-                Error::InvalidDevice(format!(
-                    "Output device index {} out of range (available: {})",
-                    idx, device_count
-                ))
-            })
-        } else {
-            host.default_output_device()
-                .ok_or_else(|| Error::InvalidDevice("No output device available".to_string()))
-        }
-    }
-
-    fn build_stream<T>(
-        &self,
-        device: &cpal::Device,
-        config: &cpal::StreamConfig,
-        state: AudioCallbackState,
-    ) -> Result<cpal::Stream>
-    where
-        T: cpal::SizedSample + cpal::FromSample<f32>,
-    {
-        let channels = config.channels as usize;
-
-        // Pre-allocate reusable buffers outside the closure.
-        // These grow on the first callback if needed, then never reallocate.
-        let mut output_f32 = Vec::<f32>::new();
-        let mut lufs_left = Vec::<f32>::new();
-        let mut lufs_right = Vec::<f32>::new();
-
-        let stream = device.build_output_stream(
-            config,
-            move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    let frames = data.len() / channels;
-
-                    // Reuse pre-allocated buffer (only allocates on first call or size change)
-                    let needed = frames * 2;
-                    if output_f32.len() < needed {
-                        output_f32.resize(needed, 0.0);
-                    } else {
-                        output_f32[..needed].fill(0.0);
-                    }
-
-                    crate::callback::process_audio(&state, &mut output_f32[..needed]);
-
-                    // LUFS metering: pre-allocated buffers + non-blocking try_lock
-                    if state.metering.is_lufs_enabled() {
-                        if lufs_left.len() < frames {
-                            lufs_left.resize(frames, 0.0);
-                        }
-                        if lufs_right.len() < frames {
-                            lufs_right.resize(frames, 0.0);
-                        }
-                        for i in 0..frames {
-                            lufs_left[i] = output_f32[i * 2];
-                            lufs_right[i] = output_f32[i * 2 + 1];
-                        }
-                        // try_lock: skip this callback if UI thread is reading LUFS
-                        if let Some(mut ebur128) = state.metering.ebur128().try_lock() {
-                            let data: [&[f32]; 2] = [&lufs_left[..frames], &lufs_right[..frames]];
-                            let _ = ebur128.add_frames_planar_f32(&data);
-                        }
-                    }
-
-                    for (i, sample) in data.iter_mut().enumerate() {
-                        let channel = i % channels;
-                        let frame = i / channels;
-                        let value = if channel < 2 {
-                            output_f32.get(frame * 2 + channel).copied().unwrap_or(0.0)
-                        } else {
-                            0.0
-                        };
-                        *sample = T::from_sample(value);
-                    }
-                }));
-
-                if result.is_err() {
-                    // Panic in callback - output silence
-                    for sample in data.iter_mut() {
-                        *sample = T::from_sample(0.0);
-                    }
-                }
-            },
-            |_err| {
-                // Audio stream error - cannot log from callback
-            },
-            None,
-        )?;
-
-        Ok(stream)
-    }
-
-    pub fn set_output_device(&mut self, index: Option<usize>) {
-        self.output_device_index = index;
-    }
-
-    pub fn sample_rate(&self) -> f64 {
+    pub(crate) fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
 
-    pub fn channels(&self) -> usize {
+    pub(crate) fn channels(&self) -> usize {
         self.channels
     }
 
-    pub fn is_running(&self) -> bool {
+    pub(crate) fn is_running(&self) -> bool {
         self.is_running
     }
 
-    /// List available output devices.
-    pub fn list_output_devices() -> Result<Vec<String>> {
-        let host = cpal::default_host();
-        let devices: Result<Vec<String>> = host
-            .output_devices()?
-            .enumerate()
-            .map(|(idx, device)| Ok(format!("{}: {}", idx, device.name()?)))
-            .collect();
-        devices
+    pub(crate) fn set_device(&mut self, index: Option<usize>) {
+        self.device_index = index;
     }
 
-    /// Get the name of the current output device.
-    pub fn current_output_device_name(&self) -> Result<String> {
-        let device = Self::get_device(self.output_device_index)?;
-        Ok(device.name()?)
+    pub(crate) fn device_name(&self) -> Result<String> {
+        Ok(get_device(self.device_index)?.name()?)
+    }
+
+    pub(crate) fn list_devices() -> Result<Vec<String>> {
+        cpal::default_host()
+            .output_devices()?
+            .enumerate()
+            .map(|(i, d)| Ok(format!("{i}: {}", d.name()?)))
+            .collect()
+    }
+}
+
+fn get_device(index: Option<usize>) -> Result<cpal::Device> {
+    let host = cpal::default_host();
+
+    match index {
+        Some(i) => {
+            let devices: Vec<_> = host.output_devices()?.collect();
+            let count = devices.len();
+            devices.into_iter().nth(i).ok_or_else(|| {
+                Error::InvalidDevice(format!("Device index {i} out of range ({count} available)"))
+            })
+        }
+        None => host
+            .default_output_device()
+            .ok_or_else(|| Error::InvalidDevice("No output device available".into())),
+    }
+}
+
+fn build_stream<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    state: AudioCallbackState,
+) -> Result<cpal::Stream>
+where
+    T: cpal::SizedSample + cpal::FromSample<f32>,
+{
+    let channels = config.channels as usize;
+
+    // Pre-allocated buffers (grow on first callback, then stable)
+    let mut output_f32 = Vec::<f32>::new();
+    let mut lufs_left = Vec::<f32>::new();
+    let mut lufs_right = Vec::<f32>::new();
+
+    let stream = device.build_output_stream(
+        config,
+        move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let frames = data.len() / channels;
+
+                process_dsp(&state, frames, &mut output_f32);
+                update_lufs_metering(&state, frames, &output_f32, &mut lufs_left, &mut lufs_right);
+                write_output(data, channels, &output_f32);
+            }));
+
+            if result.is_err() {
+                output_silence(data);
+            }
+        },
+        |_err| {},
+        None,
+    )?;
+
+    Ok(stream)
+}
+
+/// Process DSP graph into stereo f32 buffer.
+#[inline]
+fn process_dsp(state: &AudioCallbackState, frames: usize, output: &mut Vec<f32>) {
+    let needed = frames * 2;
+    if output.len() < needed {
+        output.resize(needed, 0.0);
+    } else {
+        output[..needed].fill(0.0);
+    }
+    crate::callback::process_audio(state, &mut output[..needed]);
+}
+
+/// Update LUFS metering (non-blocking, skips if locked).
+#[inline]
+fn update_lufs_metering(
+    state: &AudioCallbackState,
+    frames: usize,
+    output: &[f32],
+    lufs_left: &mut Vec<f32>,
+    lufs_right: &mut Vec<f32>,
+) {
+    if !state.metering.is_lufs_enabled() {
+        return;
+    }
+
+    if lufs_left.len() < frames {
+        lufs_left.resize(frames, 0.0);
+        lufs_right.resize(frames, 0.0);
+    }
+
+    for i in 0..frames {
+        lufs_left[i] = output[i * 2];
+        lufs_right[i] = output[i * 2 + 1];
+    }
+
+    if let Some(mut ebur128) = state.metering.ebur128().try_lock() {
+        let _ = ebur128.add_frames_planar_f32(&[&lufs_left[..frames], &lufs_right[..frames]]);
+    }
+}
+
+/// Convert stereo f32 to output format and write to device buffer.
+#[inline]
+fn write_output<T: cpal::SizedSample + cpal::FromSample<f32>>(
+    data: &mut [T],
+    channels: usize,
+    output: &[f32],
+) {
+    for (i, sample) in data.iter_mut().enumerate() {
+        let frame = i / channels;
+        let ch = i % channels;
+        let value = if ch < 2 { output[frame * 2 + ch] } else { 0.0 };
+        *sample = T::from_sample(value);
+    }
+}
+
+/// Output silence (panic recovery).
+#[inline]
+fn output_silence<T: cpal::SizedSample + cpal::FromSample<f32>>(data: &mut [T]) {
+    for sample in data.iter_mut() {
+        *sample = T::from_sample(0.0);
     }
 }

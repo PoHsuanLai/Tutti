@@ -8,8 +8,9 @@ pub mod metadata;
 pub mod traits;
 
 // Re-export core types
-pub use graph_analyzer::{BatchingStrategy, GraphAnalyzer};
-pub use metadata::{NeuralModelId, NeuralNodeInfo, NeuralNodeManager, SharedNeuralNodeManager};
+pub use graph_analyzer::BatchingStrategy;
+pub(crate) use graph_analyzer::GraphAnalyzer;
+pub use metadata::{NeuralModelId, NeuralNodeManager, SharedNeuralNodeManager};
 pub use traits::{
     ArcNeuralEffectBuilder, ArcNeuralSynthBuilder, NeuralEffectBuilder, NeuralSynthBuilder,
 };

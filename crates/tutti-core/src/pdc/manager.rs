@@ -4,20 +4,6 @@ use crate::compat::{Arc, Vec};
 use crate::{AtomicBool, AtomicUsize, Ordering};
 use arc_swap::ArcSwap;
 
-#[derive(Debug, Clone, Copy)]
-pub struct ChannelLatencyInfo {
-    pub latency_samples: usize,
-    pub compensation_samples: usize,
-    pub max_system_latency: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ReturnLatencyInfo {
-    pub latency_samples: usize,
-    pub compensation_samples: usize,
-    pub max_system_latency: usize,
-}
-
 #[derive(Clone)]
 pub struct PdcState {
     pub channel_latencies: Vec<usize>,
@@ -57,7 +43,6 @@ pub struct PdcManager {
     state: ArcSwap<PdcState>,
     enabled: AtomicBool,
     max_allowed_latency: AtomicUsize,
-    version: crate::compat::AtomicU64,
 }
 
 impl PdcManager {
@@ -68,7 +53,6 @@ impl PdcManager {
             state: ArcSwap::from_pointee(PdcState::new(channel_count, return_count)),
             enabled: AtomicBool::new(true),
             max_allowed_latency: AtomicUsize::new(Self::DEFAULT_MAX_LATENCY),
-            version: crate::compat::AtomicU64::new(0),
         }
     }
 
@@ -95,10 +79,6 @@ impl PdcManager {
     pub fn get_snapshot(&self) -> Arc<PdcState> {
         self.state.load_full()
     }
-
-    // =========================================================================
-    // Track Latency Management (Main Thread Only)
-    // =========================================================================
 
     pub fn set_channel_latency(&self, channel_index: usize, latency_samples: usize) -> usize {
         // Validate latency bounds
@@ -132,10 +112,6 @@ impl PdcManager {
 
         // Swap state (lock-free for readers)
         self.state.store(Arc::new(new_state.clone()));
-
-        // Increment version for UI polling
-        self.version.fetch_add(1, Ordering::Release);
-
         new_state.channel_compensations[channel_index]
     }
 
@@ -155,14 +131,8 @@ impl PdcManager {
             new_state.channel_latencies[channel_index] = 0;
             new_state.recalculate();
             self.state.store(Arc::new(new_state));
-
-            // Increment version for UI polling
-            self.version.fetch_add(1, Ordering::Release);
         }
     }
-
-    // =========================================================================
-    // =========================================================================
 
     pub fn set_return_latency(&self, return_index: usize, latency_samples: usize) -> usize {
         // Validate latency bounds
@@ -196,10 +166,6 @@ impl PdcManager {
 
         // Swap state (lock-free for readers)
         self.state.store(Arc::new(new_state.clone()));
-
-        // Increment version for UI polling
-        self.version.fetch_add(1, Ordering::Release);
-
         new_state.return_compensations[return_index]
     }
 
@@ -222,10 +188,6 @@ impl PdcManager {
         }
     }
 
-    // =========================================================================
-    // Bulk Operations
-    // =========================================================================
-
     pub fn resize(&self, channel_count: usize, return_count: usize) {
         let mut new_state = self.state.load().as_ref().clone();
 
@@ -241,54 +203,6 @@ impl PdcManager {
         let state = self.state.load();
         let new_state = PdcState::new(state.channel_latencies.len(), state.return_latencies.len());
         self.state.store(Arc::new(new_state));
-
-        // Increment version for UI polling
-        self.version.fetch_add(1, Ordering::Release);
-    }
-
-    // =========================================================================
-    // UI Polling API (Lock-free)
-    // =========================================================================
-
-    #[inline]
-    pub fn current_version(&self) -> u64 {
-        self.version.load(Ordering::Acquire)
-    }
-
-    pub fn get_state_if_changed(&self, last_version: &mut u64) -> Option<Arc<PdcState>> {
-        let current = self.version.load(Ordering::Acquire);
-        if current != *last_version {
-            *last_version = current;
-            Some(self.state.load_full())
-        } else {
-            None
-        }
-    }
-
-    pub fn get_channel_info(&self, channel_index: usize) -> Option<ChannelLatencyInfo> {
-        let state = self.state.load();
-        if channel_index >= state.channel_latencies.len() {
-            return None;
-        }
-
-        Some(ChannelLatencyInfo {
-            latency_samples: state.channel_latencies[channel_index],
-            compensation_samples: state.channel_compensations[channel_index],
-            max_system_latency: state.max_latency,
-        })
-    }
-
-    pub fn get_return_info(&self, return_index: usize) -> Option<ReturnLatencyInfo> {
-        let state = self.state.load();
-        if return_index >= state.return_latencies.len() {
-            return None;
-        }
-
-        Some(ReturnLatencyInfo {
-            latency_samples: state.return_latencies[return_index],
-            compensation_samples: state.return_compensations[return_index],
-            max_system_latency: state.max_latency,
-        })
     }
 }
 

@@ -111,8 +111,6 @@ impl TransportHandle {
         }
     }
 
-    // ===== Tempo control =====
-
     /// Set tempo in BPM.
     pub fn tempo(self, bpm: f32) -> Self {
         self.transport.set_tempo(bpm);
@@ -123,8 +121,6 @@ impl TransportHandle {
     pub fn get_tempo(&self) -> f32 {
         self.transport.get_tempo()
     }
-
-    // ===== Transport control =====
 
     /// Start playback.
     pub fn play(self) -> Self {
@@ -186,8 +182,6 @@ impl TransportHandle {
         self
     }
 
-    // ===== Loop control =====
-
     /// Set loop range (start and end in beats).
     pub fn loop_range(self, start: f64, end: f64) -> Self {
         self.transport.set_loop_range_fsm(start, end);
@@ -228,8 +222,6 @@ impl TransportHandle {
         self.transport.is_loop_enabled()
     }
 
-    // ===== Position queries =====
-
     /// Get current beat position.
     pub fn current_beat(&self) -> f64 {
         self.transport.get_current_beat()
@@ -240,8 +232,6 @@ impl TransportHandle {
         self.transport.set_current_beat(beat);
         self
     }
-
-    // ===== State queries =====
 
     /// Check if transport is playing.
     pub fn is_playing(&self) -> bool {
@@ -278,14 +268,6 @@ impl TransportHandle {
         self.transport.motion_state()
     }
 
-    /// Check if paused (deprecated - use `is_stopped()` or `motion_state()`).
-    #[deprecated(since = "0.1.0", note = "Use is_stopped() or motion_state() instead")]
-    pub fn is_paused(&self) -> bool {
-        self.transport.is_paused()
-    }
-
-    // ===== Metronome access =====
-
     /// Get metronome handle for fluent configuration.
     ///
     /// # Example
@@ -298,8 +280,6 @@ impl TransportHandle {
     pub fn metronome(&self) -> MetronomeHandle {
         MetronomeHandle::new(self.metronome.clone())
     }
-
-    // ===== Access to underlying managers (advanced use) =====
 
     /// Get reference to underlying TransportManager for direct access.
     pub fn manager(&self) -> &Arc<TransportManager> {

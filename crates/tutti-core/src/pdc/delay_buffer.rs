@@ -179,8 +179,6 @@ mod tests {
         assert_eq!(buffer.process(3.0, 3.0), (0.0, 0.0));
     }
 
-    // ===== Batch Processing Tests =====
-
     #[test]
     fn test_batch_zero_delay() {
         let mut buffer = DelayBuffer::new(0);

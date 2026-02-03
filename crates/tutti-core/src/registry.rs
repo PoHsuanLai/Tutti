@@ -1,9 +1,7 @@
-//! Node Registry for Dynamic Node Creation
-//!
-//! Provides a global registry for creating audio nodes from string identifiers.
-//! This enables dynamic node creation from serialized data or scripting languages.
+//! Node registry for dynamic node creation.
 
 use crate::compat::{Arc, Box, HashMap, RwLock, String, ToString, Vec};
+use crate::error::NodeRegistryError;
 use fundsp::prelude::AudioUnit;
 
 /// Create a `NodeParams` HashMap with key-value pairs.
@@ -250,31 +248,6 @@ impl Clone for NodeRegistry {
             constructors: Arc::clone(&self.constructors),
         }
     }
-}
-
-/// Errors that can occur when using the registry
-#[derive(Debug, thiserror::Error)]
-pub enum NodeRegistryError {
-    #[error("Unknown node type: {0}")]
-    UnknownNodeType(String),
-
-    #[error("Missing required parameter: {0}")]
-    MissingParameter(String),
-
-    #[error("Invalid parameter value for '{0}': {1}")]
-    InvalidParameter(String, String),
-
-    #[error("Node construction failed: {0}")]
-    ConstructionFailed(String),
-
-    #[error("Neural error: {0}")]
-    Neural(String),
-
-    #[error("Plugin error: {0}")]
-    Plugin(String),
-
-    #[error("Failed to load audio file: {0}")]
-    AudioFileLoadError(String),
 }
 
 /// Helper to get a required parameter
