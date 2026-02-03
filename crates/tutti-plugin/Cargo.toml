@@ -67,10 +67,10 @@ tracing = "0.1"
 vst = { version = "0.3", optional = true }
 
 # CLAP plugin hosting (optional)
-clap-host = { path = "../../../clap-host", optional = true }
+clap-host = { git = "https://github.com/PoHsuanLai/clap-host", optional = true }
 
 # VST3 plugin hosting (optional)
-vst3-host = { path = "../../../vst3-host", optional = true }
+vst3-host = { git = "https://github.com/PoHsuanLai/vst3-host", optional = true }
 
 libloading = "0.8"
 
