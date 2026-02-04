@@ -190,7 +190,6 @@ struct ActiveNoteData {
 /// Recording buffer for all event types
 #[derive(Debug, Clone)]
 pub struct RecordingBuffer {
-    // === MIDI Events ===
     /// Completed MIDI note events (note on + note off received)
     pub midi_events: Vec<RecordedMidiEvent>,
 
@@ -209,14 +208,12 @@ pub struct RecordingBuffer {
     /// MIDI program change events
     pub program_change_events: Vec<RecordedProgramChangeEvent>,
 
-    // === MIDI 2.0 Events ===
     /// Per-note pitch bend events (MIDI 2.0 only)
     pub per_note_pitch_bend_events: Vec<RecordedPerNotePitchBendEvent>,
 
     /// Per-note controller events (MIDI 2.0 only)
     pub per_note_controller_events: Vec<RecordedPerNoteControllerEvent>,
 
-    // === Audio Events ===
     /// Audio sample chunks (chunked for efficiency)
     pub audio_chunks: VecDeque<RecordedAudioChunk>,
 
@@ -226,11 +223,9 @@ pub struct RecordingBuffer {
     /// Total audio sample count (frames)
     pub audio_frame_count: usize,
 
-    // === Pattern Events ===
     /// Pattern trigger events
     pub pattern_events: Vec<RecordedPatternEvent>,
 
-    // === Timeline Tracking ===
     /// Recording start beat
     pub start_beat: f64,
 
@@ -262,8 +257,6 @@ impl RecordingBuffer {
             sample_rate,
         }
     }
-
-    // === MIDI Recording Methods ===
 
     /// Record MIDI note on event (beat-only, for backwards compatibility)
     pub fn record_midi_note_on(&mut self, note: u8, velocity: u8, beat: f64, channel: u8) {
@@ -587,8 +580,6 @@ impl RecordingBuffer {
         self.current_beat = beat.max(self.current_beat);
     }
 
-    // === Audio Recording Methods ===
-
     /// Record stereo audio sample pair
     pub fn record_audio(&mut self, left: f32, right: f32, beat: f64) {
         if self.audio_chunks.is_empty()
@@ -610,8 +601,6 @@ impl RecordingBuffer {
         self.current_beat = beat.max(self.current_beat);
     }
 
-    // === Pattern Recording Methods ===
-
     /// Record pattern trigger event
     pub fn record_pattern_trigger(&mut self, symbol: String, step: u32, beat: f64, velocity: f32) {
         self.pattern_events.push(RecordedPatternEvent {
@@ -622,8 +611,6 @@ impl RecordingBuffer {
         });
         self.current_beat = beat.max(self.current_beat);
     }
-
-    // === Query Methods ===
 
     /// Get recording duration in beats
     pub fn duration_beats(&self) -> f64 {

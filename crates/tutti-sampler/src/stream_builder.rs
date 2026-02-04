@@ -1,5 +1,6 @@
 //! Stream and record builders for fluent API
 
+use crate::butler::PlayDirection;
 use crate::system::{CaptureSession, SamplerSystem};
 use std::path::PathBuf;
 
@@ -11,20 +12,20 @@ use std::path::PathBuf;
 /// ```ignore
 /// sampler.stream("long_audio.wav")
 ///     .channel(0)
-///     .gain(0.8)
-///     .speed(1.5)
-///     .start_sample(44100)
+///     .offset_samples(44100)
+///     .loop_samples(0, 88200)
+///     .crossfade_samples(256)
 ///     .start();
 /// ```
 pub struct StreamBuilder<'a> {
     sampler: Option<&'a SamplerSystem>,
     file_path: PathBuf,
     channel: usize,
-    start_sample: usize,
-    duration_samples: usize,
     offset_samples: usize,
+    loop_range: Option<(u64, u64)>,
+    crossfade_samples: usize,
+    direction: PlayDirection,
     speed: f32,
-    gain: f32,
 }
 
 impl<'a> StreamBuilder<'a> {
@@ -33,11 +34,11 @@ impl<'a> StreamBuilder<'a> {
             sampler: Some(sampler),
             file_path: file_path.into(),
             channel: 0,
-            start_sample: 0,
-            duration_samples: usize::MAX,
             offset_samples: 0,
+            loop_range: None,
+            crossfade_samples: 0,
+            direction: PlayDirection::Forward,
             speed: 1.0,
-            gain: 1.0,
         }
     }
 
@@ -47,11 +48,11 @@ impl<'a> StreamBuilder<'a> {
             sampler: None,
             file_path: PathBuf::new(),
             channel: 0,
-            start_sample: 0,
-            duration_samples: usize::MAX,
             offset_samples: 0,
+            loop_range: None,
+            crossfade_samples: 0,
+            direction: PlayDirection::Forward,
             speed: 1.0,
-            gain: 1.0,
         }
     }
 
@@ -61,33 +62,38 @@ impl<'a> StreamBuilder<'a> {
         self
     }
 
-    /// Set start sample position (default: 0).
-    pub fn start_sample(mut self, sample: usize) -> Self {
-        self.start_sample = sample;
-        self
-    }
-
-    /// Set duration in samples (default: entire file).
-    pub fn duration_samples(mut self, samples: usize) -> Self {
-        self.duration_samples = samples;
-        self
-    }
-
     /// Set offset in samples (default: 0).
     pub fn offset_samples(mut self, offset: usize) -> Self {
         self.offset_samples = offset;
         self
     }
 
-    /// Set playback speed multiplier (default: 1.0).
-    pub fn speed(mut self, speed: f32) -> Self {
-        self.speed = speed;
+    /// Set loop range in samples.
+    pub fn loop_samples(mut self, start: u64, end: u64) -> Self {
+        self.loop_range = Some((start, end));
         self
     }
 
-    /// Set gain/volume (default: 1.0).
-    pub fn gain(mut self, gain: f32) -> Self {
-        self.gain = gain;
+    /// Set crossfade length for smooth loop transitions (default: 0 = no crossfade).
+    pub fn crossfade_samples(mut self, samples: usize) -> Self {
+        self.crossfade_samples = samples;
+        self
+    }
+
+    /// Enable reverse playback.
+    pub fn reverse(mut self) -> Self {
+        self.direction = PlayDirection::Reverse;
+        self
+    }
+
+    /// Set playback speed (1.0 = normal, negative = reverse).
+    pub fn speed(mut self, speed: f32) -> Self {
+        if speed < 0.0 {
+            self.direction = PlayDirection::Reverse;
+            self.speed = speed.abs();
+        } else {
+            self.speed = speed;
+        }
         self
     }
 
@@ -95,15 +101,28 @@ impl<'a> StreamBuilder<'a> {
     ///
     /// No-op when sampler is disabled.
     pub fn start(self) {
-        if let Some(sampler) = self.sampler {
-            sampler
-                .stream_file(self.channel, self.file_path)
-                .start_sample(self.start_sample)
-                .duration_samples(self.duration_samples)
-                .offset_samples(self.offset_samples)
-                .speed(self.speed)
-                .gain(self.gain)
-                .start();
+        let Some(sampler) = self.sampler else {
+            return;
+        };
+
+        sampler
+            .stream_file(self.channel, self.file_path)
+            .offset_samples(self.offset_samples)
+            .start();
+
+        if let Some((start, end)) = self.loop_range {
+            sampler.set_loop_range_with_crossfade(self.channel, start, end, self.crossfade_samples);
+        }
+
+        if self.direction == PlayDirection::Reverse || (self.speed - 1.0).abs() > 0.001 {
+            sampler.set_speed(
+                self.channel,
+                if self.direction == PlayDirection::Reverse {
+                    -self.speed
+                } else {
+                    self.speed
+                },
+            );
         }
     }
 }

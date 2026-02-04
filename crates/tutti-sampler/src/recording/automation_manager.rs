@@ -32,10 +32,6 @@ impl AutomationManager {
         }
     }
 
-    // =========================================================================
-    // Global Control
-    // =========================================================================
-
     /// Enable or disable all automation
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
@@ -50,10 +46,6 @@ impl AutomationManager {
     pub fn set_default_config(&mut self, config: AutomationRecordingConfig) {
         self.default_config = config;
     }
-
-    // =========================================================================
-    // Lane Management
-    // =========================================================================
 
     /// Get or create a lane for the given target
     ///
@@ -133,10 +125,6 @@ impl AutomationManager {
         self.lanes.clear();
     }
 
-    // =========================================================================
-    // Value Access (Real-time Safe)
-    // =========================================================================
-
     /// Get the current value for a target at the given beat position
     ///
     /// Returns None if automation is disabled or the lane doesn't exist.
@@ -161,10 +149,6 @@ impl AutomationManager {
             .map(|target| self.lanes.get(target).map(|lane| lane.get_value_at(beat)))
             .collect()
     }
-
-    // =========================================================================
-    // State Control
-    // =========================================================================
 
     /// Set the automation state for a specific target
     pub fn set_state(&self, target: &AutomationTarget, state: AutomationState) {
@@ -197,10 +181,6 @@ impl AutomationManager {
         }
     }
 
-    // =========================================================================
-    // Recording Control
-    // =========================================================================
-
     /// Signal that a control has been "touched" (user started interacting)
     pub fn touch(&self, target: &AutomationTarget, beat: f64, value: f32) {
         if let Some(mut lane) = self.lanes.get_mut(target) {
@@ -228,10 +208,6 @@ impl AutomationManager {
             self.record(target, beat, *value);
         }
     }
-
-    // =========================================================================
-    // Envelope Manipulation
-    // =========================================================================
 
     /// Add a point to a specific lane
     pub fn add_point(&self, target: &AutomationTarget, point: AutomationPoint) {
@@ -268,10 +244,6 @@ impl AutomationManager {
         }
     }
 
-    // =========================================================================
-    // Bulk Operations
-    // =========================================================================
-
     /// Get all lanes for a specific node (by node_id)
     pub fn lanes_for_node(&self, node_id: u64) -> Vec<AutomationTarget> {
         self.lanes
@@ -307,10 +279,6 @@ impl AutomationManager {
             })
             .collect()
     }
-
-    // =========================================================================
-    // Snapshot/Restore
-    // =========================================================================
 
     /// Create a snapshot of all lanes (for undo/redo)
     pub fn snapshot(&self) -> AutomationSnapshot {

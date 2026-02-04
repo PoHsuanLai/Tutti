@@ -1,13 +1,14 @@
 //! Sampler system - unified API for streaming, recording, and butler operations.
 
 use crate::butler::{
-    ButlerCommand, CaptureBuffer, CaptureBufferProducer, CaptureId, FlushPriority, FlushRequest,
-    RegionBufferProducer, RegionId,
+    BufferConfig, ButlerCommand, CacheStats, CaptureBuffer, CaptureBufferProducer, CaptureId,
+    FlushRequest, IOMetricsSnapshot, LruCache, PlayDirection, TransportBridge,
 };
 use crate::error::Result;
 use crossbeam_channel::Sender;
 use std::path::PathBuf;
-use tutti_core::Wave;
+use std::sync::Arc;
+use tutti_core::{PdcManager, TransportManager};
 
 /// Complete sampler system with butler thread.
 pub struct SamplerSystem {
@@ -17,21 +18,24 @@ pub struct SamplerSystem {
     automation: std::sync::Arc<crate::recording::automation_manager::AutomationManager>,
     audio_input: std::sync::Arc<crate::audio_input::manager::AudioInputManager>,
     sample_rate: f64,
-    sample_cache: std::sync::Arc<dashmap::DashMap<std::path::PathBuf, std::sync::Arc<Wave>>>,
+    transport_bridge: Option<TransportBridge>,
+    pdc_manager: Option<Arc<PdcManager>>,
 }
 
 impl SamplerSystem {
     /// Create a new sampler system builder.
     pub fn builder(sample_rate: f64) -> SamplerSystemBuilder {
-        SamplerSystemBuilder { sample_rate }
+        SamplerSystemBuilder {
+            sample_rate,
+            buffer_config: BufferConfig::default(),
+            pdc_manager: None,
+        }
     }
 
     /// Get the sample rate.
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
-
-    // Butler operations
 
     /// Resume butler processing.
     pub fn run(&self) -> &Self {
@@ -57,8 +61,6 @@ impl SamplerSystem {
         self
     }
 
-    // Capture/Recording
-
     /// Create a new capture session for recording.
     pub fn create_capture(
         &self,
@@ -71,13 +73,8 @@ impl SamplerSystem {
         let id = CaptureId::generate();
         let file_path = file_path.into();
 
-        let (producer, consumer) = CaptureBuffer::new(
-            id,
-            file_path.clone(),
-            sample_rate,
-            channels,
-            buffer_ms as f32,
-        );
+        let (producer, consumer) =
+            CaptureBuffer::new(id, file_path.clone(), sample_rate, buffer_ms as f32);
 
         CaptureSession {
             id,
@@ -114,12 +111,10 @@ impl SamplerSystem {
     }
 
     /// Flush a capture buffer to disk.
-    pub fn flush_capture(&self, id: CaptureId, file_path: impl Into<PathBuf>) -> &Self {
-        let _ = self.butler_tx.send(ButlerCommand::Flush(FlushRequest {
-            capture_id: id,
-            file_path: file_path.into(),
-            priority: FlushPriority::Normal,
-        }));
+    pub fn flush_capture(&self, id: CaptureId) -> &Self {
+        let _ = self
+            .butler_tx
+            .send(ButlerCommand::Flush(FlushRequest::new(id)));
         self
     }
 
@@ -128,34 +123,6 @@ impl SamplerSystem {
         let _ = self.butler_tx.send(ButlerCommand::FlushAll);
         self
     }
-
-    // Region streaming
-
-    /// Register a region buffer producer.
-    pub fn register_region(&self, region_id: RegionId, producer: RegionBufferProducer) -> &Self {
-        let _ = self.butler_tx.send(ButlerCommand::RegisterProducer {
-            region_id,
-            producer,
-        });
-        self
-    }
-
-    /// Remove a region buffer.
-    pub fn remove_region(&self, region_id: RegionId) -> &Self {
-        let _ = self.butler_tx.send(ButlerCommand::RemoveRegion(region_id));
-        self
-    }
-
-    /// Seek a region to a new sample position.
-    pub fn seek_region(&self, region_id: RegionId, sample_offset: usize) -> &Self {
-        let _ = self.butler_tx.send(ButlerCommand::SeekRegion {
-            region_id,
-            sample_offset,
-        });
-        self
-    }
-
-    // File streaming
 
     /// Stream an audio file to a channel.
     pub fn stream_file(
@@ -167,11 +134,7 @@ impl SamplerSystem {
             butler_tx: self.butler_tx.clone(),
             channel_index,
             file_path: file_path.into(),
-            start_sample: 0,
-            duration_samples: usize::MAX,
             offset_samples: 0,
-            speed: 1.0,
-            gain: 1.0,
         }
     }
 
@@ -183,20 +146,128 @@ impl SamplerSystem {
         self
     }
 
-    /// Get butler command sender for advanced integration.
-    ///
-    /// This provides direct access to the butler command channel for advanced
-    /// use cases like tutti-export that need custom butler communication.
-    /// Most users should use the high-level SamplerSystem API instead.
-    pub fn command_sender(&self) -> Sender<ButlerCommand> {
-        self.butler_tx.clone()
+    /// Seek within a stream to a new position.
+    pub fn seek(&self, channel_index: usize, position_samples: u64) -> &Self {
+        let _ = self.butler_tx.send(ButlerCommand::SeekStream {
+            channel_index,
+            position_samples,
+        });
+        self
     }
 
-    /// Get sample cache (for preloading audio files).
-    pub fn sample_cache(
+    /// Set loop range for a stream (in samples).
+    pub fn set_loop_range(
         &self,
-    ) -> &std::sync::Arc<dashmap::DashMap<std::path::PathBuf, std::sync::Arc<Wave>>> {
-        &self.sample_cache
+        channel_index: usize,
+        start_samples: u64,
+        end_samples: u64,
+    ) -> &Self {
+        self.set_loop_range_with_crossfade(channel_index, start_samples, end_samples, 0)
+    }
+
+    /// Set loop range with crossfade for smooth transitions.
+    pub fn set_loop_range_with_crossfade(
+        &self,
+        channel_index: usize,
+        start_samples: u64,
+        end_samples: u64,
+        crossfade_samples: usize,
+    ) -> &Self {
+        let _ = self.butler_tx.send(ButlerCommand::SetLoopRange {
+            channel_index,
+            start_samples,
+            end_samples,
+            crossfade_samples,
+        });
+        self
+    }
+
+    /// Clear loop range for a stream.
+    pub fn clear_loop_range(&self, channel_index: usize) -> &Self {
+        let _ = self
+            .butler_tx
+            .send(ButlerCommand::ClearLoopRange { channel_index });
+        self
+    }
+
+    /// Set playback direction for a stream.
+    pub fn set_direction(&self, channel_index: usize, direction: PlayDirection) -> &Self {
+        let _ = self.butler_tx.send(ButlerCommand::SetVarispeed {
+            channel_index,
+            direction,
+            speed: 1.0,
+        });
+        self
+    }
+
+    /// Set playback speed for a stream.
+    pub fn set_speed(&self, channel_index: usize, speed: f32) -> &Self {
+        let direction = if speed < 0.0 {
+            PlayDirection::Reverse
+        } else {
+            PlayDirection::Forward
+        };
+        let _ = self.butler_tx.send(ButlerCommand::SetVarispeed {
+            channel_index,
+            direction,
+            speed: speed.abs(),
+        });
+        self
+    }
+
+    /// Get LRU cache for audio files.
+    ///
+    /// The cache automatically evicts least-recently-used entries when
+    /// limits are exceeded.
+    pub fn cache(&self) -> Option<Arc<LruCache>> {
+        self.butler.as_ref().map(|b| b.cache())
+    }
+
+    /// Get cache statistics.
+    pub fn cache_stats(&self) -> CacheStats {
+        self.butler
+            .as_ref()
+            .map(|b| b.cache().stats())
+            .unwrap_or(CacheStats {
+                entries: 0,
+                bytes: 0,
+                max_entries: 0,
+                max_bytes: 0,
+            })
+    }
+
+    /// Get I/O metrics snapshot.
+    ///
+    /// Returns statistics about disk I/O operations including:
+    /// - Bytes read/written
+    /// - Read/write operation counts
+    /// - Cache hit/miss rates
+    /// - Low buffer events
+    pub fn io_metrics(&self) -> IOMetricsSnapshot {
+        self.butler
+            .as_ref()
+            .map(|b| b.metrics().snapshot())
+            .unwrap_or_default()
+    }
+
+    /// Reset I/O metrics counters.
+    pub fn reset_io_metrics(&self) {
+        if let Some(butler) = self.butler.as_ref() {
+            butler.metrics().reset();
+        }
+    }
+
+    /// Get buffer fill level for a channel (0.0 to 1.0).
+    ///
+    /// Returns the current buffer fullness for disk streaming.
+    /// Values near 0.0 indicate the buffer is nearly empty and may underrun.
+    /// Returns `None` if the channel is not streaming.
+    pub fn buffer_fill(&self, channel_index: usize) -> Option<f32> {
+        let butler = self.butler.as_ref()?;
+        let states = butler.stream_states();
+        states
+            .get(&channel_index)
+            .map(|s| s.shared_state().buffer_fill())
     }
 
     /// Get the recording manager (for MIDI/audio recording).
@@ -216,7 +287,158 @@ impl SamplerSystem {
         &self.audio_input
     }
 
-    // Fluent API
+    /// Bind to a transport manager for synchronized playback.
+    ///
+    /// The transport bridge polls the transport manager and translates
+    /// state changes (play/stop/locate/loop) to butler commands.
+    /// Commands are broadcast to ALL active streaming channels.
+    pub fn bind_transport(&mut self, transport: Arc<TransportManager>) {
+        self.transport_bridge = None;
+
+        let stream_states = self
+            .butler
+            .as_ref()
+            .map(|b| b.stream_states())
+            .unwrap_or_else(|| std::sync::Arc::new(dashmap::DashMap::new()));
+
+        let bridge = TransportBridge::new(
+            transport,
+            self.butler_tx.clone(),
+            stream_states,
+            self.sample_rate,
+        );
+        self.transport_bridge = Some(bridge);
+    }
+
+    /// Unbind from transport manager.
+    pub fn unbind_transport(&mut self) {
+        self.transport_bridge = None;
+    }
+
+    /// Check if transport is bound.
+    pub fn has_transport(&self) -> bool {
+        self.transport_bridge.is_some()
+    }
+
+    /// Get a StreamingSamplerUnit for a channel.
+    ///
+    /// Returns None if:
+    /// - The channel is not currently streaming
+    /// - The butler thread is not running
+    ///
+    /// The returned unit can be inserted into a FunDSP graph for audio playback.
+    /// It will automatically receive varispeed and seeking updates from the butler.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Start streaming first
+    /// sampler.stream_file(0, "audio.wav").start();
+    ///
+    /// // Get the audio unit for the graph
+    /// if let Some(unit) = sampler.streaming_unit(0) {
+    ///     unit.play();
+    ///     // Insert unit into audio graph...
+    /// }
+    /// ```
+    pub fn streaming_unit(&self, channel_index: usize) -> Option<crate::StreamingSamplerUnit> {
+        let butler = self.butler.as_ref()?;
+        let stream_states = butler.stream_states();
+        let stream_state = stream_states.get(&channel_index)?;
+
+        if !stream_state.is_streaming() {
+            return None;
+        }
+
+        let consumer = stream_state.consumer()?;
+        let shared_state = stream_state.shared_state();
+
+        Some(crate::StreamingSamplerUnit::new(consumer, shared_state))
+    }
+
+    /// Check if a channel is currently streaming.
+    pub fn is_streaming(&self, channel_index: usize) -> bool {
+        let Some(butler) = self.butler.as_ref() else {
+            return false;
+        };
+        let stream_states = butler.stream_states();
+        stream_states
+            .get(&channel_index)
+            .map(|s| s.is_streaming())
+            .unwrap_or(false)
+    }
+
+    /// Get underrun count for a channel (resets counter after reading).
+    ///
+    /// Returns the number of buffer underruns since the last call.
+    /// Useful for monitoring disk I/O performance.
+    pub fn take_underruns(&self, channel_index: usize) -> u64 {
+        let Some(butler) = self.butler.as_ref() else {
+            return 0;
+        };
+        butler
+            .stream_states()
+            .get(&channel_index)
+            .map(|s| s.shared_state().take_underrun_count())
+            .unwrap_or(0)
+    }
+
+    /// Get total underruns across all channels (resets counters after reading).
+    ///
+    /// Returns the sum of underruns from all active streaming channels.
+    pub fn take_all_underruns(&self) -> u64 {
+        let Some(butler) = self.butler.as_ref() else {
+            return 0;
+        };
+        let states = butler.stream_states();
+        let mut total = 0u64;
+        for entry in states.iter() {
+            total += entry.value().shared_state().take_underrun_count();
+        }
+        total
+    }
+
+    /// Get current PDC preroll for a channel in samples.
+    ///
+    /// Returns the number of samples the butler is pre-rolling this stream
+    /// to compensate for plugin delay.
+    pub fn channel_pdc_preroll(&self, channel_index: usize) -> Option<u64> {
+        let butler = self.butler.as_ref()?;
+        let states = butler.stream_states();
+        states.get(&channel_index).map(|s| s.pdc_preroll())
+    }
+
+    /// Manually update PDC preroll for a channel.
+    ///
+    /// Normally PDC is managed automatically via the PdcManager, but this
+    /// allows manual override for testing or special cases.
+    pub fn update_pdc_preroll(&self, channel_index: usize, new_preroll: u64) -> &Self {
+        let _ = self.butler_tx.send(ButlerCommand::UpdatePdcPreroll {
+            channel_index,
+            new_preroll,
+        });
+        self
+    }
+
+    /// Check if PDC is enabled.
+    pub fn is_pdc_enabled(&self) -> bool {
+        self.pdc_manager
+            .as_ref()
+            .map(|pdc| pdc.is_enabled())
+            .unwrap_or(false)
+    }
+
+    /// Get the PDC manager (if set).
+    pub fn pdc_manager(&self) -> Option<&Arc<PdcManager>> {
+        self.pdc_manager.as_ref()
+    }
+
+    /// Create a new Auditioner for preview playback.
+    ///
+    /// The Auditioner uses a reserved internal channel for streaming
+    /// and the LRU cache for instant preview of recently-accessed files.
+    pub fn auditioner(self: &Arc<Self>) -> crate::auditioner::Auditioner {
+        crate::auditioner::Auditioner::new(Arc::clone(self))
+    }
 
     /// Stream an audio file with fluent API.
     ///
@@ -260,7 +482,8 @@ impl SamplerSystem {
 
 impl Drop for SamplerSystem {
     fn drop(&mut self) {
-        // Shutdown butler thread gracefully
+        self.transport_bridge = None;
+
         if let Some(mut butler) = self.butler.take() {
             butler.stop();
         }
@@ -270,38 +493,57 @@ impl Drop for SamplerSystem {
 /// Builder for SamplerSystem.
 pub struct SamplerSystemBuilder {
     sample_rate: f64,
+    buffer_config: BufferConfig,
+    pdc_manager: Option<Arc<PdcManager>>,
 }
 
 impl SamplerSystemBuilder {
+    /// Set buffer duration in seconds (default: 10.0).
+    pub fn buffer_seconds(mut self, seconds: f64) -> Self {
+        self.buffer_config = BufferConfig::with_buffer_seconds(seconds);
+        self
+    }
+
+    /// Set full buffer configuration.
+    pub fn buffer_config(mut self, config: BufferConfig) -> Self {
+        self.buffer_config = config;
+        self
+    }
+
+    /// Set PDC manager for automatic delay compensation.
+    ///
+    /// When set, the butler thread will automatically apply preroll
+    /// to streams based on channel latency compensation values.
+    pub fn pdc_manager(mut self, pdc: Arc<PdcManager>) -> Self {
+        self.pdc_manager = Some(pdc);
+        self
+    }
+
     /// Build the sampler system (starts butler thread).
     pub fn build(self) -> Result<SamplerSystem> {
-        // Create sample cache for loaded audio files
-        let sample_cache = std::sync::Arc::new(dashmap::DashMap::new());
-
-        // Create and start butler thread
-        let mut butler = crate::butler::ButlerThread::new(
-            sample_cache.clone(),
+        let mut butler = crate::butler::ButlerThread::with_config(
             256, // command channel capacity
             self.sample_rate,
+            self.buffer_config,
         );
+
+        if let Some(ref pdc) = self.pdc_manager {
+            butler = butler.with_pdc(Arc::clone(pdc));
+        }
 
         let butler_tx = butler.command_sender();
 
-        // Start the butler thread
         butler.start();
 
-        // Create RecordingManager
         let recording = std::sync::Arc::new(crate::recording::manager::RecordingManager::new(
             64, // max recording channels
             butler_tx.clone(),
             self.sample_rate,
         ));
 
-        // Create AutomationManager
         let automation =
             std::sync::Arc::new(crate::recording::automation_manager::AutomationManager::new());
 
-        // Create AudioInputManager
         let audio_input = std::sync::Arc::new(crate::audio_input::manager::AudioInputManager::new(
             self.sample_rate as u32,
         ));
@@ -313,7 +555,8 @@ impl SamplerSystemBuilder {
             automation,
             audio_input,
             sample_rate: self.sample_rate,
-            sample_cache,
+            transport_bridge: None,
+            pdc_manager: self.pdc_manager,
         })
     }
 }
@@ -366,41 +609,13 @@ pub struct StreamBuilder {
     butler_tx: Sender<ButlerCommand>,
     channel_index: usize,
     file_path: PathBuf,
-    start_sample: usize,
-    duration_samples: usize,
     offset_samples: usize,
-    speed: f32,
-    gain: f32,
 }
 
 impl StreamBuilder {
-    /// Set start sample position.
-    pub fn start_sample(mut self, sample: usize) -> Self {
-        self.start_sample = sample;
-        self
-    }
-
-    /// Set duration in samples.
-    pub fn duration_samples(mut self, samples: usize) -> Self {
-        self.duration_samples = samples;
-        self
-    }
-
     /// Set offset in samples.
     pub fn offset_samples(mut self, offset: usize) -> Self {
         self.offset_samples = offset;
-        self
-    }
-
-    /// Set playback speed.
-    pub fn speed(mut self, speed: f32) -> Self {
-        self.speed = speed;
-        self
-    }
-
-    /// Set gain.
-    pub fn gain(mut self, gain: f32) -> Self {
-        self.gain = gain;
         self
     }
 
@@ -409,11 +624,7 @@ impl StreamBuilder {
         let _ = self.butler_tx.send(ButlerCommand::StreamAudioFile {
             channel_index: self.channel_index,
             file_path: self.file_path,
-            start_sample: self.start_sample,
-            duration_samples: self.duration_samples,
             offset_samples: self.offset_samples,
-            speed: self.speed,
-            gain: self.gain,
         });
     }
 }
@@ -444,56 +655,119 @@ mod tests {
 
         sampler
             .stream_file(0, "/path/to/file.wav")
-            .start_sample(1000)
-            .duration_samples(44100)
-            .speed(1.5)
-            .gain(0.8)
+            .offset_samples(1000)
             .start();
     }
 
     #[test]
     fn test_tutti_export_compatibility() {
-        // Verify that the API needed by tutti-export is exposed
         let sampler = SamplerSystem::builder(44100.0).build().unwrap();
 
-        // tutti-export needs command_sender() for direct butler communication
-        let _command_sender = sampler.command_sender();
-
-        // tutti-export needs to create capture sessions
         let session = sampler.create_capture("/tmp/export.wav", 44100.0, 2, Some(5.0));
-        assert_eq!(session.id.0, session.id.0); // CaptureId is public
+        assert_eq!(session.id.0, session.id.0);
 
-        // tutti-export needs to start/stop captures
         let session = sampler.start_capture(session);
         sampler.stop_capture(session.id);
 
-        // tutti-export needs flush operations
         sampler.flush_all();
         sampler.wait_for_completion();
     }
 
     #[test]
     fn test_all_managers_initialized() {
-        // Verify that all managers are properly initialized
         let sampler = SamplerSystem::builder(44100.0).build().unwrap();
 
-        // Butler thread running
         assert!(sampler.butler.is_some());
         assert_eq!(sampler.sample_rate(), 44100.0);
 
-        // Recording manager accessible
         let _recording = sampler.recording();
 
-        // Automation manager accessible
         let automation = sampler.automation();
-        assert!(automation.is_enabled()); // Enabled by default
+        assert!(automation.is_enabled());
 
-        // Audio input manager accessible
         let audio_input = sampler.audio_input();
         assert!(!audio_input.is_capturing());
 
-        // Sample cache accessible
-        let cache = sampler.sample_cache();
-        assert!(cache.is_empty());
+        let cache = sampler.cache();
+        assert!(cache.is_some());
+        assert!(cache.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_io_metrics() {
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
+
+        let metrics = sampler.io_metrics();
+        assert_eq!(metrics.bytes_read, 0);
+        assert_eq!(metrics.bytes_written, 0);
+        assert_eq!(metrics.cache_hits, 0);
+        assert_eq!(metrics.cache_misses, 0);
+
+        assert!((metrics.cache_hit_rate() - 1.0).abs() < 0.001);
+
+        sampler.reset_io_metrics();
+    }
+
+    #[test]
+    fn test_cache_stats() {
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
+
+        let stats = sampler.cache_stats();
+        assert_eq!(stats.entries, 0);
+        assert_eq!(stats.bytes, 0);
+        assert_eq!(stats.max_entries, 64);
+        assert_eq!(stats.max_bytes, 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_streaming_unit_not_streaming() {
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
+
+        assert!(!sampler.is_streaming(0));
+        assert!(sampler.streaming_unit(0).is_none());
+    }
+
+    #[test]
+    fn test_underrun_monitoring() {
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
+
+        assert_eq!(sampler.take_underruns(0), 0);
+        assert_eq!(sampler.take_all_underruns(), 0);
+    }
+
+    #[test]
+    fn test_pdc_disabled_by_default() {
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
+
+        assert!(!sampler.is_pdc_enabled());
+        assert!(sampler.pdc_manager().is_none());
+        assert!(sampler.channel_pdc_preroll(0).is_none());
+    }
+
+    #[test]
+    fn test_pdc_manager_integration() {
+        use tutti_core::PdcManager;
+
+        let pdc = Arc::new(PdcManager::new(4, 2));
+        pdc.set_channel_latency(0, 100);
+        pdc.set_channel_latency(1, 200);
+
+        let sampler = SamplerSystem::builder(44100.0)
+            .pdc_manager(pdc.clone())
+            .build()
+            .unwrap();
+
+        assert!(sampler.is_pdc_enabled());
+        assert!(sampler.pdc_manager().is_some());
+        assert_eq!(pdc.max_latency(), 200);
+        assert_eq!(pdc.get_channel_compensation(0), 100);
+        assert_eq!(pdc.get_channel_compensation(1), 0);
+    }
+
+    #[test]
+    fn test_update_pdc_preroll_command() {
+        let sampler = SamplerSystem::builder(44100.0).build().unwrap();
+
+        sampler.update_pdc_preroll(0, 500);
     }
 }

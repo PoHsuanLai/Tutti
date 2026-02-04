@@ -1,20 +1,20 @@
 //! Recording session management and automation system.
+//!
+//! This module is internal to tutti-sampler. Access recording functionality
+//! through [`SamplerSystem::recording()`] and [`SamplerSystem::automation()`].
 
-pub mod config;
-pub mod events;
-pub mod manager;
-pub mod session;
+pub(crate) mod config;
+pub(crate) mod events;
+pub(crate) mod manager;
+pub(crate) mod session;
 
-// Automation modules
 mod automation_lane;
 pub(crate) mod automation_manager;
 mod automation_target;
 
-// Re-export recording types (for internal use within tutti-sampler)
 pub(crate) use config::{RecordingConfig, RecordingMode, RecordingSource};
 pub(crate) use events::RecordingBuffer;
-pub(crate) use session::{RecordedData, RecordingSession, RecordingState};
+pub(crate) use session::{PunchEvent, RecordedData, RecordingSession, RecordingState, XRunEvent};
 
-// Re-export automation types (for internal use)
 pub(crate) use automation_lane::{AutomationLane, AutomationRecordingConfig};
 pub(crate) use automation_target::AutomationTarget;

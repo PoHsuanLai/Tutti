@@ -10,7 +10,6 @@ use std::sync::Arc;
 ///
 /// # Example
 /// ```ignore
-/// // Always works - no Option<> unwrapping needed
 /// let sampler = engine.sampler();
 /// sampler.stream("file.wav").start();  // No-op if disabled
 /// sampler.run();  // No-op if disabled
@@ -26,7 +25,6 @@ impl SamplerHandle {
         Self { sampler }
     }
 
-    // High-level streaming (most common)
     /// Stream an audio file.
     ///
     /// Returns a builder for configuring the stream. When sampler is disabled,
@@ -39,7 +37,6 @@ impl SamplerHandle {
         }
     }
 
-    // Butler control
     /// Resume the butler thread for async I/O.
     ///
     /// No-op when sampler is disabled.
@@ -80,7 +77,6 @@ impl SamplerHandle {
         self
     }
 
-    // System info
     /// Get the sample rate.
     ///
     /// Returns 0.0 when sampler is disabled.
@@ -94,6 +90,13 @@ impl SamplerHandle {
     /// Check if sampler subsystem is enabled.
     pub fn is_enabled(&self) -> bool {
         self.sampler.is_some()
+    }
+
+    /// Create an auditioner for quick file preview.
+    ///
+    /// Returns None when sampler is disabled.
+    pub fn auditioner(&self) -> Option<crate::auditioner::Auditioner> {
+        self.sampler.as_ref().map(|s| s.auditioner())
     }
 
     /// Get reference to inner SamplerSystem (advanced use).

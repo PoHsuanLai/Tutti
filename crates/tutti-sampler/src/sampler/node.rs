@@ -1,13 +1,15 @@
 //! Sample playback nodes.
 //!
-//! - `SamplerUnit`: In-memory playback
+//! - `SamplerUnit`: In-memory playback with loop crossfade support
 //! - `StreamingSamplerUnit`: Disk streaming playback
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, Wave};
 
-/// In-memory sample playback.
+use crate::butler::LoopCrossfade;
+
+/// In-memory sample playback with optional loop crossfade.
 pub struct SamplerUnit {
     wave: Arc<Wave>,
     position: AtomicU64,
@@ -21,6 +23,15 @@ pub struct SamplerUnit {
     speed: f32,
 
     sample_rate: f32,
+
+    /// SRC ratio: file_sample_rate / session_sample_rate. 1.0 = no conversion.
+    src_ratio: f32,
+
+    /// Loop range (start, end) in samples. If None, loops entire sample.
+    loop_range: Option<(u64, u64)>,
+
+    /// Crossfade for smooth loop transitions.
+    crossfade: Option<LoopCrossfade>,
 }
 
 impl Clone for SamplerUnit {
@@ -33,6 +44,9 @@ impl Clone for SamplerUnit {
             gain: self.gain,
             speed: self.speed,
             sample_rate: self.sample_rate,
+            src_ratio: self.src_ratio,
+            loop_range: self.loop_range,
+            crossfade: self.crossfade.clone(),
         }
     }
 }
@@ -49,6 +63,9 @@ impl SamplerUnit {
             gain: 1.0,
             speed: 1.0,
             sample_rate,
+            src_ratio: 1.0,
+            loop_range: None,
+            crossfade: None,
         }
     }
 
@@ -63,6 +80,9 @@ impl SamplerUnit {
             gain,
             speed,
             sample_rate,
+            src_ratio: 1.0,
+            loop_range: None,
+            crossfade: None,
         }
     }
 
@@ -113,6 +133,85 @@ impl SamplerUnit {
         self.wave.duration()
     }
 
+    /// Set session sample rate for automatic SRC.
+    /// Calculates src_ratio from the wave's sample rate vs session rate.
+    pub fn set_session_sample_rate(&mut self, session_rate: f64) {
+        let file_rate = self.wave.sample_rate();
+        self.src_ratio = if (file_rate - session_rate).abs() < 0.01 {
+            1.0
+        } else {
+            (file_rate / session_rate) as f32
+        };
+    }
+
+    /// Set loop range in samples with optional crossfade.
+    ///
+    /// When crossfade_samples > 0, samples from loop_start are captured
+    /// and blended with samples at loop_end for smooth transitions.
+    pub fn set_loop_range(&mut self, loop_start: u64, loop_end: u64, crossfade_samples: usize) {
+        self.loop_range = Some((loop_start, loop_end));
+        self.looping.store(true, Ordering::Relaxed);
+
+        if crossfade_samples > 0 {
+            let mut xfade = LoopCrossfade::new(crossfade_samples);
+
+            // Capture samples from loop start for crossfading
+            let mut preloop_samples = Vec::with_capacity(crossfade_samples);
+            for i in 0..crossfade_samples {
+                let pos = loop_start as f64 + i as f64;
+                preloop_samples.push(self.get_sample_raw(pos));
+            }
+            xfade.fill_preloop(&preloop_samples);
+
+            self.crossfade = Some(xfade);
+        } else {
+            self.crossfade = None;
+        }
+    }
+
+    /// Clear loop range.
+    pub fn clear_loop_range(&mut self) {
+        self.loop_range = None;
+        self.crossfade = None;
+    }
+
+    /// Get loop range.
+    pub fn loop_range(&self) -> Option<(u64, u64)> {
+        self.loop_range
+    }
+
+    /// Get sample without gain applied (for crossfade buffer capture).
+    #[inline]
+    fn get_sample_raw(&self, position: f64) -> (f32, f32) {
+        let len = self.wave.len() as f64;
+        if position >= len {
+            return (0.0, 0.0);
+        }
+
+        let idx = position.floor() as usize;
+        let frac = position.fract() as f32;
+
+        let (l0, r0) = if self.wave.channels() >= 2 {
+            (self.wave.at(0, idx), self.wave.at(1, idx))
+        } else {
+            let mono = self.wave.at(0, idx);
+            (mono, mono)
+        };
+
+        let next_idx = (idx + 1).min(self.wave.len().saturating_sub(1));
+        let (l1, r1) = if self.wave.channels() >= 2 {
+            (self.wave.at(0, next_idx), self.wave.at(1, next_idx))
+        } else {
+            let mono = self.wave.at(0, next_idx);
+            (mono, mono)
+        };
+
+        let left = l0 + (l1 - l0) * frac;
+        let right = r0 + (r1 - r0) * frac;
+
+        (left, right)
+    }
+
     #[inline]
     fn get_sample(&self, position: f64) -> (f32, f32) {
         let len = self.wave.len() as f64;
@@ -123,7 +222,6 @@ impl SamplerUnit {
         let idx = position.floor() as usize;
         let frac = position.fract() as f32;
 
-        // Get current sample
         let (l0, r0) = if self.wave.channels() >= 2 {
             (self.wave.at(0, idx), self.wave.at(1, idx))
         } else {
@@ -131,7 +229,6 @@ impl SamplerUnit {
             (mono, mono)
         };
 
-        // Get next sample for interpolation
         let next_idx = (idx + 1).min(self.wave.len().saturating_sub(1));
         let (l1, r1) = if self.wave.channels() >= 2 {
             (self.wave.at(0, next_idx), self.wave.at(1, next_idx))
@@ -140,7 +237,6 @@ impl SamplerUnit {
             (mono, mono)
         };
 
-        // Linear interpolation
         let left = l0 + (l1 - l0) * frac;
         let right = r0 + (r1 - r0) * frac;
 
@@ -150,11 +246,11 @@ impl SamplerUnit {
 
 impl AudioUnit for SamplerUnit {
     fn inputs(&self) -> usize {
-        0 // Sampler generates audio, no inputs
+        0
     }
 
     fn outputs(&self) -> usize {
-        2 // Stereo output
+        2
     }
 
     fn reset(&mut self) {
@@ -168,7 +264,6 @@ impl AudioUnit for SamplerUnit {
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
         if !self.playing.load(Ordering::Relaxed) {
-            // Not playing - output silence
             if output.len() >= 2 {
                 output[0] = 0.0;
                 output[1] = 0.0;
@@ -176,31 +271,47 @@ impl AudioUnit for SamplerUnit {
             return;
         }
 
-        // Get current position as float
         let pos_bits = self.position.load(Ordering::Relaxed);
         let pos = f64::from_bits(pos_bits);
 
-        // Get sample with interpolation
-        let (left, right) = self.get_sample(pos);
+        let (mut left, mut right) = self.get_sample(pos);
+
+        let (loop_start, loop_end) = self
+            .loop_range
+            .map(|(s, e)| (s as f64, e as f64))
+            .unwrap_or((0.0, self.wave.len() as f64));
+
+        if let Some(ref mut xfade) = self.crossfade {
+            let crossfade_start = loop_end - xfade.len() as f64;
+            if pos >= crossfade_start && pos < loop_end && !xfade.is_active() {
+                xfade.start();
+            }
+            if xfade.is_active() {
+                let sample = xfade.process((left, right));
+                left = sample.0;
+                right = sample.1;
+            }
+        }
 
         if output.len() >= 2 {
             output[0] = left;
             output[1] = right;
         }
 
-        // Advance position
-        let new_pos = pos + self.speed as f64;
-        let len = self.wave.len() as f64;
+        let new_pos = pos + (self.speed * self.src_ratio) as f64;
 
-        if new_pos >= len {
+        if new_pos >= loop_end {
             if self.looping.load(Ordering::Relaxed) {
-                // Wrap around
-                let wrapped = new_pos % len;
+                let overshoot = new_pos - loop_end;
+                let wrapped = loop_start + overshoot;
                 self.position.store(wrapped.to_bits(), Ordering::Relaxed);
+
+                if let Some(ref mut xfade) = self.crossfade {
+                    xfade.reset();
+                }
             } else {
-                // Stop playback
                 self.playing.store(false, Ordering::Relaxed);
-                self.position.store(len.to_bits(), Ordering::Relaxed);
+                self.position.store(loop_end.to_bits(), Ordering::Relaxed);
             }
         } else {
             self.position.store(new_pos.to_bits(), Ordering::Relaxed);
@@ -209,7 +320,6 @@ impl AudioUnit for SamplerUnit {
 
     fn process(&mut self, size: usize, _input: &BufferRef, output: &mut BufferMut) {
         if !self.playing.load(Ordering::Relaxed) {
-            // Not playing - output silence
             for i in 0..size {
                 output.set_f32(0, i, 0.0);
                 output.set_f32(1, i, 0.0);
@@ -218,18 +328,32 @@ impl AudioUnit for SamplerUnit {
         }
 
         let mut pos_bits = self.position.load(Ordering::Relaxed);
-        let len = self.wave.len() as f64;
         let looping = self.looping.load(Ordering::Relaxed);
+
+        let (loop_start, loop_end) = self
+            .loop_range
+            .map(|(s, e)| (s as f64, e as f64))
+            .unwrap_or((0.0, self.wave.len() as f64));
+
+        let crossfade_start = self
+            .crossfade
+            .as_ref()
+            .map(|xf| loop_end - xf.len() as f64)
+            .unwrap_or(loop_end);
 
         for i in 0..size {
             let pos = f64::from_bits(pos_bits);
 
-            if pos >= len {
+            if pos >= loop_end {
                 if looping {
-                    let wrapped = pos % len;
+                    let overshoot = pos - loop_end;
+                    let wrapped = loop_start + overshoot;
                     pos_bits = wrapped.to_bits();
+
+                    if let Some(ref mut xfade) = self.crossfade {
+                        xfade.reset();
+                    }
                 } else {
-                    // Stop and output silence for remaining samples
                     self.playing.store(false, Ordering::Relaxed);
                     for j in i..size {
                         output.set_f32(0, j, 0.0);
@@ -239,12 +363,24 @@ impl AudioUnit for SamplerUnit {
                 }
             }
 
-            let (left, right) = self.get_sample(f64::from_bits(pos_bits));
+            let current_pos = f64::from_bits(pos_bits);
+            let (mut left, mut right) = self.get_sample(current_pos);
+
+            if let Some(ref mut xfade) = self.crossfade {
+                if current_pos >= crossfade_start && current_pos < loop_end && !xfade.is_active() {
+                    xfade.start();
+                }
+                if xfade.is_active() {
+                    let sample = xfade.process((left, right));
+                    left = sample.0;
+                    right = sample.1;
+                }
+            }
+
             output.set_f32(0, i, left);
             output.set_f32(1, i, right);
 
-            // Advance position
-            let new_pos = f64::from_bits(pos_bits) + self.speed as f64;
+            let new_pos = current_pos + (self.speed * self.src_ratio) as f64;
             pos_bits = new_pos.to_bits();
         }
 
@@ -252,7 +388,6 @@ impl AudioUnit for SamplerUnit {
     }
 
     fn get_id(&self) -> u64 {
-        // Use wave pointer as unique ID
         Arc::as_ptr(&self.wave) as *const () as usize as u64
     }
 
@@ -265,7 +400,6 @@ impl AudioUnit for SamplerUnit {
     }
 
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
-        // Sampler outputs signal, doesn't route
         SignalFrame::new(2)
     }
 
@@ -276,10 +410,20 @@ impl AudioUnit for SamplerUnit {
 
 mod streaming {
     use super::*;
-    use crate::butler::RegionBufferConsumer;
+    use crate::butler::{RegionBufferConsumer, SharedStreamState};
     use parking_lot::Mutex;
 
-    /// Disk streaming sampler.
+    /// Cubic Hermite interpolation for smooth varispeed playback.
+    #[inline]
+    pub(super) fn cubic_hermite(y0: f32, y1: f32, y2: f32, y3: f32, t: f32) -> f32 {
+        let c0 = y1;
+        let c1 = 0.5 * (y2 - y0);
+        let c2 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+        let c3 = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+        ((c3 * t + c2) * t + c1) * t + c0
+    }
+
+    /// Disk streaming sampler with varispeed and seeking support.
     pub struct StreamingSamplerUnit {
         consumer: Arc<Mutex<RegionBufferConsumer>>,
         playing: AtomicBool,
@@ -289,6 +433,15 @@ mod streaming {
 
         /// Sample rate
         sample_rate: f32,
+
+        /// Shared state for cross-thread communication (speed, direction, seeking).
+        shared_state: Option<Arc<SharedStreamState>>,
+
+        /// Fractional position for sub-sample interpolation.
+        fractional_pos: f64,
+
+        /// History buffer for cubic Hermite interpolation (last 4 samples).
+        history: [(f32, f32); 4],
     }
 
     impl Clone for StreamingSamplerUnit {
@@ -298,22 +451,43 @@ mod streaming {
                 playing: AtomicBool::new(self.playing.load(Ordering::Relaxed)),
                 gain: self.gain,
                 sample_rate: self.sample_rate,
+                shared_state: self.shared_state.clone(),
+                fractional_pos: self.fractional_pos,
+                history: self.history,
             }
         }
     }
 
     impl StreamingSamplerUnit {
-        /// Create a new streaming sampler
+        /// Create a new streaming sampler with shared state for varispeed/seeking.
         ///
-        /// # Arguments
-        /// * `consumer` - Ring buffer consumer from Butler
-        /// * `sample_rate` - Audio sample rate
-        pub fn new(consumer: Arc<Mutex<RegionBufferConsumer>>, sample_rate: f32) -> Self {
+        /// Use `SamplerSystem::streaming_unit()` to get a fully configured unit,
+        /// or create manually from `ChannelStreamState::consumer()` and `shared_state()`.
+        pub fn new(
+            consumer: Arc<Mutex<RegionBufferConsumer>>,
+            shared_state: Arc<SharedStreamState>,
+        ) -> Self {
             Self {
                 consumer,
                 playing: AtomicBool::new(false),
                 gain: 1.0,
-                sample_rate,
+                sample_rate: 44100.0,
+                shared_state: Some(shared_state),
+                fractional_pos: 0.0,
+                history: [(0.0, 0.0); 4],
+            }
+        }
+
+        /// Create a basic streaming sampler without varispeed support.
+        pub fn new_basic(consumer: Arc<Mutex<RegionBufferConsumer>>) -> Self {
+            Self {
+                consumer,
+                playing: AtomicBool::new(false),
+                gain: 1.0,
+                sample_rate: 44100.0,
+                shared_state: None,
+                fractional_pos: 0.0,
+                history: [(0.0, 0.0); 4],
             }
         }
 
@@ -336,6 +510,103 @@ mod streaming {
         pub fn set_gain(&mut self, gain: f32) {
             self.gain = gain;
         }
+
+        /// Shift history buffer for new sample.
+        #[inline]
+        fn shift_history(&mut self) {
+            self.history[0] = self.history[1];
+            self.history[1] = self.history[2];
+            self.history[2] = self.history[3];
+        }
+
+        /// Reset interpolation state (call after seek).
+        pub fn reset_interpolation(&mut self) {
+            self.fractional_pos = 0.0;
+            self.history = [(0.0, 0.0); 4];
+        }
+
+        /// Process normal playback samples (internal helper).
+        ///
+        /// `size` is the number of samples to process.
+        /// `offset` is the starting index in the output buffer.
+        fn process_normal_samples(&mut self, size: usize, offset: usize, output: &mut BufferMut) {
+            if size == 0 {
+                return;
+            }
+
+            let src_ratio = self
+                .shared_state
+                .as_ref()
+                .map(|s| s.src_ratio())
+                .unwrap_or(1.0) as f64;
+            let base_speed = self
+                .shared_state
+                .as_ref()
+                .map(|s| s.effective_speed())
+                .unwrap_or(1.0) as f64
+                * src_ratio;
+
+            let samples_needed = (size as f64 * base_speed).ceil() as usize + 4;
+            let mut fetched_samples = Vec::with_capacity(samples_needed);
+
+            if let Some(mut guard) = self.consumer.try_lock() {
+                for _ in 0..samples_needed {
+                    if let Some((left, right)) = guard.read() {
+                        fetched_samples.push((left * self.gain, right * self.gain));
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            let mut fetch_idx = 0;
+            for i in 0..size {
+                let speed = self
+                    .shared_state
+                    .as_ref()
+                    .map(|s| {
+                        s.advance_speed_ramp();
+                        s.effective_speed() as f64 * s.src_ratio() as f64
+                    })
+                    .unwrap_or(1.0);
+
+                self.fractional_pos += speed;
+
+                while self.fractional_pos >= 1.0 {
+                    self.fractional_pos -= 1.0;
+                    self.shift_history();
+
+                    if fetch_idx < fetched_samples.len() {
+                        self.history[3] = fetched_samples[fetch_idx];
+                        fetch_idx += 1;
+                    } else {
+                        if let Some(ref state) = self.shared_state {
+                            state.report_underrun();
+                        }
+                        self.history[3] = self.history[2];
+                    }
+                }
+
+                let t = self.fractional_pos as f32;
+                let left = cubic_hermite(
+                    self.history[0].0,
+                    self.history[1].0,
+                    self.history[2].0,
+                    self.history[3].0,
+                    t,
+                );
+                let right = cubic_hermite(
+                    self.history[0].1,
+                    self.history[1].1,
+                    self.history[2].1,
+                    self.history[3].1,
+                    t,
+                );
+
+                output.set_f32(0, offset + i, left);
+                output.set_f32(1, offset + i, right);
+            }
+        }
     }
 
     impl AudioUnit for StreamingSamplerUnit {
@@ -349,6 +620,7 @@ mod streaming {
 
         fn reset(&mut self) {
             self.playing.store(false, Ordering::Relaxed);
+            self.reset_interpolation();
         }
 
         fn set_sample_rate(&mut self, sample_rate: f64) {
@@ -364,26 +636,75 @@ mod streaming {
                 return;
             }
 
-            // Try to lock consumer (should be fast since butler doesn't hold it long)
-            if let Some(mut guard) = self.consumer.try_lock() {
-                if let Some((left, right)) = guard.read() {
+            if let Some(ref state) = self.shared_state {
+                if let Some((left, right)) = state.next_seek_crossfade_sample() {
                     if output.len() >= 2 {
                         output[0] = left * self.gain;
                         output[1] = right * self.gain;
                     }
-                } else {
-                    // Buffer underrun - output silence
+                    return;
+                }
+
+                if state.is_seeking() {
                     if output.len() >= 2 {
                         output[0] = 0.0;
                         output[1] = 0.0;
                     }
+                    return;
                 }
-            } else {
-                // Couldn't lock - output silence
-                if output.len() >= 2 {
-                    output[0] = 0.0;
-                    output[1] = 0.0;
+            }
+
+            let speed = self
+                .shared_state
+                .as_ref()
+                .map(|s| {
+                    s.advance_speed_ramp();
+                    s.effective_speed() as f64 * s.src_ratio() as f64
+                })
+                .unwrap_or(1.0);
+
+            self.fractional_pos += speed;
+
+            while self.fractional_pos >= 1.0 {
+                self.fractional_pos -= 1.0;
+                self.shift_history();
+
+                if let Some(mut guard) = self.consumer.try_lock() {
+                    if let Some((left, right)) = guard.read() {
+                        self.history[3] = (left * self.gain, right * self.gain);
+                    } else {
+                        if let Some(ref state) = self.shared_state {
+                            state.report_underrun();
+                        }
+                        self.history[3] = self.history[2];
+                    }
+                } else {
+                    if let Some(ref state) = self.shared_state {
+                        state.report_underrun();
+                    }
+                    self.history[3] = self.history[2];
                 }
+            }
+
+            let t = self.fractional_pos as f32;
+            let left = cubic_hermite(
+                self.history[0].0,
+                self.history[1].0,
+                self.history[2].0,
+                self.history[3].0,
+                t,
+            );
+            let right = cubic_hermite(
+                self.history[0].1,
+                self.history[1].1,
+                self.history[2].1,
+                self.history[3].1,
+                t,
+            );
+
+            if output.len() >= 2 {
+                output[0] = left;
+                output[1] = right;
             }
         }
 
@@ -396,25 +717,43 @@ mod streaming {
                 return;
             }
 
-            // Try to lock consumer
-            if let Some(mut guard) = self.consumer.try_lock() {
-                for i in 0..size {
-                    if let Some((left, right)) = guard.read() {
-                        output.set_f32(0, i, left * self.gain);
-                        output.set_f32(1, i, right * self.gain);
-                    } else {
-                        // Buffer underrun
+            if let Some(ref state) = self.shared_state {
+                if state.is_seek_crossfading() {
+                    for i in 0..size {
+                        if let Some((left, right)) = state.next_seek_crossfade_sample() {
+                            output.set_f32(0, i, left * self.gain);
+                            output.set_f32(1, i, right * self.gain);
+                        } else {
+                            self.process_normal_samples(size - i, i, output);
+                            return;
+                        }
+                    }
+                    return;
+                }
+
+                if state.is_loop_crossfading() {
+                    for i in 0..size {
+                        if let Some((left, right)) = state.next_loop_crossfade_sample() {
+                            output.set_f32(0, i, left * self.gain);
+                            output.set_f32(1, i, right * self.gain);
+                        } else {
+                            self.process_normal_samples(size - i, i, output);
+                            return;
+                        }
+                    }
+                    return;
+                }
+
+                if state.is_seeking() {
+                    for i in 0..size {
                         output.set_f32(0, i, 0.0);
                         output.set_f32(1, i, 0.0);
                     }
-                }
-            } else {
-                // Couldn't lock - output silence
-                for i in 0..size {
-                    output.set_f32(0, i, 0.0);
-                    output.set_f32(1, i, 0.0);
+                    return;
                 }
             }
+
+            self.process_normal_samples(size, 0, output);
         }
 
         fn get_id(&self) -> u64 {
@@ -447,7 +786,6 @@ mod tests {
 
     #[test]
     fn test_sampler_unit_creation() {
-        // Create a simple test wave (mono, 100 samples)
         let wave = Wave::with_capacity(1, 44100.0, 100);
         let sampler = SamplerUnit::new(Arc::new(wave));
 
@@ -479,5 +817,93 @@ mod tests {
 
         assert_eq!(output[0], 0.0);
         assert_eq!(output[1], 0.0);
+    }
+
+    #[test]
+    fn test_loop_range_api() {
+        let samples = vec![0.0f32; 1000];
+        let wave = Wave::from_samples(44100.0, &samples);
+        let mut sampler = SamplerUnit::new(Arc::new(wave));
+
+        assert!(sampler.loop_range().is_none());
+
+        sampler.set_loop_range(100, 500, 64);
+
+        assert_eq!(sampler.loop_range(), Some((100, 500)));
+        assert!(sampler.is_looping());
+
+        sampler.clear_loop_range();
+        assert!(sampler.loop_range().is_none());
+    }
+
+    #[test]
+    fn test_loop_crossfade_integration() {
+        let samples: Vec<f32> = (0..100).map(|i| i as f32 / 100.0).collect();
+        let wave = Wave::from_samples(44100.0, &samples);
+        let mut sampler = SamplerUnit::new(Arc::new(wave));
+
+        sampler.set_loop_range(10, 90, 10);
+        sampler.trigger();
+
+        for _ in 0..75 {
+            let mut output = [0.0f32; 2];
+            sampler.tick(&[], &mut output);
+        }
+
+        let mut output = [0.0f32; 2];
+        sampler.tick(&[], &mut output);
+
+        assert!(sampler.is_playing());
+    }
+
+    mod streaming_tests {
+        #[test]
+        fn test_cubic_hermite_interpolation() {
+            use super::streaming::cubic_hermite;
+            let result = cubic_hermite(0.0, 1.0, 2.0, 3.0, 0.0);
+            assert!((result - 1.0).abs() < 0.001);
+
+            let result = cubic_hermite(0.0, 1.0, 2.0, 3.0, 1.0);
+            assert!((result - 2.0).abs() < 0.001);
+
+            let result = cubic_hermite(0.0, 1.0, 2.0, 3.0, 0.5);
+            assert!((result - 1.5).abs() < 0.1);
+        }
+
+        #[test]
+        fn test_shared_stream_state_seeking() {
+            use crate::butler::SharedStreamState;
+
+            let state = SharedStreamState::new();
+
+            assert!(!state.is_seeking());
+
+            state.set_seeking(true);
+            assert!(state.is_seeking());
+
+            state.set_seeking(false);
+            assert!(!state.is_seeking());
+        }
+
+        #[test]
+        fn test_shared_stream_state_speed() {
+            use crate::butler::SharedStreamState;
+
+            let state = SharedStreamState::new();
+
+            assert_eq!(state.speed(), 1.0);
+
+            state.set_speed(0.5);
+            assert_eq!(state.speed(), 0.5);
+
+            state.set_speed(2.0);
+            assert_eq!(state.speed(), 2.0);
+
+            state.set_speed(0.1);
+            assert_eq!(state.speed(), 0.25);
+
+            state.set_speed(10.0);
+            assert_eq!(state.speed(), 4.0);
+        }
     }
 }

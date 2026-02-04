@@ -121,10 +121,6 @@ impl AutomationLane {
         self.manual_value = value;
     }
 
-    // =========================================================================
-    // Value Access
-    // =========================================================================
-
     /// Get the current value at the given beat position
     ///
     /// Takes into account the current state:
@@ -160,10 +156,6 @@ impl AutomationLane {
             }
         }
     }
-
-    // =========================================================================
-    // Recording Control
-    // =========================================================================
 
     /// Called when a control is "touched" (user starts interacting)
     ///
@@ -271,10 +263,6 @@ impl AutomationLane {
             self.config.default_curve,
         ));
     }
-
-    // =========================================================================
-    // Envelope Manipulation
-    // =========================================================================
 
     /// Add a point to the envelope manually
     pub fn add_point(&self, point: AutomationPoint) {

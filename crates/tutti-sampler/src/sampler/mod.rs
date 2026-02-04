@@ -1,5 +1,5 @@
 //! Sample playback units.
 
-pub mod node;
+mod node;
 
 pub use node::{SamplerUnit, StreamingSamplerUnit};

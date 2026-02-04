@@ -108,13 +108,9 @@ impl PhaseVocoderProcessor {
     }
 
     /// Get the FFT size
+    #[cfg(test)]
     pub fn fft_size(&self) -> usize {
         self.fft_size
-    }
-
-    /// Get the analysis hop size
-    pub fn hop_size(&self) -> usize {
-        self.hop_analysis
     }
 
     /// Get the latency in samples
@@ -359,7 +355,7 @@ mod tests {
     fn test_processor_creation() {
         let proc = PhaseVocoderProcessor::new(FftSize::Medium, 44100.0);
         assert_eq!(proc.fft_size(), 2048);
-        assert_eq!(proc.hop_size(), 512);
+        assert_eq!(FftSize::Medium.hop_size(), 512);
     }
 
     #[test]
@@ -367,11 +363,8 @@ mod tests {
         let window = PhaseVocoderProcessor::create_hann_window(1024);
         assert_eq!(window.len(), 1024);
 
-        // First and last samples should be near zero
         assert!(window[0] < 0.001);
         assert!(window[1023] < 0.001);
-
-        // Middle should be 1.0
         assert!((window[512] - 1.0).abs() < 0.001);
     }
 
@@ -379,20 +372,16 @@ mod tests {
     fn test_push_and_pop() {
         let mut proc = PhaseVocoderProcessor::new(FftSize::Small, 44100.0);
 
-        // Push some input
         let input = vec![0.5; 256];
         proc.push_input(&input);
         assert_eq!(proc.input_available(), 256);
 
-        // Not enough for a full frame yet
         proc.process(1.0, 1.0);
         assert_eq!(proc.output_available(), 0);
 
-        // Push more to fill a frame (need 1024 for Small)
         let more_input = vec![0.3; 1024];
         proc.push_input(&more_input);
 
-        // Now we should be able to process
         proc.process(1.0, 1.0);
         assert!(proc.output_available() > 0);
     }
@@ -401,12 +390,10 @@ mod tests {
     fn test_reset() {
         let mut proc = PhaseVocoderProcessor::new(FftSize::Small, 44100.0);
 
-        // Push and process some data
         let input = vec![0.5; 2048];
         proc.push_input(&input);
         proc.process(1.0, 1.0);
 
-        // Reset
         proc.reset();
         assert_eq!(proc.input_available(), 0);
         assert_eq!(proc.output_available(), 0);
@@ -418,28 +405,23 @@ mod tests {
         assert!((PhaseVocoderProcessor::wrap_phase(PI) - PI).abs() < 0.001);
         assert!((PhaseVocoderProcessor::wrap_phase(-PI) - (-PI)).abs() < 0.001);
 
-        // Wrap around: 3*PI = PI + 2*PI, should wrap to PI
         let wrapped = PhaseVocoderProcessor::wrap_phase(3.0 * PI);
         assert!((wrapped - PI).abs() < 0.1, "Expected ~PI, got {}", wrapped);
     }
 
     #[test]
     fn test_passthrough() {
-        // With stretch=1.0 and pitch=1.0, output should approximate input
-        // Note: Phase vocoders have inherent loss due to windowing and overlap-add
         let mut proc = PhaseVocoderProcessor::new(FftSize::Small, 44100.0);
 
-        // Generate a simple sine wave - need enough samples to fill multiple frames
         let freq = 440.0;
         let sample_rate = 44100.0;
-        let num_samples = 8192; // Enough for multiple FFT frames
+        let num_samples = 8192;
         let input: Vec<f32> = (0..num_samples)
             .map(|i| (2.0 * PI * freq * i as f32 / sample_rate as f32).sin() * 0.5)
             .collect();
 
         proc.push_input(&input);
 
-        // Process multiple times to get output
         for _ in 0..8 {
             proc.process(1.0, 1.0);
         }
@@ -447,10 +429,8 @@ mod tests {
         let mut output = vec![0.0f32; 8192];
         let count = proc.pop_output(&mut output);
 
-        // Should have some output (accounting for latency)
         assert!(count > 0, "No output produced");
 
-        // Check that output has non-zero samples (some audio is present)
         let non_zero_count = output[..count].iter().filter(|&&x| x.abs() > 1e-8).count();
         assert!(
             non_zero_count > count / 10,

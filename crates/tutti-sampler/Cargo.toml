@@ -40,6 +40,12 @@ arc-swap = "1.7"
 parking_lot = "0.12"
 smallvec = "1.13"
 
+# Parallel I/O
+rayon = "1.10"
+
+# Thread priority
+thread-priority = "1.1"
+
 # DSP / Files
 hound = "3.5"
 

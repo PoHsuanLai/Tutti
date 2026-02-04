@@ -1,61 +1,80 @@
 //! Butler thread for asynchronous disk I/O operations.
 
-use super::prefetch::{CaptureBufferConsumer, RegionBufferProducer};
+use super::cache::LruCache;
+use super::capture::{create_wav_writer, flush_all_captures, flush_capture, CaptureConsumerState};
+use super::config::BufferConfig;
+use super::loops::{
+    calculate_buffer_size, capture_fadein_samples, capture_fadeout_samples, capture_samples,
+    check_and_handle_loops,
+};
+use super::metrics::IOMetrics;
+use super::pdc::check_pdc_updates;
+use super::prefetch::RegionBufferProducer;
+use super::refill::{refill_all_streams, refill_all_streams_parallel};
 use super::request::{ButlerCommand, ButlerState, CaptureId, RegionId};
 use super::stream_state::ChannelStreamState;
+use super::varispeed::Varispeed;
 use crossbeam_channel::{bounded, Receiver, Sender};
 use dashmap::DashMap;
-use hound::{SampleFormat, WavSpec, WavWriter};
-use std::fs::File;
-use std::io::BufWriter;
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
-use tutti_core::Wave;
+use thread_priority::ThreadPriority;
+use tutti_core::PdcManager;
 
 /// Butler thread for asynchronous disk I/O.
 pub struct ButlerThread {
     command_tx: Sender<ButlerCommand>,
     command_rx: Option<Receiver<ButlerCommand>>,
     stream_states: Arc<DashMap<usize, ChannelStreamState>>,
-    sample_cache: Arc<DashMap<PathBuf, Arc<Wave>>>,
+    sample_cache: Arc<LruCache>,
+    metrics: Arc<IOMetrics>,
     thread_handle: Option<JoinHandle<()>>,
     shutdown: Arc<AtomicBool>,
     state: Arc<AtomicU8>,
-    chunk_size: usize,
-    flush_threshold: usize,
+    config: BufferConfig,
     sample_rate: f64,
-}
-
-/// State for a capture consumer.
-pub struct CaptureConsumerState {
-    pub consumer: CaptureBufferConsumer,
-    pub writer: Option<WavWriter<BufWriter<File>>>,
-    pub channels: usize,
+    pdc_manager: Option<Arc<PdcManager>>,
 }
 
 impl ButlerThread {
-    pub fn new(
-        sample_cache: Arc<DashMap<PathBuf, Arc<Wave>>>,
-        channel_capacity: usize,
-        sample_rate: f64,
-    ) -> Self {
+    /// Create a new butler thread with default configuration.
+    #[allow(dead_code)]
+    pub fn new(channel_capacity: usize, sample_rate: f64) -> Self {
+        Self::with_config(channel_capacity, sample_rate, BufferConfig::default())
+    }
+
+    /// Create a new butler thread with custom configuration.
+    pub fn with_config(channel_capacity: usize, sample_rate: f64, config: BufferConfig) -> Self {
         let (tx, rx) = bounded(channel_capacity);
+        let sample_cache = Arc::new(LruCache::new(
+            config.cache_max_entries,
+            config.cache_max_bytes,
+        ));
 
         Self {
             command_tx: tx,
             command_rx: Some(rx),
             stream_states: Arc::new(DashMap::new()),
             sample_cache,
+            metrics: Arc::new(IOMetrics::new()),
             thread_handle: None,
             shutdown: Arc::new(AtomicBool::new(false)),
             state: Arc::new(AtomicU8::new(ButlerState::Running as u8)),
-            chunk_size: 16384,
-            flush_threshold: 8192,
+            config,
             sample_rate,
+            pdc_manager: None,
         }
+    }
+
+    /// Set PDC manager for automatic delay compensation.
+    ///
+    /// When set, the butler will automatically apply PDC preroll to streams
+    /// based on channel latency compensation values.
+    pub fn with_pdc(mut self, pdc: Arc<PdcManager>) -> Self {
+        self.pdc_manager = Some(pdc);
+        self
     }
 
     pub fn command_sender(&self) -> Sender<ButlerCommand> {
@@ -70,24 +89,28 @@ impl ButlerThread {
         let rx = self.command_rx.take().expect("command_rx already taken");
         let stream_states = Arc::clone(&self.stream_states);
         let sample_cache = Arc::clone(&self.sample_cache);
+        let metrics = Arc::clone(&self.metrics);
         let shutdown = Arc::clone(&self.shutdown);
         let state = Arc::clone(&self.state);
-        let chunk_size = self.chunk_size;
-        let flush_threshold = self.flush_threshold;
+        let config = self.config;
         let sample_rate = self.sample_rate;
+        let pdc_manager = self.pdc_manager.clone();
 
         let handle = thread::Builder::new()
             .name("dawai-butler".into())
             .spawn(move || {
+                let _ = thread_priority::set_current_thread_priority(ThreadPriority::Max);
+
                 butler_loop(
                     rx,
                     stream_states,
                     sample_cache,
+                    metrics,
                     shutdown,
                     state,
-                    chunk_size,
-                    flush_threshold,
+                    config,
                     sample_rate,
+                    pdc_manager,
                 );
             })
             .expect("Failed to spawn butler thread");
@@ -103,6 +126,21 @@ impl ButlerThread {
             let _ = handle.join();
         }
     }
+
+    /// Get access to stream states for creating StreamingSamplerUnit instances.
+    pub fn stream_states(&self) -> Arc<DashMap<usize, ChannelStreamState>> {
+        Arc::clone(&self.stream_states)
+    }
+
+    /// Get I/O metrics.
+    pub fn metrics(&self) -> Arc<IOMetrics> {
+        Arc::clone(&self.metrics)
+    }
+
+    /// Get cache reference.
+    pub fn cache(&self) -> Arc<LruCache> {
+        Arc::clone(&self.sample_cache)
+    }
 }
 
 impl Drop for ButlerThread {
@@ -116,434 +154,522 @@ impl Drop for ButlerThread {
 fn butler_loop(
     rx: Receiver<ButlerCommand>,
     stream_states: Arc<DashMap<usize, ChannelStreamState>>,
-    sample_cache: Arc<DashMap<PathBuf, Arc<Wave>>>,
+    sample_cache: Arc<LruCache>,
+    metrics: Arc<IOMetrics>,
     shutdown: Arc<AtomicBool>,
     state: Arc<AtomicU8>,
-    chunk_size: usize,
-    flush_threshold: usize,
+    config: BufferConfig,
     sample_rate: f64,
+    pdc_manager: Option<Arc<PdcManager>>,
 ) {
-    // Butler thread owns all producers and consumers (not shared!)
-    let mut producers: std::collections::HashMap<RegionId, RegionBufferProducer> =
+    let base_chunk_size = config.chunk_size;
+    let flush_threshold = config.flush_threshold;
+    let parallel_io = config.parallel_io;
+
+    let mut producers: Vec<RegionBufferProducer> = Vec::new();
+    let mut producer_index: std::collections::HashMap<RegionId, usize> =
         std::collections::HashMap::new();
+
     let mut capture_consumers: std::collections::HashMap<CaptureId, CaptureConsumerState> =
         std::collections::HashMap::new();
 
-    // Pre-allocate interleaving buffer to avoid allocation in hot path
-    let mut interleave_buffer: Vec<(f32, f32)> = Vec::with_capacity(chunk_size);
+    let mut interleave_buffer: Vec<(f32, f32)> = Vec::with_capacity(base_chunk_size);
 
     let mut is_paused = false;
+    let mut buffer_margin: f64 = 1.0;
+
     loop {
         if shutdown.load(Ordering::SeqCst) {
-            // Flush all capture buffers before shutdown
-            flush_all_captures(&mut capture_consumers, flush_threshold, true);
+            flush_all_captures(&mut capture_consumers, &metrics, flush_threshold, true);
             break;
         }
 
-        // Process incoming commands (non-blocking batch)
-        loop {
-            match rx.try_recv() {
-                Ok(cmd) => match cmd {
-                    // === Transport Control ===
-                    ButlerCommand::Run => {
-                        is_paused = false;
-                        state.store(ButlerState::Running as u8, Ordering::SeqCst);
-                    }
-                    ButlerCommand::Pause => {
-                        is_paused = true;
-                        state.store(ButlerState::Paused as u8, Ordering::SeqCst);
-                    }
-                    ButlerCommand::WaitForCompletion => {
-                        // Flush all capture buffers before continuing
-                        flush_all_captures(&mut capture_consumers, flush_threshold, true);
-                    }
+        process_commands(
+            &rx,
+            &stream_states,
+            &mut producers,
+            &mut producer_index,
+            &mut capture_consumers,
+            &sample_cache,
+            &metrics,
+            &state,
+            &config,
+            sample_rate,
+            &pdc_manager,
+            &mut is_paused,
+            &mut buffer_margin,
+            flush_threshold,
+        );
 
-                    // === Region Management ===
-                    ButlerCommand::RegisterProducer {
-                        region_id,
-                        producer,
-                    } => {
-                        producers.insert(region_id, producer);
-                    }
-                    ButlerCommand::RemoveRegion(region_id) => {
-                        producers.remove(&region_id);
-                    }
-                    ButlerCommand::SeekRegion {
-                        region_id,
-                        sample_offset,
-                    } => {
-                        // Update file position atomically
-                        // The audio callback will detect the discontinuity and flush its consumer buffer
-                        // The butler will start refilling from the new position on next refill cycle
-                        if let Some(producer) = producers.get(&region_id) {
-                            producer.set_file_position(sample_offset as u64);
-                        }
-                    }
-
-                    // File streaming with ring buffers
-                    ButlerCommand::StreamAudioFile {
-                        channel_index,
-                        file_path,
-                        start_sample: _start_sample,
-                        duration_samples: _duration_samples,
-                        offset_samples,
-                        speed,
-                        gain,
-                    } => {
-                        use super::prefetch::RegionBuffer;
-                        use parking_lot::Mutex;
-
-                        // Load Wave file to get metadata
-                        let wave = match Wave::load(&file_path) {
-                            Ok(w) => Arc::new(w),
-                            Err(_) => {
-                                continue;
-                            }
-                        };
-
-                        let file_length = wave.len() as u64;
-                        let file_sample_rate = wave.sample_rate();
-                        let channels = wave.channels();
-
-                        // Calculate optimal buffer size based on file size
-                        let buffer_capacity = calculate_buffer_size(file_length, sample_rate);
-                        let region_id = RegionId::generate();
-
-                        let (producer, consumer) = RegionBuffer::with_capacity(
-                            region_id,
-                            file_path.clone(),
-                            file_length,
-                            file_sample_rate,
-                            channels,
-                            buffer_capacity,
-                        );
-
-                        // Set initial file position
-                        producer.set_file_position(offset_samples as u64);
-
-                        // Pre-fill buffer with initial chunk
-                        // (Butler will continue refilling in main loop)
-                        cache_file_in_sample_cache(&sample_cache, file_path.clone(), wave);
-
-                        // Register producer with Butler
-                        producers.insert(region_id, producer);
-
-                        // Ensure stream state exists for this track
-                        stream_states
-                            .entry(channel_index)
-                            .or_insert_with(|| ChannelStreamState::new(channel_index, sample_rate));
-
-                        // Start streaming with ring buffer consumer
-                        if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
-                            stream_state.start_streaming(
-                                file_path.clone(),
-                                Arc::new(Mutex::new(consumer)),
-                                speed,
-                                gain,
-                            );
-                        }
-                    }
-                    ButlerCommand::StopStreaming { channel_index } => {
-                        if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
-                            stream_state.stop_streaming();
-                        }
-                    }
-                    ButlerCommand::SetPlaybackPosition {
-                        channel_index: _channel_index,
-                        position_seconds: _position_seconds,
-                    } => {
-                        // Position management handled externally");
-                    }
-
-                    // === Capture (Recording Write-Behind) ===
-                    ButlerCommand::RegisterCapture {
-                        capture_id,
-                        consumer,
-                        file_path,
-                        sample_rate,
-                        channels,
-                    } => {
-                        let writer = create_wav_writer(&file_path, sample_rate, channels);
-                        capture_consumers.insert(
-                            capture_id,
-                            CaptureConsumerState {
-                                consumer,
-                                writer,
-                                channels,
-                            },
-                        );
-                    }
-                    ButlerCommand::RemoveCapture(capture_id) => {
-                        // Flush remaining data and finalize
-                        if let Some(mut state) = capture_consumers.remove(&capture_id) {
-                            flush_capture(&mut state, usize::MAX);
-                            if let Some(writer) = state.writer.take() {
-                                if writer.finalize().is_err() {}
-                            }
-                        }
-                    }
-                    ButlerCommand::Flush(req) => {
-                        if let Some(state) = capture_consumers.get_mut(&req.capture_id) {
-                            flush_capture(state, usize::MAX);
-                        }
-                    }
-                    ButlerCommand::FlushAll => {
-                        flush_all_captures(&mut capture_consumers, flush_threshold, true);
-                    }
-
-                    // === Lifecycle ===
-                    ButlerCommand::Shutdown => {
-                        flush_all_captures(&mut capture_consumers, flush_threshold, true);
-                        return;
-                    }
-                },
-                Err(crossbeam_channel::TryRecvError::Empty) => break,
-                Err(crossbeam_channel::TryRecvError::Disconnected) => {
-                    flush_all_captures(&mut capture_consumers, flush_threshold, true);
-                    return;
-                }
-            }
-        }
-
-        // Skip work if paused (but still process commands above)
         if is_paused {
             thread::sleep(Duration::from_millis(10));
             continue;
         }
 
-        // Skip work if idle (no streams and no captures)
         if stream_states.is_empty() && capture_consumers.is_empty() {
             thread::sleep(Duration::from_millis(1));
             continue;
         }
 
-        // Ring buffer refill: check loops first
-        check_and_handle_loops(&stream_states, &mut producers);
-
-        // Refill ring buffers from disk
-        refill_all_streams(
+        check_pdc_updates(
+            &pdc_manager,
             &stream_states,
             &mut producers,
+            &producer_index,
             &sample_cache,
-            chunk_size,
-            &mut interleave_buffer,
+            &metrics,
+            &config,
         );
 
-        // Flush capture buffers that have enough data
-        flush_all_captures(&mut capture_consumers, flush_threshold, false);
-    }
-}
+        check_and_handle_loops(
+            &stream_states,
+            &mut producers,
+            &producer_index,
+            &sample_cache,
+            &metrics,
+        );
 
-/// Check and handle stream loop conditions.
-fn check_and_handle_loops(
-    stream_states: &DashMap<usize, ChannelStreamState>,
-    producers: &mut std::collections::HashMap<RegionId, RegionBufferProducer>,
-) {
-    for stream_entry in stream_states.iter() {
-        let stream_state = stream_entry.value();
-
-        // Check if this stream needs to loop
-        if let Some(loop_start) = stream_state.check_loop_condition() {
-            // Get region ID for this stream
-            if let Some(region_id) = stream_state.region_id() {
-                if let Some(producer) = producers.get_mut(&region_id) {
-                    // Flush buffer and seek to loop start
-                    stream_state.flush_buffer();
-                    producer.set_file_position(loop_start);
-                }
-            }
-        }
-    }
-}
-
-/// Refill ring buffers from disk with adaptive prefetch.
-///
-/// Uses a pre-allocated buffer to avoid allocation in the hot path.
-fn refill_all_streams(
-    _stream_states: &DashMap<usize, ChannelStreamState>,
-    producers: &mut std::collections::HashMap<RegionId, RegionBufferProducer>,
-    sample_cache: &DashMap<PathBuf, Arc<Wave>>,
-    base_chunk_size: usize,
-    interleave_buffer: &mut Vec<(f32, f32)>,
-) {
-    // Iterate over all region buffer producers
-    for (_region_id, producer) in producers.iter_mut() {
-        let available = producer.capacity() - producer.write_space();
-        let buffer_capacity = producer.capacity();
-
-        // Calculate buffer fill percentage
-        let fill_percentage = (available as f32 / buffer_capacity as f32) * 100.0;
-
-        // Adaptive refill strategy based on buffer state
-        let (should_refill, chunk_multiplier) = if fill_percentage < 10.0 {
-            // Critical: Buffer nearly empty - aggressive refill with double chunk size
-            (true, 2.0)
-        } else if fill_percentage < 25.0 {
-            // Low: Buffer running low - normal refill
-            (true, 1.0)
-        } else if fill_percentage < 75.0 {
-            // Medium: Buffer has decent amount - use smaller chunks to reduce I/O
-            (true, 0.5)
+        if parallel_io && stream_states.len() >= 3 {
+            refill_all_streams_parallel(
+                &stream_states,
+                &mut producers,
+                &producer_index,
+                &sample_cache,
+                &metrics,
+                base_chunk_size,
+                buffer_margin,
+            );
         } else {
-            // High: Buffer is full - skip refill
-            (false, 1.0)
-        };
-
-        if !should_refill {
-            continue;
+            refill_all_streams(
+                &stream_states,
+                &mut producers,
+                &producer_index,
+                &sample_cache,
+                &metrics,
+                base_chunk_size,
+                buffer_margin,
+                &mut interleave_buffer,
+            );
         }
 
-        // Adaptive chunk size
-        let chunk_size = (base_chunk_size as f32 * chunk_multiplier) as usize;
+        flush_all_captures(&mut capture_consumers, &metrics, flush_threshold, false);
+    }
+}
 
-        // Load Wave file from cache (or disk if not cached)
-        let file_path = producer.file_path();
-        let wave = match sample_cache.get(file_path) {
-            Some(cached) => cached.value().clone(),
-            None => {
-                // Not in cache - load from disk and cache it
-                match Wave::load(file_path) {
-                    Ok(w) => {
-                        let arc_wave = Arc::new(w);
-                        sample_cache.insert(file_path.clone(), arc_wave.clone());
-                        arc_wave
-                    }
-                    Err(_) => {
-                        continue;
+/// Process incoming commands from the command channel.
+#[allow(clippy::too_many_arguments)]
+fn process_commands(
+    rx: &Receiver<ButlerCommand>,
+    stream_states: &DashMap<usize, ChannelStreamState>,
+    producers: &mut Vec<RegionBufferProducer>,
+    producer_index: &mut std::collections::HashMap<RegionId, usize>,
+    capture_consumers: &mut std::collections::HashMap<CaptureId, CaptureConsumerState>,
+    sample_cache: &LruCache,
+    metrics: &IOMetrics,
+    state: &AtomicU8,
+    config: &BufferConfig,
+    sample_rate: f64,
+    pdc_manager: &Option<Arc<PdcManager>>,
+    is_paused: &mut bool,
+    buffer_margin: &mut f64,
+    flush_threshold: usize,
+) {
+    loop {
+        match rx.try_recv() {
+            Ok(cmd) => {
+                handle_command(
+                    cmd,
+                    stream_states,
+                    producers,
+                    producer_index,
+                    capture_consumers,
+                    sample_cache,
+                    metrics,
+                    state,
+                    config,
+                    sample_rate,
+                    pdc_manager,
+                    is_paused,
+                    buffer_margin,
+                    flush_threshold,
+                );
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => break,
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                flush_all_captures(capture_consumers, metrics, flush_threshold, true);
+                return;
+            }
+        }
+    }
+}
+
+/// Handle a single butler command.
+#[allow(clippy::too_many_arguments)]
+fn handle_command(
+    cmd: ButlerCommand,
+    stream_states: &DashMap<usize, ChannelStreamState>,
+    producers: &mut Vec<RegionBufferProducer>,
+    producer_index: &mut std::collections::HashMap<RegionId, usize>,
+    capture_consumers: &mut std::collections::HashMap<CaptureId, CaptureConsumerState>,
+    sample_cache: &LruCache,
+    metrics: &IOMetrics,
+    state: &AtomicU8,
+    config: &BufferConfig,
+    sample_rate: f64,
+    pdc_manager: &Option<Arc<PdcManager>>,
+    is_paused: &mut bool,
+    buffer_margin: &mut f64,
+    flush_threshold: usize,
+) {
+    match cmd {
+        ButlerCommand::Run => {
+            *is_paused = false;
+            state.store(ButlerState::Running as u8, Ordering::SeqCst);
+        }
+        ButlerCommand::Pause => {
+            *is_paused = true;
+            state.store(ButlerState::Paused as u8, Ordering::SeqCst);
+        }
+        ButlerCommand::WaitForCompletion => {
+            flush_all_captures(capture_consumers, metrics, flush_threshold, true);
+        }
+
+        ButlerCommand::StreamAudioFile {
+            channel_index,
+            file_path,
+            offset_samples,
+        } => {
+            handle_stream_audio_file(
+                channel_index,
+                file_path,
+                offset_samples,
+                stream_states,
+                producers,
+                producer_index,
+                sample_cache,
+                metrics,
+                sample_rate,
+                pdc_manager,
+            );
+        }
+        ButlerCommand::StopStreaming { channel_index } => {
+            if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
+                stream_state.stop_streaming();
+            }
+        }
+
+        ButlerCommand::SeekStream {
+            channel_index,
+            position_samples,
+        } => {
+            handle_seek_stream(
+                channel_index,
+                position_samples,
+                stream_states,
+                producers,
+                producer_index,
+                sample_cache,
+                metrics,
+                config,
+            );
+        }
+
+        ButlerCommand::SetLoopRange {
+            channel_index,
+            start_samples,
+            end_samples,
+            crossfade_samples,
+        } => {
+            handle_set_loop_range(
+                channel_index,
+                start_samples,
+                end_samples,
+                crossfade_samples,
+                stream_states,
+                producers,
+                producer_index,
+                sample_cache,
+            );
+        }
+
+        ButlerCommand::ClearLoopRange { channel_index } => {
+            if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
+                stream_state.clear_loop_range();
+            }
+        }
+
+        ButlerCommand::SetVarispeed {
+            channel_index,
+            direction,
+            speed,
+        } => {
+            if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
+                stream_state.set_varispeed(Varispeed { direction, speed });
+            }
+        }
+
+        ButlerCommand::UpdatePdcPreroll {
+            channel_index,
+            new_preroll,
+        } => {
+            handle_update_pdc_preroll(
+                channel_index,
+                new_preroll,
+                stream_states,
+                producers,
+                producer_index,
+                sample_cache,
+                metrics,
+                config,
+            );
+        }
+
+        ButlerCommand::RegisterCapture {
+            capture_id,
+            consumer,
+            file_path,
+            sample_rate,
+            channels,
+        } => {
+            let writer = create_wav_writer(&file_path, sample_rate, channels);
+            capture_consumers.insert(
+                capture_id,
+                CaptureConsumerState {
+                    consumer,
+                    writer,
+                    channels,
+                },
+            );
+        }
+        ButlerCommand::RemoveCapture(capture_id) => {
+            if let Some(mut state) = capture_consumers.remove(&capture_id) {
+                flush_capture(&mut state, metrics, usize::MAX);
+                if let Some(writer) = state.writer.take() {
+                    let _ = writer.finalize();
+                }
+            }
+        }
+        ButlerCommand::Flush(req) => {
+            if let Some(state) = capture_consumers.get_mut(&req.capture_id) {
+                flush_capture(state, metrics, usize::MAX);
+            }
+        }
+        ButlerCommand::FlushAll => {
+            flush_all_captures(capture_consumers, metrics, flush_threshold, true);
+        }
+
+        ButlerCommand::SetBufferMargin { margin } => {
+            *buffer_margin = margin.clamp(0.5, 3.0);
+        }
+
+        ButlerCommand::Shutdown => {
+            flush_all_captures(capture_consumers, metrics, flush_threshold, true);
+        }
+    }
+}
+
+/// Handle StreamAudioFile command.
+#[allow(clippy::too_many_arguments)]
+fn handle_stream_audio_file(
+    channel_index: usize,
+    file_path: std::path::PathBuf,
+    offset_samples: usize,
+    stream_states: &DashMap<usize, ChannelStreamState>,
+    producers: &mut Vec<RegionBufferProducer>,
+    producer_index: &mut std::collections::HashMap<RegionId, usize>,
+    sample_cache: &LruCache,
+    metrics: &IOMetrics,
+    sample_rate: f64,
+    pdc_manager: &Option<Arc<PdcManager>>,
+) {
+    use super::prefetch::RegionBuffer;
+    use parking_lot::Mutex;
+    use tutti_core::Wave;
+
+    let wave = if let Some(cached) = sample_cache.get(&file_path) {
+        metrics.record_cache_hit();
+        cached
+    } else {
+        metrics.record_cache_miss();
+        match Wave::load(&file_path) {
+            Ok(w) => {
+                let arc_wave = Arc::new(w);
+                let bytes = arc_wave.len() as u64 * arc_wave.channels() as u64 * 4;
+                metrics.record_read(bytes);
+                sample_cache.insert(file_path.clone(), arc_wave.clone());
+                arc_wave
+            }
+            Err(_) => {
+                return;
+            }
+        }
+    };
+
+    let file_length = wave.len() as u64;
+
+    let buffer_capacity = calculate_buffer_size(file_length, sample_rate);
+    let region_id = RegionId::generate();
+
+    let (producer, consumer) =
+        RegionBuffer::with_capacity(region_id, file_path.clone(), buffer_capacity);
+
+    let pdc_preroll = pdc_manager
+        .as_ref()
+        .filter(|pdc| pdc.is_enabled())
+        .map(|pdc| pdc.get_channel_compensation(channel_index) as u64)
+        .unwrap_or(0);
+
+    let adjusted_offset = (offset_samples as u64).saturating_sub(pdc_preroll);
+    producer.set_file_position(adjusted_offset);
+
+    let idx = producers.len();
+    producers.push(producer);
+    producer_index.insert(region_id, idx);
+
+    stream_states.entry(channel_index).or_default();
+
+    let file_sr = wave.sample_rate();
+    let src_ratio = if (file_sr - sample_rate).abs() < 0.01 {
+        1.0
+    } else {
+        (file_sr / sample_rate) as f32
+    };
+
+    if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
+        stream_state.start_streaming(Arc::new(Mutex::new(consumer)));
+        stream_state.set_pdc_preroll(pdc_preroll);
+        stream_state.shared_state().set_src_ratio(src_ratio);
+    }
+}
+
+/// Handle SeekStream command.
+#[allow(clippy::too_many_arguments)]
+fn handle_seek_stream(
+    channel_index: usize,
+    position_samples: u64,
+    stream_states: &DashMap<usize, ChannelStreamState>,
+    producers: &mut [RegionBufferProducer],
+    producer_index: &std::collections::HashMap<RegionId, usize>,
+    sample_cache: &LruCache,
+    metrics: &IOMetrics,
+    config: &BufferConfig,
+) {
+    if let Some(stream_state) = stream_states.get(&channel_index) {
+        if let Some(region_id) = stream_state.region_id() {
+            if let Some(&idx) = producer_index.get(&region_id) {
+                let producer = &mut producers[idx];
+                let crossfade_len = config.seek_crossfade_samples;
+
+                let pdc_preroll = stream_state.pdc_preroll();
+                let adjusted_position = position_samples.saturating_sub(pdc_preroll);
+
+                let fadeout = capture_fadeout_samples(&stream_state, crossfade_len);
+
+                stream_state.set_seeking(true);
+
+                stream_state.flush_buffer();
+                producer.set_file_position(adjusted_position);
+
+                let fadein = capture_fadein_samples(
+                    sample_cache,
+                    metrics,
+                    producer.file_path(),
+                    adjusted_position,
+                    crossfade_len,
+                );
+
+                if !fadeout.is_empty() && !fadein.is_empty() {
+                    stream_state
+                        .shared_state()
+                        .start_seek_crossfade(fadeout, fadein);
+                }
+
+                stream_state.set_seeking(false);
+            }
+        }
+    }
+}
+
+/// Handle SetLoopRange command.
+fn handle_set_loop_range(
+    channel_index: usize,
+    start_samples: u64,
+    end_samples: u64,
+    crossfade_samples: usize,
+    stream_states: &DashMap<usize, ChannelStreamState>,
+    producers: &[RegionBufferProducer],
+    producer_index: &std::collections::HashMap<RegionId, usize>,
+    sample_cache: &LruCache,
+) {
+    if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
+        stream_state.set_loop_range(start_samples, end_samples, crossfade_samples);
+
+        if crossfade_samples > 0 {
+            if let Some(region_id) = stream_state.region_id() {
+                if let Some(&idx) = producer_index.get(&region_id) {
+                    let file_path = producers[idx].file_path();
+                    if let Some(wave) = sample_cache.get(file_path) {
+                        let preloop =
+                            capture_samples(&wave, start_samples as usize, crossfade_samples);
+                        stream_state.set_preloop_buffer(preloop);
                     }
                 }
             }
-        };
+        }
+    }
+}
 
-        // Get current file position
-        let file_position = producer.file_position() as usize;
-        let channels = wave.channels();
+/// Handle UpdatePdcPreroll command.
+#[allow(clippy::too_many_arguments)]
+fn handle_update_pdc_preroll(
+    channel_index: usize,
+    new_preroll: u64,
+    stream_states: &DashMap<usize, ChannelStreamState>,
+    producers: &mut [RegionBufferProducer],
+    producer_index: &std::collections::HashMap<RegionId, usize>,
+    sample_cache: &LruCache,
+    metrics: &IOMetrics,
+    config: &BufferConfig,
+) {
+    if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
+        let old_preroll = stream_state.pdc_preroll();
 
-        // Read chunk from Wave file
-        interleave_buffer.clear();
-        (0..chunk_size).for_each(|i| {
-            let sample_idx = file_position + i;
+        if new_preroll != old_preroll {
+            if let Some(region_id) = stream_state.region_id() {
+                if let Some(&idx) = producer_index.get(&region_id) {
+                    let producer = &mut producers[idx];
+                    let current_pos = producer.file_position();
+                    let new_pos = if new_preroll > old_preroll {
+                        current_pos.saturating_sub(new_preroll - old_preroll)
+                    } else {
+                        current_pos + (old_preroll - new_preroll)
+                    };
 
-            if sample_idx >= wave.len() {
-                // Reached end of file - pad with silence
-                interleave_buffer.push((0.0, 0.0));
-            } else {
-                let left = wave.at(0, sample_idx);
-                let right = if channels > 1 {
-                    wave.at(1, sample_idx)
-                } else {
-                    left // Mono -> duplicate
-                };
-                interleave_buffer.push((left, right));
+                    let crossfade_len = config.seek_crossfade_samples;
+                    let fadeout = capture_fadeout_samples(&stream_state, crossfade_len);
+
+                    stream_state.set_seeking(true);
+                    stream_state.flush_buffer();
+                    producer.set_file_position(new_pos);
+
+                    let fadein = capture_fadein_samples(
+                        sample_cache,
+                        metrics,
+                        producer.file_path(),
+                        new_pos,
+                        crossfade_len,
+                    );
+
+                    if !fadeout.is_empty() && !fadein.is_empty() {
+                        stream_state
+                            .shared_state()
+                            .start_seek_crossfade(fadeout, fadein);
+                    }
+
+                    stream_state.set_pdc_preroll(new_preroll);
+                    stream_state.set_seeking(false);
+                }
             }
-        });
-
-        // Write samples to ring buffer producer
-        let written = producer.write(interleave_buffer);
-
-        // Update file position
-        producer.set_file_position((file_position + written) as u64);
-
-        if written < chunk_size {}
-    }
-}
-
-/// Helper: Cache Wave file in sample cache (avoids reloading from disk)
-fn cache_file_in_sample_cache(
-    sample_cache: &DashMap<PathBuf, Arc<Wave>>,
-    file_path: PathBuf,
-    wave: Arc<Wave>,
-) {
-    sample_cache.insert(file_path, wave);
-}
-
-/// Calculate optimal buffer size based on file size.
-fn calculate_buffer_size(file_length_samples: u64, sample_rate: f64) -> usize {
-    // Convert file size to megabytes (stereo, 32-bit float)
-    let file_size_bytes = file_length_samples * 2 * 4; // 2 channels * 4 bytes per sample
-    let file_size_mb = file_size_bytes as f64 / (1024.0 * 1024.0);
-
-    let buffer_seconds = if file_size_mb < 50.0 {
-        // Small file - load entire file
-        (file_length_samples as f64 / sample_rate).min(30.0) // Cap at 30 seconds
-    } else if file_size_mb < 200.0 {
-        // Medium file - 10 second buffer
-        10.0
-    } else if file_size_mb < 500.0 {
-        // Large file - 5 second buffer
-        5.0
-    } else {
-        // Huge file - 3 second buffer (minimum for smooth streaming)
-        3.0
-    };
-
-    let buffer_capacity = (buffer_seconds * sample_rate) as usize;
-    buffer_capacity.max(4096) // Minimum 4096 samples
-}
-
-/// Create a WAV writer for capture
-fn create_wav_writer(
-    file_path: &PathBuf,
-    sample_rate: f64,
-    channels: usize,
-) -> Option<WavWriter<BufWriter<File>>> {
-    let spec = WavSpec {
-        channels: channels as u16,
-        sample_rate: sample_rate as u32,
-        bits_per_sample: 32,
-        sample_format: SampleFormat::Float,
-    };
-
-    match File::create(file_path) {
-        Ok(file) => {
-            let buf_writer = BufWriter::new(file);
-            WavWriter::new(buf_writer, spec).ok()
-        }
-        Err(_) => None,
-    }
-}
-
-/// Flush a single capture buffer to disk
-fn flush_capture(state: &mut CaptureConsumerState, max_samples: usize) {
-    let Some(writer) = state.writer.as_mut() else {
-        return;
-    };
-
-    let available = state.consumer.available();
-    let to_read = available.min(max_samples);
-
-    if to_read == 0 {
-        return;
-    }
-
-    let mut buffer = vec![(0.0f32, 0.0f32); to_read];
-    let read = state.consumer.read_into(&mut buffer);
-
-    // Write interleaved samples to WAV
-    for &(left, right) in &buffer[..read] {
-        if writer.write_sample(left).is_err() {
-            return;
-        }
-        if state.channels > 1 && writer.write_sample(right).is_err() {
-            return;
-        }
-    }
-
-    state.consumer.add_frames_written(read as u64);
-}
-
-/// Flush all capture buffers
-fn flush_all_captures(
-    capture_consumers: &mut std::collections::HashMap<CaptureId, CaptureConsumerState>,
-    threshold: usize,
-    force: bool,
-) {
-    for state in capture_consumers.values_mut() {
-        let available = state.consumer.available();
-
-        // Only flush if above threshold (or force flush)
-        if force || available >= threshold {
-            flush_capture(state, if force { usize::MAX } else { threshold });
         }
     }
 }
@@ -552,16 +678,12 @@ fn flush_all_captures(
 mod tests {
     use super::*;
 
-    // Note: TempoMapSnapshot is not publicly exported from tutti-core,
-    // so butler tests that need tempo map integration should be in integration tests.
-
     #[test]
     fn test_region_id_generation() {
         let id1 = RegionId::generate();
         let id2 = RegionId::generate();
         let id3 = RegionId::generate();
 
-        // Each ID should be unique
         assert_ne!(id1, id2);
         assert_ne!(id2, id3);
         assert_ne!(id1, id3);
@@ -572,8 +694,6 @@ mod tests {
         let id1 = CaptureId::generate();
         let id2 = CaptureId::generate();
         let id3 = CaptureId::generate();
-
-        // Each ID should be unique
         assert_ne!(id1, id2);
         assert_ne!(id2, id3);
         assert_ne!(id1, id3);

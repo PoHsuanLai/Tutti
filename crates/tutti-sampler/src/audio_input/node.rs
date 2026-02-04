@@ -92,15 +92,14 @@ impl AudioInputBackend {
 
 impl AudioUnit for AudioInputBackend {
     fn inputs(&self) -> usize {
-        0 // Source - no inputs
+        0
     }
 
     fn outputs(&self) -> usize {
-        2 // Stereo output
+        2
     }
 
     fn reset(&mut self) {
-        // Drain the channel to clear any stale data
         while self.receiver.try_recv().is_ok() {}
     }
 
@@ -109,7 +108,6 @@ impl AudioUnit for AudioInputBackend {
     }
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
-        // Lock-free: try_recv is RT-safe
         if let Ok((left, right)) = self.receiver.try_recv() {
             output[0] = left;
             output[1] = right;
@@ -195,7 +193,6 @@ mod tests {
         assert!(sender.is_some());
         assert!(audio_input.sender_taken());
 
-        // Second take returns None
         let sender2 = audio_input.take_sender();
         assert!(sender2.is_none());
     }
@@ -216,7 +213,6 @@ mod tests {
         let sender = audio_input.take_sender().unwrap();
         let mut backend = audio_input.backend();
 
-        // Push some samples
         sender.try_send((0.5, 0.75)).unwrap();
 
         let mut output = [0.0f32; 2];
@@ -231,10 +227,9 @@ mod tests {
         let audio_input = AudioInput::new();
         let mut backend = audio_input.backend();
 
-        let mut output = [1.0f32; 2]; // Non-zero initial values
+        let mut output = [1.0f32; 2];
         backend.tick(&[], &mut output);
 
-        // Should return zeros when channel is empty
         assert!((output[0]).abs() < 0.001);
         assert!((output[1]).abs() < 0.001);
     }
@@ -250,8 +245,6 @@ mod tests {
         let backend = audio_input.backend();
         let mut cloned = backend.clone();
 
-        // Clone shares the same receiver (Arc clone)
-        // So reading from clone consumes the sample
         let mut output = [0.0f32; 2];
         cloned.tick(&[], &mut output);
 

@@ -1,67 +1,104 @@
 //! Channel streaming state for disk-based audio playback.
 
 use parking_lot::Mutex;
-use std::path::PathBuf;
 use std::sync::Arc;
 use tutti_core::{AtomicU64, Ordering};
 
 use super::prefetch::RegionBufferConsumer;
 use super::request::RegionId;
+use super::shared_state::SharedStreamState;
+use super::varispeed::Varispeed;
+
+/// Loop detection status.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LoopStatus {
+    /// Normal playback, not near loop boundary
+    Normal,
+    /// Approaching loop end (within crossfade distance)
+    ApproachingEnd,
+    /// At or past loop end, should wrap to start
+    AtEnd(u64),
+}
 
 /// Channel streaming state using ring buffers for disk streaming.
 pub struct ChannelStreamState {
-    _channel_index: usize,
-    current_file: Option<PathBuf>,
     ring_buffer_consumer: Option<Arc<Mutex<RegionBufferConsumer>>>,
     /// Cached for lock-free access from butler thread.
     cached_region_id: Option<RegionId>,
     /// Shared read position — lock-free access without acquiring the consumer Mutex.
     cached_read_position: Option<Arc<AtomicU64>>,
-    speed: f32,
-    gain: f32,
+    /// Loop range (start, end) in samples
     loop_range: Option<(u64, u64)>,
-    _sample_rate: f64,
+    /// Crossfade length config in samples (crossfade logic moved to SharedStreamState)
+    loop_crossfade_samples: usize,
+    /// Pre-loop buffer: cached samples from loop start for crossfade.
+    /// Avoids re-reading from disk/cache on every loop iteration.
+    preloop_buffer: Option<Vec<(f32, f32)>>,
+    /// Varispeed state (butler-local, synced to shared_state)
+    varispeed: Varispeed,
+    /// Shared state for cross-thread communication with audio callback
+    shared_state: Arc<SharedStreamState>,
+    /// PDC preroll in samples (how much earlier to read for delay compensation)
+    pdc_preroll: u64,
 }
 
-impl ChannelStreamState {
-    pub fn new(channel_index: usize, sample_rate: f64) -> Self {
+impl Default for ChannelStreamState {
+    fn default() -> Self {
         Self {
-            _channel_index: channel_index,
-            current_file: None,
             ring_buffer_consumer: None,
             cached_region_id: None,
             cached_read_position: None,
-            speed: 1.0,
-            gain: 1.0,
             loop_range: None,
-            _sample_rate: sample_rate,
+            loop_crossfade_samples: 0,
+            preloop_buffer: None,
+            varispeed: Varispeed::default(),
+            shared_state: Arc::new(SharedStreamState::new()),
+            pdc_preroll: 0,
         }
     }
+}
 
-    pub fn start_streaming(
-        &mut self,
-        file_path: PathBuf,
-        consumer: Arc<Mutex<RegionBufferConsumer>>,
-        speed: f32,
-        gain: f32,
-    ) {
-        // Cache region_id and read_position for lock-free access
+impl ChannelStreamState {
+    pub fn start_streaming(&mut self, consumer: Arc<Mutex<RegionBufferConsumer>>) {
         {
             let guard = consumer.lock();
             self.cached_region_id = Some(guard.region_id());
             self.cached_read_position = Some(guard.read_position_shared());
         }
-        self.current_file = Some(file_path);
         self.ring_buffer_consumer = Some(consumer);
-        self.speed = speed;
-        self.gain = gain;
     }
 
     pub fn stop_streaming(&mut self) {
-        self.current_file = None;
         self.ring_buffer_consumer = None;
         self.cached_region_id = None;
         self.cached_read_position = None;
+        self.loop_range = None;
+        self.loop_crossfade_samples = 0;
+        self.preloop_buffer = None;
+        self.varispeed = Varispeed::default();
+        self.pdc_preroll = 0;
+        self.shared_state.set_speed(1.0);
+        self.shared_state.set_reverse(false);
+        self.shared_state.set_seeking(false);
+        self.shared_state.set_src_ratio(1.0);
+        self.shared_state.clear_loop_crossfade();
+    }
+
+    /// Get the shared state for cross-thread communication.
+    /// Clone the Arc to pass to StreamingSamplerUnit.
+    pub fn shared_state(&self) -> Arc<SharedStreamState> {
+        Arc::clone(&self.shared_state)
+    }
+
+    /// Get the ring buffer consumer for audio playback.
+    /// Returns None if not currently streaming.
+    pub fn consumer(&self) -> Option<Arc<Mutex<RegionBufferConsumer>>> {
+        self.ring_buffer_consumer.clone()
+    }
+
+    /// Check if this channel is currently streaming.
+    pub fn is_streaming(&self) -> bool {
+        self.ring_buffer_consumer.is_some()
     }
 
     /// Clear all buffered samples. Uses `RegionBufferConsumer::clear()` instead of
@@ -74,20 +111,199 @@ impl ChannelStreamState {
     }
 
     /// Lock-free: returns cached region_id without acquiring the consumer Mutex.
-    pub fn region_id(&self) -> Option<RegionId> {
+    pub(crate) fn region_id(&self) -> Option<RegionId> {
         self.cached_region_id
     }
 
-    /// Lock-free: reads the shared AtomicU64 read_position without acquiring the consumer Mutex.
-    pub fn check_loop_condition(&self) -> Option<u64> {
-        if let Some((loop_start, loop_end)) = self.loop_range {
-            if let Some(ref pos) = self.cached_read_position {
-                let read_pos = pos.load(Ordering::Relaxed);
-                if read_pos >= loop_end {
-                    return Some(loop_start);
-                }
+    /// Set loop range in samples.
+    pub fn set_loop_range(&mut self, start: u64, end: u64, crossfade_samples: usize) {
+        self.loop_range = Some((start, end));
+        self.loop_crossfade_samples = crossfade_samples;
+    }
+
+    /// Clear loop range.
+    pub fn clear_loop_range(&mut self) {
+        self.loop_range = None;
+        self.loop_crossfade_samples = 0;
+        self.preloop_buffer = None;
+        self.shared_state.clear_loop_crossfade();
+    }
+
+    /// Get loop range.
+    pub fn loop_range(&self) -> Option<(u64, u64)> {
+        self.loop_range
+    }
+
+    /// Get configured crossfade length in samples.
+    pub fn loop_crossfade_samples(&self) -> usize {
+        self.loop_crossfade_samples
+    }
+
+    /// Set pre-loop buffer with samples from loop start.
+    /// Called once when loop is set up to cache fadein samples.
+    pub fn set_preloop_buffer(&mut self, samples: Vec<(f32, f32)>) {
+        self.preloop_buffer = Some(samples);
+    }
+
+    /// Get cached pre-loop buffer (fadein samples from loop start).
+    /// Returns None if not prepared or loop not set.
+    pub fn preloop_buffer(&self) -> Option<&[(f32, f32)]> {
+        self.preloop_buffer.as_deref()
+    }
+
+    /// Check if pre-loop buffer is ready for crossfade.
+    pub fn has_preloop_buffer(&self) -> bool {
+        self.preloop_buffer.is_some()
+    }
+
+    /// Lock-free: check loop status based on read position.
+    pub fn check_loop_status(&self) -> LoopStatus {
+        let Some((loop_start, loop_end)) = self.loop_range else {
+            return LoopStatus::Normal;
+        };
+
+        let Some(ref pos) = self.cached_read_position else {
+            return LoopStatus::Normal;
+        };
+
+        let read_pos = pos.load(Ordering::Relaxed);
+
+        if read_pos >= loop_end {
+            return LoopStatus::AtEnd(loop_start);
+        }
+
+        if self.loop_crossfade_samples > 0 {
+            let crossfade_start = loop_end.saturating_sub(self.loop_crossfade_samples as u64);
+            if read_pos >= crossfade_start {
+                return LoopStatus::ApproachingEnd;
             }
         }
-        None
+
+        LoopStatus::Normal
+    }
+
+    /// Set varispeed configuration. Updates both local and shared state.
+    pub fn set_varispeed(&mut self, varispeed: Varispeed) {
+        self.varispeed = varispeed;
+        self.shared_state.set_speed(varispeed.speed);
+        self.shared_state.set_reverse(varispeed.is_reverse());
+    }
+
+    /// Check if playing in reverse.
+    pub fn is_reverse(&self) -> bool {
+        self.varispeed.is_reverse()
+    }
+
+    /// Get playback speed.
+    pub fn speed(&self) -> f32 {
+        self.varispeed.effective_speed()
+    }
+
+    /// Set seeking flag (to coordinate with audio callback).
+    pub fn set_seeking(&self, seeking: bool) {
+        self.shared_state.set_seeking(seeking);
+    }
+
+    /// Set PDC preroll amount in samples.
+    pub fn set_pdc_preroll(&mut self, samples: u64) {
+        self.pdc_preroll = samples;
+    }
+
+    /// Get current PDC preroll in samples.
+    pub fn pdc_preroll(&self) -> u64 {
+        self.pdc_preroll
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_loop_status_normal() {
+        let state = ChannelStreamState::default();
+        assert_eq!(state.check_loop_status(), LoopStatus::Normal);
+    }
+
+    #[test]
+    fn test_varispeed_default() {
+        let state = ChannelStreamState::default();
+        assert!(!state.is_reverse());
+        assert_eq!(state.speed(), 1.0);
+    }
+
+    #[test]
+    fn test_set_varispeed() {
+        let mut state = ChannelStreamState::default();
+        state.set_varispeed(Varispeed::reverse());
+        assert!(state.is_reverse());
+    }
+
+    #[test]
+    fn test_loop_range() {
+        let mut state = ChannelStreamState::default();
+        assert!(state.loop_range().is_none());
+
+        state.set_loop_range(1000, 5000, 64);
+        assert_eq!(state.loop_range(), Some((1000, 5000)));
+        assert_eq!(state.loop_crossfade_samples(), 64);
+
+        state.clear_loop_range();
+        assert!(state.loop_range().is_none());
+        assert_eq!(state.loop_crossfade_samples(), 0);
+    }
+
+    #[test]
+    fn test_pdc_preroll_default() {
+        let state = ChannelStreamState::default();
+        assert_eq!(state.pdc_preroll(), 0);
+    }
+
+    #[test]
+    fn test_pdc_preroll_set() {
+        let mut state = ChannelStreamState::default();
+        state.set_pdc_preroll(1000);
+        assert_eq!(state.pdc_preroll(), 1000);
+
+        state.set_pdc_preroll(500);
+        assert_eq!(state.pdc_preroll(), 500);
+    }
+
+    #[test]
+    fn test_pdc_preroll_reset_on_stop() {
+        let mut state = ChannelStreamState::default();
+        state.set_pdc_preroll(1000);
+        assert_eq!(state.pdc_preroll(), 1000);
+
+        state.stop_streaming();
+        assert_eq!(state.pdc_preroll(), 0);
+    }
+
+    #[test]
+    fn test_preloop_buffer() {
+        let mut state = ChannelStreamState::default();
+
+        assert!(!state.has_preloop_buffer());
+        assert!(state.preloop_buffer().is_none());
+
+        let samples = vec![(0.5, 0.5), (0.6, 0.6), (0.7, 0.7)];
+        state.set_preloop_buffer(samples.clone());
+
+        assert!(state.has_preloop_buffer());
+        assert_eq!(state.preloop_buffer(), Some(samples.as_slice()));
+
+        state.set_loop_range(100, 500, 64);
+        state.clear_loop_range();
+        assert!(!state.has_preloop_buffer());
+    }
+
+    #[test]
+    fn test_preloop_buffer_reset_on_stop() {
+        let mut state = ChannelStreamState::default();
+        state.set_preloop_buffer(vec![(0.5, 0.5)]);
+        assert!(state.has_preloop_buffer());
+
+        state.stop_streaming();
+        assert!(!state.has_preloop_buffer());
     }
 }

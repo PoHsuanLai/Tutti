@@ -40,7 +40,7 @@ pub struct AudioInputManager {
 impl Clone for AudioInputManager {
     fn clone(&self) -> Self {
         Self {
-            input_sender: None, // Sender is moved to callback, can't be cloned
+            input_sender: None,
             input_receiver: self.input_receiver.clone(),
             monitoring_enabled: Arc::clone(&self.monitoring_enabled),
             input_gain: Arc::clone(&self.input_gain),
@@ -48,7 +48,7 @@ impl Clone for AudioInputManager {
             is_capturing: Arc::clone(&self.is_capturing),
             sample_rate: self.sample_rate,
             dropped_samples: Arc::clone(&self.dropped_samples),
-            selected_device: Arc::clone(&self.selected_device), // Clone Arc, not value
+            selected_device: Arc::clone(&self.selected_device),
             start_requested: Arc::clone(&self.start_requested),
             stop_requested: Arc::clone(&self.stop_requested),
         }
@@ -131,19 +131,17 @@ impl AudioInputManager {
             )));
         }
 
-        // Release ordering: ensures device index is visible to other threads
         self.selected_device.store(device_index, Ordering::Release);
         Ok(())
     }
 
     /// Request to start capturing (will be picked up by stream manager)
     pub fn request_start(&mut self) {
-        // Create lock-free MPMC channel (500ms buffer at current sample rate)
         let buffer_size = (self.sample_rate as usize) / 2;
         let (tx, rx) = bounded(buffer_size);
 
-        self.input_sender = Some(tx); // Will be moved to callback
-        self.input_receiver = Some(Arc::new(rx)); // Can be cloned for multiple readers!
+        self.input_sender = Some(tx);
+        self.input_receiver = Some(Arc::new(rx));
 
         self.start_requested.store(true, Ordering::Release);
     }
@@ -239,7 +237,6 @@ impl AudioInputManager {
     /// Lock-free: Uses AtomicUsize with Acquire ordering
     /// Returns None if no device selected (sentinel value)
     pub fn selected_device(&self) -> Option<usize> {
-        // Acquire ordering: ensures we see the latest device index
         let device = self.selected_device.load(Ordering::Acquire);
         if device == NO_DEVICE_SELECTED {
             None

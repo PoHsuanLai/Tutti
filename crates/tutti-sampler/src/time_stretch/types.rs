@@ -1,8 +1,5 @@
 //! Time-stretching types and parameters.
 
-/// Re-export AtomicFloat from tutti-core as AtomicF32 for backwards compatibility.
-pub type AtomicF32 = tutti_core::AtomicFloat;
-
 /// Time-stretch and pitch-shift parameters
 ///
 /// ## Range Limits
@@ -108,13 +105,11 @@ impl Default for TimeStretchParams {
 /// Time-stretching algorithm selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimeStretchAlgorithm {
-    /// Phase-locked vocoder (FFT-based)
-    /// Best quality for pitched/harmonic content (music, vocals)
+    /// Phase vocoder (FFT-based) - best for melodic/pitched content
     #[default]
-    PhaseLocked,
+    PhaseVocoder,
 
-    /// Granular synthesis
-    /// Better transient preservation for percussive material
+    /// Granular synthesis - best for drums/transients
     Granular,
 }
 

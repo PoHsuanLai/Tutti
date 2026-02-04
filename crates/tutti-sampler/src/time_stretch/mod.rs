@@ -29,11 +29,11 @@
 //! - **Multiple FFT sizes**: Trade-off between latency and quality
 //! - **Stereo processing**: Independent left/right channel processing
 
+mod granular;
 mod phase_vocoder;
 mod types;
 mod unit;
 
-pub use types::{AtomicF32, FftSize, TimeStretchAlgorithm, TimeStretchParams};
-
-pub use phase_vocoder::PhaseVocoderProcessor;
+pub use granular::GrainSize;
+pub use types::{FftSize, TimeStretchAlgorithm, TimeStretchParams};
 pub use unit::TimeStretchUnit;

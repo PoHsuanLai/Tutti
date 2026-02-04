@@ -17,42 +17,45 @@
 //! use tutti_sampler::{SamplerSystem, SamplerUnit, TimeStretchUnit};
 //!
 //! // High-level streaming API (most common)
-//! let sampler = SamplerSystem::new(44100.0).build()?;
-//! sampler.stream_file(0, "audio.wav").gain(0.8).start();
+//! let sampler = SamplerSystem::builder(44100.0).build()?;
+//! sampler.stream_file(0, "audio.wav").offset_samples(0).start();
 //!
 //! // Low-level DSP nodes for FunDSP graph integration
 //! let unit = SamplerUnit::new(wave);
 //! let stretched = TimeStretchUnit::new(Box::new(unit), 44100.0);
 //!
-//! // Advanced: Recording and automation
-//! use tutti_sampler::recording::{RecordingManager, AutomationManager};
-//! let recording = RecordingManager::new(44100.0);
+//! // Recording via SamplerSystem
+//! let session = sampler.record("output.wav").channels(2).start();
 //! ```
 
-// Error types
 pub mod error;
 pub use error::{Error, Result};
 
-// Main high-level API (most common usage)
 mod system;
 pub use system::{CaptureSession, SamplerSystem, SamplerSystemBuilder};
 
-// Fluent builders
 mod stream_builder;
 pub use stream_builder::{RecordBuilder, StreamBuilder};
 
-// Fluent handle
 mod handle;
 pub use handle::SamplerHandle;
 
-// DSP nodes for FunDSP graph integration
+mod auditioner;
+pub use auditioner::Auditioner;
+
 pub use audio_input::{AudioInput, AudioInputBackend};
 pub use sampler::{SamplerUnit, StreamingSamplerUnit};
-pub use time_stretch::TimeStretchUnit;
+pub use time_stretch::{
+    FftSize, GrainSize, TimeStretchAlgorithm, TimeStretchParams, TimeStretchUnit,
+};
 
-// Modules - always compiled (SamplerSystem needs them internally)
-pub mod audio_input;
-pub mod butler;
-pub mod recording;
-pub mod sampler;
-pub mod time_stretch;
+pub use butler::{
+    BufferConfig, CacheStats, CaptureBufferProducer, CaptureId, ChannelStreamState, IOMetrics,
+    IOMetricsSnapshot, LruCache, PlayDirection, RegionBufferConsumer, SharedStreamState, Varispeed,
+};
+
+mod audio_input;
+pub(crate) mod butler;
+pub(crate) mod recording;
+mod sampler;
+mod time_stretch;

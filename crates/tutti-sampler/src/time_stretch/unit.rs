@@ -1,42 +1,82 @@
 //! Time-stretching audio unit wrapper.
 
 use std::sync::Arc;
-use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
+use tutti_core::{AtomicFloat, AudioUnit, BufferMut, BufferRef, SignalFrame};
 
+use super::granular::{GrainSize, GranularProcessor};
 use super::phase_vocoder::PhaseVocoderProcessor;
-use super::types::{AtomicF32, FftSize, TimeStretchAlgorithm};
+use super::types::{FftSize, TimeStretchAlgorithm};
+
+/// Internal processor enum for algorithm switching
+enum Processor {
+    PhaseVocoder(PhaseVocoderProcessor),
+    Granular(GranularProcessor),
+}
+
+impl Processor {
+    fn latency_samples(&self) -> usize {
+        match self {
+            Processor::PhaseVocoder(p) => p.latency_samples(),
+            Processor::Granular(p) => p.latency_samples(),
+        }
+    }
+
+    fn reset(&mut self) {
+        match self {
+            Processor::PhaseVocoder(p) => p.reset(),
+            Processor::Granular(p) => p.reset(),
+        }
+    }
+
+    fn set_sample_rate(&mut self, sr: f64) {
+        match self {
+            Processor::PhaseVocoder(p) => p.set_sample_rate(sr),
+            Processor::Granular(p) => p.set_sample_rate(sr),
+        }
+    }
+
+    fn push_input(&mut self, samples: &[f32]) {
+        match self {
+            Processor::PhaseVocoder(p) => p.push_input(samples),
+            Processor::Granular(p) => p.push_input(samples),
+        }
+    }
+
+    fn process(&mut self, stretch: f32, pitch_ratio: f32) {
+        match self {
+            Processor::PhaseVocoder(p) => p.process(stretch, pitch_ratio),
+            Processor::Granular(p) => p.process(stretch, pitch_ratio),
+        }
+    }
+
+    fn pop_output(&mut self, output: &mut [f32]) -> usize {
+        match self {
+            Processor::PhaseVocoder(p) => p.pop_output(output),
+            Processor::Granular(p) => p.pop_output(output),
+        }
+    }
+}
+
+impl Clone for Processor {
+    fn clone(&self) -> Self {
+        match self {
+            Processor::PhaseVocoder(p) => Processor::PhaseVocoder(p.clone()),
+            Processor::Granular(p) => Processor::Granular(p.clone()),
+        }
+    }
+}
 
 /// Real-time time-stretching and pitch-shifting unit.
 pub struct TimeStretchUnit {
-    /// The source audio unit
     source: Box<dyn AudioUnit>,
-
-    /// Phase vocoder processor (stereo: left channel)
-    processor_left: PhaseVocoderProcessor,
-    /// Phase vocoder processor (stereo: right channel)
-    processor_right: PhaseVocoderProcessor,
-
-    /// Time stretch factor (atomic for lock-free updates)
-    /// 1.0 = normal, >1 = slower, <1 = faster
-    stretch_factor: Arc<AtomicF32>,
-
-    /// Pitch shift in cents (atomic for lock-free updates)
-    /// 0 = no shift, +100 = up 1 semitone, -100 = down 1 semitone
-    pitch_cents: Arc<AtomicF32>,
-
-    /// Whether time-stretching is enabled
+    processor_left: Processor,
+    processor_right: Processor,
+    stretch_factor: Arc<AtomicFloat>,
+    pitch_cents: Arc<AtomicFloat>,
     enabled: bool,
-
-    /// Current algorithm (for future granular support)
-    _algorithm: TimeStretchAlgorithm,
-
-    /// Sample rate
+    algorithm: TimeStretchAlgorithm,
     sample_rate: f64,
-
-    /// Intermediate buffer for source output
     source_buffer: Vec<f32>,
-
-    /// Pre-allocated scratch buffers for process() (avoids per-frame allocations)
     scratch_left: Vec<f32>,
     scratch_right: Vec<f32>,
     scratch_out_left: Vec<f32>,
@@ -44,34 +84,29 @@ pub struct TimeStretchUnit {
 }
 
 impl TimeStretchUnit {
-    /// Create a new time-stretch unit wrapping a source
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - The source AudioUnit to stretch (must have 2 outputs for stereo)
-    /// * `sample_rate` - Audio sample rate in Hz
+    /// Create with phase vocoder algorithm (default)
     pub fn new(source: Box<dyn AudioUnit>, sample_rate: f64) -> Self {
         Self::with_fft_size(source, sample_rate, FftSize::default())
     }
 
-    /// Create a new time-stretch unit with custom FFT size
-    ///
-    /// # Arguments
-    ///
-    /// * `source` - The source AudioUnit to stretch
-    /// * `sample_rate` - Audio sample rate in Hz
-    /// * `fft_size` - FFT size preset (affects latency/quality trade-off)
+    /// Create with custom FFT size (phase vocoder)
     pub fn with_fft_size(source: Box<dyn AudioUnit>, sample_rate: f64, fft_size: FftSize) -> Self {
         Self {
             source,
-            processor_left: PhaseVocoderProcessor::new(fft_size, sample_rate),
-            processor_right: PhaseVocoderProcessor::new(fft_size, sample_rate),
-            stretch_factor: Arc::new(AtomicF32::new(1.0)),
-            pitch_cents: Arc::new(AtomicF32::new(0.0)),
+            processor_left: Processor::PhaseVocoder(PhaseVocoderProcessor::new(
+                fft_size,
+                sample_rate,
+            )),
+            processor_right: Processor::PhaseVocoder(PhaseVocoderProcessor::new(
+                fft_size,
+                sample_rate,
+            )),
+            stretch_factor: Arc::new(AtomicFloat::new(1.0)),
+            pitch_cents: Arc::new(AtomicFloat::new(0.0)),
             enabled: true,
-            _algorithm: TimeStretchAlgorithm::PhaseLocked,
+            algorithm: TimeStretchAlgorithm::PhaseVocoder,
             sample_rate,
-            source_buffer: vec![0.0; 2], // Stereo output
+            source_buffer: vec![0.0; 2],
             scratch_left: Vec::new(),
             scratch_right: Vec::new(),
             scratch_out_left: Vec::new(),
@@ -79,66 +114,77 @@ impl TimeStretchUnit {
         }
     }
 
-    /// Set the time stretch factor
+    /// Create with granular algorithm (better for drums/transients)
     ///
-    /// * 1.0 = normal speed
-    /// * 2.0 = half speed (stretched to 2x duration)
-    /// * 0.5 = double speed (compressed to half duration)
-    ///
-    /// Range: 0.25 to 4.0
-    pub fn set_stretch_factor(&self, factor: f32) {
-        let clamped = factor.clamp(0.25, 4.0);
-        self.stretch_factor.set(clamped);
+    /// Note: Granular does NOT support pitch shifting - use phase vocoder for that.
+    pub fn with_granular(
+        source: Box<dyn AudioUnit>,
+        sample_rate: f64,
+        grain_size: GrainSize,
+    ) -> Self {
+        Self {
+            source,
+            processor_left: Processor::Granular(GranularProcessor::new(grain_size, sample_rate)),
+            processor_right: Processor::Granular(GranularProcessor::new(grain_size, sample_rate)),
+            stretch_factor: Arc::new(AtomicFloat::new(1.0)),
+            pitch_cents: Arc::new(AtomicFloat::new(0.0)),
+            enabled: true,
+            algorithm: TimeStretchAlgorithm::Granular,
+            sample_rate,
+            source_buffer: vec![0.0; 2],
+            scratch_left: Vec::new(),
+            scratch_right: Vec::new(),
+            scratch_out_left: Vec::new(),
+            scratch_out_right: Vec::new(),
+        }
     }
 
-    /// Get the current stretch factor
+    /// Get the current algorithm
+    pub fn algorithm(&self) -> TimeStretchAlgorithm {
+        self.algorithm
+    }
+
+    /// Set stretch factor (1.0 = normal, 2.0 = half speed, 0.5 = double speed)
+    pub fn set_stretch_factor(&self, factor: f32) {
+        self.stretch_factor.set(factor.clamp(0.25, 4.0));
+    }
+
+    /// Get current stretch factor
     pub fn stretch_factor(&self) -> f32 {
         self.stretch_factor.get()
     }
 
-    /// Get a clone of the stretch factor Arc for external control
-    pub fn stretch_factor_arc(&self) -> Arc<AtomicF32> {
+    /// Get Arc for lock-free external control
+    pub fn stretch_factor_arc(&self) -> Arc<AtomicFloat> {
         Arc::clone(&self.stretch_factor)
     }
 
-    /// Set the pitch shift in cents
-    ///
-    /// * 0 = no shift
-    /// * +100 = up 1 semitone
-    /// * +1200 = up 1 octave
-    /// * -100 = down 1 semitone
-    ///
-    /// Range: -2400 to +2400 (±2 octaves)
+    /// Set pitch shift in cents (only works with PhaseVocoder algorithm)
     pub fn set_pitch_cents(&self, cents: f32) {
-        let clamped = cents.clamp(-2400.0, 2400.0);
-        self.pitch_cents.set(clamped);
+        self.pitch_cents.set(cents.clamp(-2400.0, 2400.0));
     }
 
-    /// Get the current pitch shift in cents
+    /// Get current pitch shift in cents
     pub fn pitch_cents(&self) -> f32 {
         self.pitch_cents.get()
     }
 
-    /// Get a clone of the pitch cents Arc for external control
-    pub fn pitch_cents_arc(&self) -> Arc<AtomicF32> {
+    /// Get Arc for lock-free external control
+    pub fn pitch_cents_arc(&self) -> Arc<AtomicFloat> {
         Arc::clone(&self.pitch_cents)
     }
 
-    /// Enable or disable time-stretching
-    ///
-    /// When disabled, audio passes through unchanged (lower CPU usage).
+    /// Enable/disable processing
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
 
-    /// Check if time-stretching is enabled
+    /// Check if enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Check if any processing is actually active
-    ///
-    /// Returns false if stretch=1.0 and pitch=0.0 (passthrough mode)
+    /// Check if processing is active (not passthrough)
     pub fn is_processing(&self) -> bool {
         if !self.enabled {
             return false;
@@ -148,27 +194,21 @@ impl TimeStretchUnit {
         (stretch - 1.0).abs() > 0.001 || pitch.abs() > 0.5
     }
 
-    /// Get the processing latency in samples
+    /// Get latency in samples
     pub fn latency_samples(&self) -> usize {
         self.processor_left.latency_samples()
     }
 
-    /// Get the FFT size
-    pub fn fft_size(&self) -> usize {
-        self.processor_left.fft_size()
-    }
-
-    /// Get access to the source unit
+    /// Get source unit
     pub fn source(&self) -> &dyn AudioUnit {
         &*self.source
     }
 
-    /// Get mutable access to the source unit
+    /// Get mutable source unit
     pub fn source_mut(&mut self) -> &mut dyn AudioUnit {
         &mut *self.source
     }
 
-    /// Calculate pitch shift ratio from cents
     #[inline]
     fn pitch_ratio(&self) -> f32 {
         2.0_f32.powf(self.pitch_cents.get() / 1200.0)
@@ -181,10 +221,10 @@ impl Clone for TimeStretchUnit {
             source: self.source.clone(),
             processor_left: self.processor_left.clone(),
             processor_right: self.processor_right.clone(),
-            stretch_factor: Arc::new(AtomicF32::new(self.stretch_factor.get())),
-            pitch_cents: Arc::new(AtomicF32::new(self.pitch_cents.get())),
+            stretch_factor: Arc::new(AtomicFloat::new(self.stretch_factor.get())),
+            pitch_cents: Arc::new(AtomicFloat::new(self.pitch_cents.get())),
             enabled: self.enabled,
-            _algorithm: self._algorithm,
+            algorithm: self.algorithm,
             sample_rate: self.sample_rate,
             source_buffer: self.source_buffer.clone(),
             scratch_left: self.scratch_left.clone(),
@@ -201,7 +241,7 @@ impl AudioUnit for TimeStretchUnit {
     }
 
     fn outputs(&self) -> usize {
-        2 // Always stereo output
+        2
     }
 
     fn reset(&mut self) {
@@ -218,40 +258,34 @@ impl AudioUnit for TimeStretchUnit {
     }
 
     fn tick(&mut self, input: &[f32], output: &mut [f32]) {
-        // Get source output
         self.source.tick(input, &mut self.source_buffer);
 
         if !self.is_processing() {
-            // Passthrough mode
             if output.len() >= 2 {
                 output[0] = self.source_buffer[0];
-                output[1] = if self.source_buffer.len() >= 2 {
-                    self.source_buffer[1]
-                } else {
-                    self.source_buffer[0]
-                };
+                output[1] = self
+                    .source_buffer
+                    .get(1)
+                    .copied()
+                    .unwrap_or(self.source_buffer[0]);
             }
             return;
         }
 
-        // Get parameters
         let stretch = self.stretch_factor.get();
         let pitch_ratio = self.pitch_ratio();
 
-        // Push source output to processors
         self.processor_left.push_input(&[self.source_buffer[0]]);
-        let right_sample = if self.source_buffer.len() >= 2 {
-            self.source_buffer[1]
-        } else {
-            self.source_buffer[0]
-        };
-        self.processor_right.push_input(&[right_sample]);
+        let right = self
+            .source_buffer
+            .get(1)
+            .copied()
+            .unwrap_or(self.source_buffer[0]);
+        self.processor_right.push_input(&[right]);
 
-        // Process
         self.processor_left.process(stretch, pitch_ratio);
         self.processor_right.process(stretch, pitch_ratio);
 
-        // Pop output
         if output.len() >= 2 {
             let mut left = [0.0f32];
             let mut right = [0.0f32];
@@ -263,7 +297,6 @@ impl AudioUnit for TimeStretchUnit {
     }
 
     fn process(&mut self, size: usize, input: &BufferRef, output: &mut BufferMut) {
-        // Resize scratch buffers if needed (stable after first call)
         if self.scratch_left.len() < size {
             self.scratch_left.resize(size, 0.0);
             self.scratch_right.resize(size, 0.0);
@@ -271,7 +304,6 @@ impl AudioUnit for TimeStretchUnit {
             self.scratch_out_right.resize(size, 0.0);
         }
 
-        // Collect source samples
         let has_inputs = self.source.inputs() > 0;
         let mut input_sample = [0.0f32];
         for i in 0..size {
@@ -282,15 +314,14 @@ impl AudioUnit for TimeStretchUnit {
                 self.source.tick(&[], &mut self.source_buffer);
             }
             self.scratch_left[i] = self.source_buffer[0];
-            self.scratch_right[i] = if self.source_buffer.len() >= 2 {
-                self.source_buffer[1]
-            } else {
-                self.source_buffer[0]
-            };
+            self.scratch_right[i] = self
+                .source_buffer
+                .get(1)
+                .copied()
+                .unwrap_or(self.source_buffer[0]);
         }
 
         if !self.is_processing() {
-            // Passthrough mode
             for i in 0..size {
                 output.set_f32(0, i, self.scratch_left[i]);
                 output.set_f32(1, i, self.scratch_right[i]);
@@ -298,19 +329,15 @@ impl AudioUnit for TimeStretchUnit {
             return;
         }
 
-        // Get parameters
         let stretch = self.stretch_factor.get();
         let pitch_ratio = self.pitch_ratio();
 
-        // Push all source samples to processors
         self.processor_left.push_input(&self.scratch_left[..size]);
         self.processor_right.push_input(&self.scratch_right[..size]);
 
-        // Process
         self.processor_left.process(stretch, pitch_ratio);
         self.processor_right.process(stretch, pitch_ratio);
 
-        // Pop output
         self.scratch_out_left[..size].fill(0.0);
         self.scratch_out_right[..size].fill(0.0);
 
@@ -321,7 +348,6 @@ impl AudioUnit for TimeStretchUnit {
             .processor_right
             .pop_output(&mut self.scratch_out_right[..size]);
 
-        // Write to output buffer
         for i in 0..size {
             output.set_f32(
                 0,
@@ -345,7 +371,6 @@ impl AudioUnit for TimeStretchUnit {
     }
 
     fn get_id(&self) -> u64 {
-        // Combine source ID with a marker for time-stretch
         const TIME_STRETCH_MARKER: u64 = 0xABC0_0000_0000_0000;
         self.source.get_id() ^ TIME_STRETCH_MARKER
     }
@@ -363,14 +388,11 @@ impl AudioUnit for TimeStretchUnit {
     }
 
     fn footprint(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.source.footprint()
-            + self.processor_left.fft_size() * 8 * 2 // Approximate processor footprint
+        std::mem::size_of::<Self>() + self.source.footprint()
     }
 
     fn allocate(&mut self) {
         self.source.allocate();
-        // Processors are already allocated during construction
     }
 }
 
@@ -378,7 +400,6 @@ impl AudioUnit for TimeStretchUnit {
 mod tests {
     use super::*;
 
-    // Simple passthrough unit for testing
     struct PassthroughUnit;
 
     impl AudioUnit for PassthroughUnit {
@@ -426,19 +447,22 @@ mod tests {
     }
 
     #[test]
-    fn test_creation() {
-        let source = Box::new(PassthroughUnit);
-        let unit = TimeStretchUnit::new(source, 44100.0);
-
+    fn test_phase_vocoder_creation() {
+        let unit = TimeStretchUnit::new(Box::new(PassthroughUnit), 44100.0);
+        assert_eq!(unit.algorithm(), TimeStretchAlgorithm::PhaseVocoder);
         assert_eq!(unit.outputs(), 2);
-        assert!((unit.stretch_factor() - 1.0).abs() < 0.001);
-        assert!(unit.pitch_cents().abs() < 0.001);
+    }
+
+    #[test]
+    fn test_granular_creation() {
+        let unit =
+            TimeStretchUnit::with_granular(Box::new(PassthroughUnit), 44100.0, GrainSize::Medium);
+        assert_eq!(unit.algorithm(), TimeStretchAlgorithm::Granular);
     }
 
     #[test]
     fn test_set_parameters() {
-        let source = Box::new(PassthroughUnit);
-        let unit = TimeStretchUnit::new(source, 44100.0);
+        let unit = TimeStretchUnit::new(Box::new(PassthroughUnit), 44100.0);
 
         unit.set_stretch_factor(2.0);
         assert!((unit.stretch_factor() - 2.0).abs() < 0.001);
@@ -449,38 +473,27 @@ mod tests {
 
     #[test]
     fn test_parameter_clamping() {
-        let source = Box::new(PassthroughUnit);
-        let unit = TimeStretchUnit::new(source, 44100.0);
+        let unit = TimeStretchUnit::new(Box::new(PassthroughUnit), 44100.0);
 
         unit.set_stretch_factor(10.0);
         assert!((unit.stretch_factor() - 4.0).abs() < 0.001);
 
         unit.set_stretch_factor(0.1);
         assert!((unit.stretch_factor() - 0.25).abs() < 0.001);
-
-        unit.set_pitch_cents(5000.0);
-        assert!((unit.pitch_cents() - 2400.0).abs() < 0.001);
     }
 
     #[test]
     fn test_passthrough_mode() {
-        let source = Box::new(PassthroughUnit);
-        let mut unit = TimeStretchUnit::new(source, 44100.0);
-
-        // With default parameters, should be passthrough
+        let mut unit = TimeStretchUnit::new(Box::new(PassthroughUnit), 44100.0);
         assert!(!unit.is_processing());
 
         let mut output = [0.0f32; 2];
         unit.tick(&[], &mut output);
-
-        // After warming up the processor, we should get output
-        // Note: There's latency, so first samples may be zero
     }
 
     #[test]
     fn test_enabled_flag() {
-        let source = Box::new(PassthroughUnit);
-        let mut unit = TimeStretchUnit::new(source, 44100.0);
+        let mut unit = TimeStretchUnit::new(Box::new(PassthroughUnit), 44100.0);
 
         unit.set_stretch_factor(2.0);
         assert!(unit.is_processing());
@@ -493,35 +506,13 @@ mod tests {
     }
 
     #[test]
-    fn test_arc_access() {
-        let source = Box::new(PassthroughUnit);
-        let unit = TimeStretchUnit::new(source, 44100.0);
-
-        let stretch_arc = unit.stretch_factor_arc();
-        let pitch_arc = unit.pitch_cents_arc();
-
-        // Modify through Arc
-        stretch_arc.set(1.5);
-        pitch_arc.set(-100.0);
-
-        // Verify changes visible through unit
-        assert!((unit.stretch_factor() - 1.5).abs() < 0.001);
-        assert!((unit.pitch_cents() - (-100.0)).abs() < 0.001);
-    }
-
-    #[test]
     fn test_clone() {
-        let source = Box::new(PassthroughUnit);
-        let unit1 = TimeStretchUnit::new(source, 44100.0);
+        let unit1 = TimeStretchUnit::new(Box::new(PassthroughUnit), 44100.0);
         unit1.set_stretch_factor(1.5);
-        unit1.set_pitch_cents(-200.0);
 
         let unit2 = unit1.clone();
-
         assert!((unit2.stretch_factor() - 1.5).abs() < 0.001);
-        assert!((unit2.pitch_cents() - (-200.0)).abs() < 0.001);
 
-        // Clones should have independent parameters
         unit1.set_stretch_factor(2.0);
         assert!((unit1.stretch_factor() - 2.0).abs() < 0.001);
         assert!((unit2.stretch_factor() - 1.5).abs() < 0.001);

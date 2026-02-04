@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// Unique identifier for a region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RegionId(pub u64);
+pub(crate) struct RegionId(pub u64);
 
 impl RegionId {
     /// Generate a new unique region ID.
@@ -28,11 +28,12 @@ impl CaptureId {
     }
 }
 
-use super::prefetch::{CaptureBufferConsumer, RegionBufferProducer};
+use super::prefetch::CaptureBufferConsumer;
+use super::varispeed::PlayDirection;
 
 /// Butler transport state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ButlerState {
+pub(crate) enum ButlerState {
     #[default]
     Running,
     Paused,
@@ -40,42 +41,20 @@ pub enum ButlerState {
     Shutdown,
 }
 
-/// Priority for flush operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum FlushPriority {
-    Normal = 0,
-    Urgent = 1,
-}
-
 /// Request to flush captured audio to disk.
-#[derive(Debug, Clone)]
-pub struct FlushRequest {
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct FlushRequest {
     pub capture_id: CaptureId,
-    pub file_path: PathBuf,
-    pub priority: FlushPriority,
 }
 
 impl FlushRequest {
-    pub fn new(capture_id: CaptureId, file_path: PathBuf) -> Self {
-        Self {
-            capture_id,
-            file_path,
-            priority: FlushPriority::Normal,
-        }
-    }
-
-    pub fn urgent(capture_id: CaptureId, file_path: PathBuf) -> Self {
-        Self {
-            capture_id,
-            file_path,
-            priority: FlushPriority::Urgent,
-        }
+    pub(crate) fn new(capture_id: CaptureId) -> Self {
+        Self { capture_id }
     }
 }
 
 /// Command sent to the Butler thread
-pub enum ButlerCommand {
-    // === Transport Control (Ardour-style) ===
+pub(crate) enum ButlerCommand {
     /// Start/resume butler processing
     Run,
     /// Pause butler (e.g., during locate)
@@ -83,56 +62,65 @@ pub enum ButlerCommand {
     /// Wait for butler to complete current work and signal ready
     WaitForCompletion,
 
-    // === Region Management ===
-    /// Register a region buffer producer (Butler will write to this)
-    RegisterProducer {
-        /// Region identifier
-        region_id: RegionId,
-        /// Buffer producer for this region
-        producer: RegionBufferProducer,
-    },
-    /// Remove a region buffer
-    RemoveRegion(RegionId),
-    /// Seek a region to a new position (flush buffer and reposition)
-    SeekRegion {
-        /// Region identifier
-        region_id: RegionId,
-        /// Target sample offset
-        sample_offset: usize,
-    },
-
-    // === File Streaming (Ultra Low-Level) ===
     /// Stream an audio file to a channel buffer
     StreamAudioFile {
         /// Channel index to stream to
         channel_index: usize,
         /// Path to audio file
         file_path: PathBuf,
-        /// Start position in the file (in samples)
-        start_sample: usize,
-        /// Duration to stream (in samples)
-        duration_samples: usize,
         /// Offset into the file to start reading (in samples)
         offset_samples: usize,
-        /// Playback speed multiplier
-        speed: f32,
-        /// Gain multiplier (linear, not dB)
-        gain: f32,
     },
     /// Stop streaming for a channel
     StopStreaming {
         /// Channel index to stop
         channel_index: usize,
     },
-    /// Set playback position for a channel (in seconds)
-    SetPlaybackPosition {
+
+    /// Seek within a stream (in samples)
+    SeekStream {
         /// Channel index
         channel_index: usize,
-        /// Position in seconds
-        position_seconds: f64,
+        /// Target position in samples
+        position_samples: u64,
     },
 
-    // === Capture (Recording Write-Behind) ===
+    /// Set loop range for a channel (in samples)
+    SetLoopRange {
+        /// Channel index
+        channel_index: usize,
+        /// Loop start position in samples
+        start_samples: u64,
+        /// Loop end position in samples
+        end_samples: u64,
+        /// Crossfade length in samples (0 = no crossfade)
+        crossfade_samples: usize,
+    },
+
+    /// Clear loop range for a channel
+    ClearLoopRange {
+        /// Channel index
+        channel_index: usize,
+    },
+
+    /// Set varispeed (direction and speed) for a channel
+    SetVarispeed {
+        /// Channel index
+        channel_index: usize,
+        /// Playback direction
+        direction: PlayDirection,
+        /// Speed multiplier (1.0 = normal)
+        speed: f32,
+    },
+
+    /// Update PDC preroll for a channel (plugin latency changed)
+    UpdatePdcPreroll {
+        /// Channel index
+        channel_index: usize,
+        /// New preroll amount in samples
+        new_preroll: u64,
+    },
+
     /// Register a capture buffer consumer (Butler will read from this and write to disk)
     RegisterCapture {
         /// Capture session identifier
@@ -153,7 +141,12 @@ pub enum ButlerCommand {
     /// Flush all capture buffers (e.g., when stopping recording)
     FlushAll,
 
-    // === Lifecycle ===
+    /// Set buffer margin multiplier (for external sync jitter handling)
+    SetBufferMargin {
+        /// Margin multiplier (1.0 = normal, >1.0 = larger buffers for jitter)
+        margin: f64,
+    },
+
     /// Shutdown the butler thread
     Shutdown,
 }
@@ -161,54 +154,67 @@ pub enum ButlerCommand {
 impl std::fmt::Debug for ButlerCommand {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            // Transport control
             ButlerCommand::Run => write!(f, "Run"),
             ButlerCommand::Pause => write!(f, "Pause"),
             ButlerCommand::WaitForCompletion => write!(f, "WaitForCompletion"),
 
-            // Region management
-            ButlerCommand::RegisterProducer { region_id, .. } => f
-                .debug_struct("RegisterProducer")
-                .field("region_id", region_id)
-                .finish(),
-            ButlerCommand::RemoveRegion(id) => f.debug_tuple("RemoveRegion").field(id).finish(),
-            ButlerCommand::SeekRegion {
-                region_id,
-                sample_offset,
-            } => f
-                .debug_struct("SeekRegion")
-                .field("region_id", region_id)
-                .field("sample_offset", sample_offset)
-                .finish(),
-
-            // File streaming
             ButlerCommand::StreamAudioFile {
                 channel_index,
                 file_path,
-                start_sample,
-                duration_samples,
-                ..
+                offset_samples,
             } => f
                 .debug_struct("StreamAudioFile")
                 .field("channel_index", channel_index)
                 .field("file_path", file_path)
-                .field("start_sample", start_sample)
-                .field("duration_samples", duration_samples)
+                .field("offset_samples", offset_samples)
                 .finish(),
             ButlerCommand::StopStreaming { channel_index } => f
                 .debug_struct("StopStreaming")
                 .field("channel_index", channel_index)
                 .finish(),
-            ButlerCommand::SetPlaybackPosition {
+            ButlerCommand::SeekStream {
                 channel_index,
-                position_seconds,
+                position_samples,
             } => f
-                .debug_struct("SetPlaybackPosition")
+                .debug_struct("SeekStream")
                 .field("channel_index", channel_index)
-                .field("position_seconds", position_seconds)
+                .field("position_samples", position_samples)
+                .finish(),
+            ButlerCommand::SetLoopRange {
+                channel_index,
+                start_samples,
+                end_samples,
+                crossfade_samples,
+            } => f
+                .debug_struct("SetLoopRange")
+                .field("channel_index", channel_index)
+                .field("start_samples", start_samples)
+                .field("end_samples", end_samples)
+                .field("crossfade_samples", crossfade_samples)
+                .finish(),
+            ButlerCommand::ClearLoopRange { channel_index } => f
+                .debug_struct("ClearLoopRange")
+                .field("channel_index", channel_index)
+                .finish(),
+            ButlerCommand::SetVarispeed {
+                channel_index,
+                direction,
+                speed,
+            } => f
+                .debug_struct("SetVarispeed")
+                .field("channel_index", channel_index)
+                .field("direction", direction)
+                .field("speed", speed)
+                .finish(),
+            ButlerCommand::UpdatePdcPreroll {
+                channel_index,
+                new_preroll,
+            } => f
+                .debug_struct("UpdatePdcPreroll")
+                .field("channel_index", channel_index)
+                .field("new_preroll", new_preroll)
                 .finish(),
 
-            // Capture
             ButlerCommand::RegisterCapture {
                 capture_id,
                 file_path,
@@ -222,7 +228,11 @@ impl std::fmt::Debug for ButlerCommand {
             ButlerCommand::Flush(req) => f.debug_tuple("Flush").field(req).finish(),
             ButlerCommand::FlushAll => write!(f, "FlushAll"),
 
-            // Lifecycle
+            ButlerCommand::SetBufferMargin { margin } => f
+                .debug_struct("SetBufferMargin")
+                .field("margin", margin)
+                .finish(),
+
             ButlerCommand::Shutdown => write!(f, "Shutdown"),
         }
     }
