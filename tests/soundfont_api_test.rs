@@ -19,7 +19,7 @@ mod soundfont_tests {
 
     #[test]
     fn test_soundfont_instance_api() {
-        let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
+        let engine = TuttiEngine::builder().build().unwrap();
 
         // If we had a valid .sf2 file, we could:
         // 1. Load it: engine.load_sf2("piano", "path/to/piano.sf2")?;
@@ -35,7 +35,8 @@ mod soundfont_tests {
         //        chain!(net, piano1 => output);
         //    });
 
-        // For now, just verify the engine was created successfully
-        assert_eq!(engine.sample_rate(), 48000.0);
+        // Verify the engine was created successfully
+        // Sample rate comes from the audio device (typically 44100 or 48000)
+        assert!(engine.sample_rate() > 0.0);
     }
 }

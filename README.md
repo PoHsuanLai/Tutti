@@ -99,7 +99,7 @@ let engine = TuttiEngine::builder()
     .build()?;
 
 // Load nodes once (explicit format methods = compile-time type safety)
-engine.load_mpk("my_synth", "model.mpk")?;      // Neural model
+engine.load_synth_mpk("my_synth", "model.mpk")?; // Neural model
 engine.load_vst3("reverb", "plugin.vst3")?;     // VST3 plugin
 engine.load_wav("kick", "kick.wav")?;           // WAV sample
 
@@ -212,7 +212,7 @@ engine.graph(|net| {
 engine.export()
     .duration_seconds(10.0)
     .format(AudioFormat::Flac)
-    .normalize(NormalizationMode::Lufs(-14.0))
+    .normalize(NormalizationMode::lufs(-14.0))
     .to_file("output.flac")?;
 ```
 

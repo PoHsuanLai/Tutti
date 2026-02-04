@@ -52,14 +52,14 @@ full = [
 ]
 
 # === MIDI Features ===
-midi = ["dep:tutti-midi-io", "tutti-core/midi", "tutti-synth?/midi"]
+midi = ["dep:tutti-midi-io", "tutti-core/midi"]
 midi-io = ["midi", "tutti-midi-io/midi-io"]  # Hardware MIDI I/O
 mpe = ["midi", "tutti-midi-io/mpe"]          # MPE support
 midi2 = ["midi", "tutti-midi-io/midi2"]      # MIDI 2.0
 
 # === Synth Features ===
 synth = ["dep:tutti-synth"]
-soundfont = ["synth", "tutti-synth/soundfont", "tutti-synth/midi"]
+soundfont = ["synth", "tutti-synth/soundfont"]
 
 # === Plugin Hosting ===
 plugin = ["dep:tutti-plugin", "dep:tokio"]
@@ -79,7 +79,7 @@ sampler-audio-input = ["sampler", "tutti-sampler/audio-input"] # Hardware audio 
 
 # === Export & Analysis ===
 export = ["dep:tutti-export"]
-analysis = ["dep:tutti-analysis"]
+analysis = ["dep:tutti-analysis", "tutti-analysis/live"]
 
 [dependencies]
 # Core (always included - minimal DSP)
@@ -90,7 +90,7 @@ tutti-dsp = { version = "0.0.1", path = "crates/tutti-dsp", default-features = f
 # Optional subsystems
 tutti-sampler = { version = "0.0.1", path = "crates/tutti-sampler", optional = true, default-features = false }
 tutti-analysis = { version = "0.0.1", path = "crates/tutti-analysis", optional = true }
-tutti-export = { version = "0.0.1", path = "crates/tutti-export", optional = true, default-features = false }
+tutti-export = { version = "0.0.1", path = "crates/tutti-export", optional = true }
 tutti-midi-io = { version = "0.0.1", path = "crates/tutti-midi-io", optional = true, default-features = false }
 tutti-synth = { version = "0.0.1", path = "crates/tutti-synth", optional = true, default-features = false }
 tutti-plugin = { version = "0.0.1", path = "crates/tutti-plugin", optional = true }

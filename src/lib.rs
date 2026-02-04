@@ -30,7 +30,7 @@
 //!     .build()?;
 //!
 //! // Load nodes once (explicit format methods = compile-time type safety)
-//! engine.load_mpk("my_synth", "model.mpk")?;      // Neural model
+//! engine.load_synth_mpk("my_synth", "model.mpk")?; // Neural model
 //! engine.load_vst3("reverb", "plugin.vst3")?;     // VST3 plugin
 //!
 //! // Add custom DSP nodes programmatically
@@ -57,9 +57,9 @@
 //!
 //! Tutti provides many AudioUnit implementations out of the box:
 //!
-//! - **Synths**: `PolySynth` (waveform synth), `SoundFontUnit` (sample-based)
+//! - **Synths**: `SoundFontUnit` (sample-based), voice allocator, modulation matrix
 //! - **Samplers**: `SamplerUnit`, `StreamingSamplerUnit`, `TimeStretchUnit`
-//! - **DSP**: `LfoNode`, `EnvelopeFollowerNode`, sidechain dynamics
+//! - **DSP**: `LfoNode`, sidechain compressor/gate
 //! - **Spatial**: `BinauralPannerNode` (HRTF), `SpatialPannerNode` (VBAP)
 //! - **Effects**: All FunDSP nodes (`lowpass_hz`, `reverb_stereo`, 100+ more)
 //!
@@ -96,7 +96,6 @@ pub use tutti_core::{
     AudioUnit,
     BufferMut,
     BufferRef,
-    Connection,
     CpuMeter,
     CpuMetrics,
 
@@ -161,7 +160,7 @@ pub use tutti_midi_io::{
 };
 
 #[cfg(feature = "midi")]
-pub use tutti_core::{AsMidiAudioUnit, MidiAudioUnit, MidiRegistry};
+pub use tutti_core::{AsMidiAudioUnit, MidiAudioUnit, MidiRegistry, MidiRoutingTable};
 
 // Sampler subsystem (optional)
 #[cfg(feature = "sampler")]
@@ -175,24 +174,22 @@ pub use tutti_sampler::{
 
 // Time stretch types from sampler subcrate
 #[cfg(feature = "sampler")]
-pub use tutti_sampler::time_stretch::TimeStretchParams;
+pub use tutti_sampler::TimeStretchParams;
 
-// Synth subsystem
+// Synth subsystem (building blocks for synthesis)
 #[cfg(feature = "synth")]
 pub use tutti_synth as synth;
 
-#[cfg(feature = "synth")]
-pub use tutti_synth::{Envelope, PolySynth, Waveform};
-
+// SoundFont synthesis
 #[cfg(feature = "soundfont")]
-pub use tutti_synth::{SoundFontSynth, SoundFontSystem, SoundFontUnit};
+pub use tutti_synth::{SoundFontHandle, SoundFontSynth, SoundFontSystem, SoundFontUnit};
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
 
 pub use tutti_dsp::{
-    ChannelLayout, EnvelopeFollowerNode, EnvelopeMode, LfoMode, LfoNode, LfoShape,
-    SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate,
+    ChannelLayout, LfoMode, LfoNode, LfoShape, SidechainCompressor, SidechainGate,
+    StereoSidechainCompressor, StereoSidechainGate,
 };
 
 // Spatial audio (always included) - only AudioUnit nodes
@@ -204,7 +201,9 @@ pub use tutti_analysis as analysis;
 
 #[cfg(feature = "analysis")]
 pub use tutti_analysis::{
-    CorrelationMeter, PitchDetector, PitchResult, StereoAnalysis, Transient, TransientDetector,
+    AnalysisHandle, CorrelationMeter, DetectionMethod, LiveAnalysisState, MultiResolutionSummary,
+    PitchDetector, PitchResult, StereoAnalysis, StereoWaveformSummary, Transient,
+    TransientDetector, WaveformBlock, WaveformSummary,
 };
 
 // Export (optional)
@@ -212,7 +211,7 @@ pub use tutti_analysis::{
 pub use tutti_export as export;
 
 #[cfg(feature = "export")]
-pub use tutti_export::{AudioFormat, ExportBuilder, ExportOptions};
+pub use tutti_export::{AudioFormat, ExportBuilder, ExportOptions, NormalizationMode};
 
 // Plugin hosting
 #[cfg(feature = "plugin")]
@@ -229,11 +228,11 @@ pub use tutti_plugin::{
 pub use tutti_neural as neural;
 
 #[cfg(feature = "neural")]
-pub use tutti_neural::{
-    register_all_neural_models, register_neural_directory, register_neural_effects,
-    register_neural_model, register_neural_synth_models, NeuralHandle, NeuralModelMetadata,
-    NeuralModelType, NeuralSystem, NeuralSystemBuilder,
-};
+pub use tutti_neural::{NeuralHandle, NeuralSystem, NeuralSystemBuilder};
+
+// Neural types from tutti-core
+#[cfg(feature = "neural")]
+pub use tutti_core::NeuralModelId;
 
 /// Full FunDSP prelude - oscillators, filters, effects, and more.
 ///
@@ -292,10 +291,12 @@ pub mod prelude {
     // Neural (optional)
     #[cfg(feature = "neural")]
     pub use crate::neural::{NeuralHandle, NeuralSystem};
+    #[cfg(feature = "neural")]
+    pub use tutti_core::NeuralModelId;
 
     // Export (optional)
     #[cfg(feature = "export")]
-    pub use crate::export::{AudioFormat, ExportBuilder};
+    pub use crate::export::{AudioFormat, ExportBuilder, NormalizationMode};
 
     // Analysis (optional)
     #[cfg(feature = "analysis")]

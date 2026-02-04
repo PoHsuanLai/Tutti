@@ -117,7 +117,20 @@ impl TuttiEngineBuilder {
 
     /// Build and start the engine
     pub fn build(self) -> Result<TuttiEngine> {
-        // Build core system
+        // Build MIDI subsystem first (if enabled) so we can pass port manager to core
+        #[cfg(feature = "midi")]
+        let midi = if self.enable_midi {
+            Some(Arc::new(
+                MidiSystem::builder()
+                    .io() // Enable hardware I/O
+                    .build()
+                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+            ))
+        } else {
+            None
+        };
+
+        // Build core system with MIDI routing if enabled
         let mut core_builder = TuttiSystemBuilder::default()
             .inputs(self.inputs)
             .outputs(self.outputs);
@@ -127,21 +140,17 @@ impl TuttiEngineBuilder {
             core_builder = core_builder.output_device(device);
         }
 
+        // Wire up MIDI port manager to the audio callback
+        // This enables hardware MIDI → audio graph routing
+        // Routing is configured via engine.core().midi_routing() after building
+        #[cfg(feature = "midi")]
+        if let Some(ref midi_system) = midi {
+            core_builder = core_builder.midi_input(midi_system.port_manager());
+        }
+
         let core = core_builder.build()?;
 
         let sample_rate = self.sample_rate.unwrap_or_else(|| core.sample_rate());
-
-        // Build optional subsystems
-        #[cfg(feature = "midi")]
-        let midi = if self.enable_midi {
-            Some(Arc::new(
-                MidiSystem::builder()
-                    .build()
-                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
-            ))
-        } else {
-            None
-        };
 
         // Build sampler subsystem (always enabled when feature is compiled)
         #[cfg(feature = "sampler")]

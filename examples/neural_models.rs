@@ -30,12 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Create engine (neural enabled via cargo feature)
-    let engine = TuttiEngine::builder()
-        .sample_rate(44100.0)
-        .build()?;
+    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
-    // Load neural model
-    engine.load_mpk("simple_synth", model_path)?;
+    // Load neural synth model
+    engine.load_synth_mpk("simple_synth", model_path)?;
 
     println!("Loaded neural model: simple_synth");
 

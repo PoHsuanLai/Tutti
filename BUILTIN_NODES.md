@@ -231,30 +231,28 @@ let lfo_node = engine.graph(|net| net.add(Box::new(lfo)));
 - `LfoShape::Random` - Sample & hold random
 
 **Modes:**
-- `LfoMode::Unipolar` - 0.0 to 1.0
-- `LfoMode::Bipolar` - -1.0 to 1.0
+- `LfoMode::FreeRunning` - Self-oscillating at specified frequency
+- `LfoMode::BeatSynced` - Synced to beat position input
 
-### EnvelopeFollowerNode
+### Envelope Following
 
-Tracks the amplitude envelope of an audio signal.
+For envelope detection, use the `afollow` function from the DSP module:
 
-**Features:** Always available
-
-**Usage:**
 ```rust
-use tutti::prelude::*;
+use tutti::dsp::afollow;
 
-let follower = EnvelopeFollowerNode::new(44100.0)
-    .attack(0.01)   // Attack time in seconds
-    .release(0.1)   // Release time in seconds
-    .mode(EnvelopeMode::Rms); // RMS or Peak detection
-
-let env = engine.graph(|net| net.add(Box::new(follower)));
+// Envelope follower with 10ms attack, 100ms release
+let env = afollow(0.01, 0.1);
 ```
 
-**Modes:**
-- `EnvelopeMode::Peak` - Track peak amplitude
-- `EnvelopeMode::Rms` - Track RMS (average) level
+Or for symmetric smoothing, use `follow`:
+
+```rust
+use tutti::dsp::follow;
+
+// Simple smoothing filter with 50ms response time
+let smooth = follow(0.05);
+```
 
 ### SidechainCompressor / StereoSidechainCompressor
 
@@ -562,7 +560,7 @@ use tutti::prelude::*;
 
 // Load external resources
 engine.load_sf2("piano", "piano.sf2")?;
-engine.load_mpk("synth", "model.mpk")?;
+engine.load_synth_mpk("synth", "model.mpk")?;
 engine.load_vst3("reverb", "plugin.vst3")?;
 
 // Then instance

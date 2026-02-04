@@ -30,10 +30,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("✓ SoundFont loaded\n");
 
     // Create synth instance
-    let synth = engine.instance("piano", &params! {
-        "preset" => 0,  // GM Piano
-        "bank" => 0,
-    })?;
+    let synth = engine.instance(
+        "piano",
+        &params! {
+            "preset" => 0,  // GM Piano
+            "bank" => 0,
+        },
+    )?;
 
     // Connect to output
     engine.graph(|net| {

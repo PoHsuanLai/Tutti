@@ -23,7 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("   $ burn-import onnx model.onnx --out-type burn model.mpk");
     println!();
     println!("3. Load with Tutti engine:");
-    println!("   engine.load_mpk(\"my_synth\", \"model.mpk\")?;");
+    println!("   engine.load_synth_mpk(\"my_synth\", \"model.mpk\")?;");
     println!();
     println!("4. Use in audio graph:");
     println!("   let synth = engine.instance(\"my_synth\", &params! {{}})?;");
