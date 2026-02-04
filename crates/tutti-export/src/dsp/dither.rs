@@ -114,20 +114,6 @@ pub fn apply_dither(
     }
 }
 
-/// Quantize samples to a target bit depth without dithering
-///
-/// # Arguments
-/// * `left` - Left channel (modified in place)
-/// * `right` - Right channel (modified in place)
-/// * `target_bits` - Target bit depth
-pub fn quantize(left: &mut [f32], right: &mut [f32], target_bits: u16) {
-    let max_value = (1 << (target_bits - 1)) as f32;
-
-    for i in 0..left.len() {
-        left[i] = (left[i] * max_value).round() / max_value;
-        right[i] = (right[i] * max_value).round() / max_value;
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -191,15 +177,4 @@ mod tests {
         assert!(max_sample < max_noise * 3.0);
     }
 
-    #[test]
-    fn test_quantize() {
-        let mut left = vec![0.123_456_79];
-        let mut right = vec![-0.987_654_3];
-
-        quantize(&mut left, &mut right, 16);
-
-        // Check that values are quantized to 16-bit precision
-        let quantized_l = (left[0] * 32768.0).round() / 32768.0;
-        assert!((left[0] - quantized_l).abs() < 1e-6);
-    }
 }

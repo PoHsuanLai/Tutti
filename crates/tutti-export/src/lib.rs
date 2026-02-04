@@ -1,71 +1,70 @@
 //! # Tutti Export
 //!
-//! Audio export utilities for the Tutti audio engine.
+//! Offline audio export for the Tutti audio engine.
 //!
-//! This crate provides low-level export functionality:
-//! - **Format encoding**: Export to WAV, FLAC
-//! - **DSP utilities**: Resampling, dithering, loudness metering
+//! ## When to Use
 //!
-//! ## Note
+//! Use this crate for **offline rendering** with full DSP processing:
+//! - Bounce/export a mix to WAV or FLAC
+//! - Sample rate conversion, bit depth reduction
+//! - LUFS normalization, dithering
 //!
-//! This crate is typically not used directly. Instead, use the integrated
-//! export API from the main `tutti` crate:
+//! For **real-time recording** (capturing live audio input), use
+//! `tutti-sampler`'s recording API instead.
+//!
+//! ## Usage
+//!
+//! Via the main `tutti` crate:
 //!
 //! ```ignore
-//! use tutti::prelude::*;
-//!
-//! let engine = TuttiEngine::builder().build()?;
-//! // ... build your graph ...
-//!
-//! // Export directly from engine
 //! engine.export()
 //!     .duration_seconds(10.0)
-//!     .to_file("output.wav")?;
+//!     .normalize(NormalizationMode::lufs(-14.0))
+//!     .to_file("output.flac")?;
+//!
+//! // With progress callback
+//! engine.export()
+//!     .duration_seconds(3600.0)
+//!     .to_file_with_progress("output.wav", |p| {
+//!         println!("{:?}: {:.0}%", p.phase, p.progress * 100.0);
+//!     })?;
 //! ```
 //!
-//! ## Feature Flags
+//! Or standalone:
 //!
-//! - `wav` (default): WAV export via hound (pure Rust)
-//! - `flac` (default): FLAC export via flacenc (pure Rust)
-//! - `butler`: Butler thread integration for async disk I/O
+//! ```ignore
+//! use tutti_export::{export_to_file, ExportOptions};
+//!
+//! export_to_file("output.wav", &left, &right, &ExportOptions::default())?;
+//! ```
+//!
+//! ## Features
+//!
+//! - `wav` (default): WAV encoding
+//! - `flac` (default): FLAC encoding
 
-// Core modules
-pub mod error;
-pub mod export_builder;
-mod options;
-
-// Advanced APIs
-pub mod dsp;
-pub mod format;
-
-// Butler async export (requires tutti-sampler)
-#[cfg(feature = "butler")]
-pub mod butler_export;
-
-// Re-exports
+// Error types
+mod error;
 pub use error::{ExportError, Result};
-pub use export_builder::ExportBuilder;
+
+// Export builder
+mod export_builder;
+pub use export_builder::{ExportBuilder, ExportPhase, ExportProgress};
+
+// Options
+mod options;
 pub use options::{
-    AudioFormat, BitDepth, DitherType, ExportOptions, ExportRange, FlacOptions, NormalizationMode,
-    SampleRateTarget,
+    AudioFormat, BitDepth, DitherType, ExportOptions, FlacOptions, NormalizationMode,
 };
 
-// Butler export (requires tutti-sampler)
-#[cfg(feature = "butler")]
-pub use butler_export::ButlerExporter;
+// DSP utilities
+pub(crate) mod dsp;
+pub use dsp::ResampleQuality;
 
-// Format-specific exports
-#[cfg(feature = "wav")]
-pub use format::wav::export_wav;
+// Format encoders
+pub(crate) mod format;
 
-#[cfg(feature = "flac")]
-pub use format::flac::export_flac;
-
-/// Export audio to a file with automatic format detection
-///
-/// The format is determined by the file extension:
-/// - `.wav` -> WAV
-/// - `.flac` -> FLAC
+/// Export audio to a file (format detected from extension).
 #[allow(unused_variables)]
 pub fn export_to_file(
     path: &str,
@@ -73,28 +72,51 @@ pub fn export_to_file(
     right: &[f32],
     options: &ExportOptions,
 ) -> Result<()> {
-    let path_lower = path.to_lowercase();
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
 
-    if path_lower.ends_with(".wav") {
+    match ext.as_str() {
         #[cfg(feature = "wav")]
-        return format::wav::export_wav(path, left, right, options);
+        "wav" => format::wav::export_wav(path, left, right, options),
         #[cfg(not(feature = "wav"))]
-        return Err(ExportError::UnsupportedFormat(
-            "WAV support not enabled".into(),
-        ));
-    }
+        "wav" => Err(ExportError::UnsupportedFormat("WAV not enabled".into())),
 
-    if path_lower.ends_with(".flac") {
         #[cfg(feature = "flac")]
-        return format::flac::export_flac(path, left, right, options);
+        "flac" => format::flac::export_flac(path, left, right, options),
         #[cfg(not(feature = "flac"))]
-        return Err(ExportError::UnsupportedFormat(
-            "FLAC support not enabled".into(),
-        ));
-    }
+        "flac" => Err(ExportError::UnsupportedFormat("FLAC not enabled".into())),
 
-    Err(ExportError::UnsupportedFormat(format!(
-        "Unknown or unsupported file extension: {}. Supported: .wav, .flac",
-        path
-    )))
+        _ => Err(ExportError::UnsupportedFormat(format!(
+            "Unknown extension: .{}",
+            ext
+        ))),
+    }
+}
+
+/// Export audio to a file with progress callback.
+#[allow(unused_variables)]
+pub fn export_to_file_with_progress(
+    path: &str,
+    left: &[f32],
+    right: &[f32],
+    options: &ExportOptions,
+    on_progress: impl Fn(ExportProgress),
+) -> Result<()> {
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+
+    match ext.as_str() {
+        #[cfg(feature = "wav")]
+        "wav" => format::wav::export_wav_with_progress(path, left, right, options, on_progress),
+        #[cfg(not(feature = "wav"))]
+        "wav" => Err(ExportError::UnsupportedFormat("WAV not enabled".into())),
+
+        #[cfg(feature = "flac")]
+        "flac" => format::flac::export_flac_with_progress(path, left, right, options, on_progress),
+        #[cfg(not(feature = "flac"))]
+        "flac" => Err(ExportError::UnsupportedFormat("FLAC not enabled".into())),
+
+        _ => Err(ExportError::UnsupportedFormat(format!(
+            "Unknown extension: .{}",
+            ext
+        ))),
+    }
 }

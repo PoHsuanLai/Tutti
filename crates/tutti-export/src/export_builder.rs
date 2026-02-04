@@ -1,19 +1,37 @@
-//! Export builder for rendering audio from the engine
+//! Export builder for rendering audio from the engine.
 
 use crate::{AudioFormat, ExportOptions, NormalizationMode, Result};
 use std::path::Path;
 use tutti_core::AudioUnit;
 
+/// Export progress information.
+#[derive(Debug, Clone, Copy)]
+pub struct ExportProgress {
+    /// Current phase.
+    pub phase: ExportPhase,
+    /// Progress within current phase (0.0 to 1.0).
+    pub progress: f32,
+}
+
+/// Export phase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExportPhase {
+    /// Rendering the audio graph.
+    Rendering,
+    /// Processing (resampling, normalization, dithering).
+    Processing,
+    /// Encoding and writing to file.
+    Encoding,
+}
+
 /// Builder for exporting audio from the engine.
-///
-/// Created via `engine.export()`.
 ///
 /// # Example
 /// ```ignore
 /// engine.export()
 ///     .duration_seconds(10.0)
 ///     .format(AudioFormat::Flac)
-///     .normalize(NormalizationMode::Lufs(-14.0))
+///     .normalize(NormalizationMode::lufs(-14.0))
 ///     .to_file("output.flac")?;
 /// ```
 pub struct ExportBuilder {
@@ -25,8 +43,6 @@ pub struct ExportBuilder {
 
 impl ExportBuilder {
     /// Create a new export builder.
-    ///
-    /// Takes a cloned Net from the audio engine and its sample rate.
     pub fn new(net: tutti_core::dsp::Net, sample_rate: f64) -> Self {
         Self {
             net,
@@ -42,7 +58,7 @@ impl ExportBuilder {
         self
     }
 
-    /// Set the duration to export in beats (uses transport tempo).
+    /// Set the duration to export in beats.
     pub fn duration_beats(mut self, beats: f64, tempo: f64) -> Self {
         let seconds = (beats / tempo) * 60.0;
         self.duration_seconds = Some(seconds);
@@ -67,63 +83,91 @@ impl ExportBuilder {
         self
     }
 
-    /// Render the audio and export to a file.
-    ///
-    /// The format is auto-detected from the file extension.
+    /// Render and export to a file.
     pub fn to_file(self, path: impl AsRef<Path>) -> Result<()> {
-        let duration = self.duration_seconds.ok_or_else(|| {
-            crate::ExportError::InvalidOptions(
-                "Duration not set. Use .duration_seconds() or .duration_beats()".into(),
-            )
-        })?;
-
-        // Render the Net offline
-        let mut render_net = self.net;
-        render_net.set_sample_rate(self.sample_rate);
-
-        // Render audio
-        let wave = tutti_core::dsp::Wave::render(self.sample_rate, duration, &mut render_net);
-
-        // Convert to separate L/R buffers
-        let mut left = Vec::with_capacity(wave.length());
-        let mut right = Vec::with_capacity(wave.length());
-
-        for i in 0..wave.length() {
-            left.push(wave.at(0, i));
-            right.push(wave.at(1, i));
-        }
-
-        // Export using tutti-export
+        let options = self.options.clone();
+        let (left, right) = self.render_internal()?;
         let path = path.as_ref();
         crate::export_to_file(
             path.to_str()
                 .ok_or_else(|| crate::ExportError::InvalidOptions("Invalid path".into()))?,
             &left,
             &right,
-            &self.options,
-        )?;
-
-        Ok(())
+            &options,
+        )
     }
 
-    /// Render the audio to buffers without exporting to a file.
+    /// Render and export to a file with progress callback.
     ///
-    /// Returns `(left_channel, right_channel, sample_rate)`.
+    /// The callback receives `ExportProgress` with granular updates:
+    /// - `Rendering`: Progress updates roughly every 0.5 seconds of audio
+    /// - `Processing`: Updates at 0%, 33%, 66%, 100% (resample, normalize, dither)
+    /// - `Encoding`: Updates at 0% and 100%
+    pub fn to_file_with_progress(
+        self,
+        path: impl AsRef<Path>,
+        on_progress: impl Fn(ExportProgress),
+    ) -> Result<()> {
+        let options = self.options.clone();
+        let (left, right) = self.render_internal_with_progress(&on_progress)?;
+
+        let path = path.as_ref();
+        crate::export_to_file_with_progress(
+            path.to_str()
+                .ok_or_else(|| crate::ExportError::InvalidOptions("Invalid path".into()))?,
+            &left,
+            &right,
+            &options,
+            on_progress,
+        )
+    }
+
+    /// Render to buffers without exporting.
     pub fn render(self) -> Result<(Vec<f32>, Vec<f32>, f64)> {
+        let sample_rate = self.sample_rate;
+        let (left, right) = self.render_internal()?;
+        Ok((left, right, sample_rate))
+    }
+
+    /// Render to buffers with progress callback.
+    pub fn render_with_progress(
+        self,
+        on_progress: impl Fn(ExportProgress),
+    ) -> Result<(Vec<f32>, Vec<f32>, f64)> {
+        let sample_rate = self.sample_rate;
+        let (left, right) = self.render_internal_with_progress(&on_progress)?;
+        Ok((left, right, sample_rate))
+    }
+
+    fn render_internal(self) -> Result<(Vec<f32>, Vec<f32>)> {
+        self.render_internal_with_progress(&|_| {})
+    }
+
+    fn render_internal_with_progress(
+        self,
+        on_progress: &impl Fn(ExportProgress),
+    ) -> Result<(Vec<f32>, Vec<f32>)> {
         let duration = self.duration_seconds.ok_or_else(|| {
             crate::ExportError::InvalidOptions(
                 "Duration not set. Use .duration_seconds() or .duration_beats()".into(),
             )
         })?;
 
-        // Render the Net offline
         let mut render_net = self.net;
         render_net.set_sample_rate(self.sample_rate);
 
-        // Render audio
-        let wave = tutti_core::dsp::Wave::render(self.sample_rate, duration, &mut render_net);
+        let wave = tutti_core::dsp::Wave::render_with_progress(
+            self.sample_rate,
+            duration,
+            &mut render_net,
+            |p| {
+                on_progress(ExportProgress {
+                    phase: ExportPhase::Rendering,
+                    progress: p,
+                });
+            },
+        );
 
-        // Convert to separate L/R buffers
         let mut left = Vec::with_capacity(wave.length());
         let mut right = Vec::with_capacity(wave.length());
 
@@ -132,6 +176,6 @@ impl ExportBuilder {
             right.push(wave.at(1, i));
         }
 
-        Ok((left, right, self.sample_rate))
+        Ok((left, right))
     }
 }

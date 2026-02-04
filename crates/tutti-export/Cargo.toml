@@ -10,36 +10,15 @@ categories = ["multimedia::audio"]
 
 [features]
 default = ["wav", "flac"]
-
-# Format support (pure Rust)
 wav = ["hound"]
 flac = ["flacenc"]
 
-# Butler thread integration for async disk I/O
-butler = ["tutti-sampler"]
-
 [dependencies]
-# Core
 thiserror = "1.0"
-log = "0.4"
-
-# Audio processing
 tutti-core = { path = "../tutti-core", default-features = false }
-
-# Resampling (always included - pure Rust with SIMD)
 rubato = "0.16"
-
-# Loudness metering (EBU R128)
-ebur128 = "0.1"
-
-# WAV encoding (pure Rust)
 hound = { version = "3.5", optional = true }
-
-# FLAC encoding (pure Rust)
 flacenc = { version = "0.4", optional = true }
-
-# Butler thread integration (for async disk I/O)
-tutti-sampler = { path = "../tutti-sampler", optional = true, default-features = false }
 
 [dev-dependencies]
 tempfile = "3.10"

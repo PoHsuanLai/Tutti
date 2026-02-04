@@ -1,17 +1,17 @@
-//! Export options and configuration
+//! Export options.
 
-/// Audio format for export
+use crate::dsp::ResampleQuality;
+
+/// Audio format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioFormat {
-    /// WAV format (uncompressed)
     #[default]
     Wav,
-    /// FLAC format (lossless compression)
     Flac,
 }
 
 impl AudioFormat {
-    /// Get the file extension for this format
+    /// File extension (without dot).
     pub fn extension(&self) -> &'static str {
         match self {
             AudioFormat::Wav => "wav",
@@ -20,20 +20,17 @@ impl AudioFormat {
     }
 }
 
-/// Bit depth for audio export
+/// Bit depth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BitDepth {
-    /// 16-bit integer (CD quality)
     Int16,
-    /// 24-bit integer (professional audio)
     #[default]
     Int24,
-    /// 32-bit float (maximum precision)
     Float32,
 }
 
 impl BitDepth {
-    /// Get bits per sample
+    /// Bits per sample.
     pub fn bits(&self) -> u16 {
         match self {
             BitDepth::Int16 => 16,
@@ -43,87 +40,44 @@ impl BitDepth {
     }
 }
 
-/// Target sample rate for export
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SampleRateTarget {
-    /// Keep original sample rate (no resampling)
-    #[default]
-    Original,
-    /// CD quality
-    Rate44100,
-    /// Professional video
-    Rate48000,
-    /// High-resolution audio
-    Rate88200,
-    /// High-resolution audio
-    Rate96000,
-    /// Custom sample rate
-    Custom(u32),
-}
-
-impl SampleRateTarget {
-    /// Get the sample rate in Hz, or None for Original
-    pub fn rate(&self) -> Option<u32> {
-        match self {
-            SampleRateTarget::Original => None,
-            SampleRateTarget::Rate44100 => Some(44100),
-            SampleRateTarget::Rate48000 => Some(48000),
-            SampleRateTarget::Rate88200 => Some(88200),
-            SampleRateTarget::Rate96000 => Some(96000),
-            SampleRateTarget::Custom(rate) => Some(*rate),
-        }
-    }
-}
-
-/// Dithering algorithm for bit depth reduction
+/// Dithering algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DitherType {
-    /// No dithering
     None,
-    /// Simple rectangular dither (fastest)
     Rectangular,
-    /// Triangular probability density function (best for most content)
     #[default]
     Triangular,
-    /// Noise-shaped dither (most sophisticated, best perceptual quality)
     NoiseShaped,
 }
 
-/// Normalization mode for export
+/// Normalization mode.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum NormalizationMode {
-    /// No normalization
     #[default]
     None,
-    /// Peak normalization to specified dB level
+    /// Peak normalization (dB).
     Peak(f64),
-    /// Loudness normalization (EBU R128 / ITU-R BS.1770)
+    /// Loudness normalization (EBU R128).
     Loudness {
-        /// Target integrated loudness in LUFS
         target_lufs: f64,
-        /// True peak ceiling in dBTP
         true_peak_dbtp: f64,
     },
 }
 
-/// Range of audio to export
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum ExportRange {
-    /// Export the entire project
-    #[default]
-    Full,
-    /// Export a specific range (start sample, end sample)
-    Range { start: usize, end: usize },
-    /// Export loop region
-    Loop,
-    /// Export selected region
-    Selection,
+impl NormalizationMode {
+    /// Loudness normalization with default true peak limit (-1.0 dBTP).
+    pub fn lufs(target_lufs: f64) -> Self {
+        Self::Loudness {
+            target_lufs,
+            true_peak_dbtp: -1.0,
+        }
+    }
 }
 
-/// FLAC-specific encoding options
+/// FLAC encoding options.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlacOptions {
-    /// Compression level (0-8, higher = smaller file but slower)
+    /// Compression level (0-8).
     pub compression_level: u8,
 }
 
@@ -135,30 +89,26 @@ impl Default for FlacOptions {
     }
 }
 
-/// Complete export options
+/// Export options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportOptions {
-    /// Audio format
+    /// Audio format.
     pub format: AudioFormat,
-    /// Bit depth (for WAV/FLAC)
+    /// Bit depth.
     pub bit_depth: BitDepth,
-    /// Target sample rate
-    pub sample_rate: SampleRateTarget,
-    /// Source sample rate (used when sample_rate is Original)
+    /// Target sample rate (None = keep original).
+    pub sample_rate: Option<u32>,
+    /// Source sample rate.
     pub source_sample_rate: u32,
-    /// Export range
-    pub range: ExportRange,
-    /// Normalization mode
+    /// Normalization mode.
     pub normalization: NormalizationMode,
-    /// Dithering type
+    /// Dithering type.
     pub dither: DitherType,
-    /// Resampling quality (when sample_rate != Original)
-    pub resample_quality: crate::dsp::ResampleQuality,
-    /// Extra tail time in seconds (for reverb decay)
-    pub tail_seconds: f64,
-    /// Export as mono (downmix)
+    /// Resampling quality.
+    pub resample_quality: ResampleQuality,
+    /// Export as mono.
     pub mono: bool,
-    /// FLAC-specific options
+    /// FLAC options.
     pub flac: FlacOptions,
 }
 
@@ -167,13 +117,11 @@ impl Default for ExportOptions {
         Self {
             format: AudioFormat::Wav,
             bit_depth: BitDepth::Int24,
-            sample_rate: SampleRateTarget::Original,
+            sample_rate: None,
             source_sample_rate: 44100,
-            range: ExportRange::Full,
             normalization: NormalizationMode::None,
             dither: DitherType::Triangular,
-            resample_quality: crate::dsp::ResampleQuality::Medium,
-            tail_seconds: 0.0,
+            resample_quality: ResampleQuality::Medium,
             mono: false,
             flac: FlacOptions::default(),
         }
@@ -181,69 +129,15 @@ impl Default for ExportOptions {
 }
 
 impl ExportOptions {
-    /// Create new export options with default settings
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set audio format
-    pub fn with_format(mut self, format: AudioFormat) -> Self {
-        self.format = format;
-        self
-    }
-
-    /// Set bit depth
-    pub fn with_bit_depth(mut self, bit_depth: BitDepth) -> Self {
-        self.bit_depth = bit_depth;
-        self
-    }
-
-    /// Set target sample rate
-    pub fn with_sample_rate(mut self, sample_rate: SampleRateTarget) -> Self {
-        self.sample_rate = sample_rate;
-        self
-    }
-
-    /// Set source sample rate
-    pub fn with_source_sample_rate(mut self, rate: u32) -> Self {
-        self.source_sample_rate = rate;
-        self
-    }
-
-    /// Set normalization mode
-    pub fn with_normalization(mut self, normalization: NormalizationMode) -> Self {
-        self.normalization = normalization;
-        self
-    }
-
-    /// Set dither type
-    pub fn with_dither(mut self, dither: DitherType) -> Self {
-        self.dither = dither;
-        self
-    }
-
-    /// Set tail time in seconds
-    pub fn with_tail(mut self, seconds: f64) -> Self {
-        self.tail_seconds = seconds;
-        self
-    }
-
-    /// Set mono export
-    pub fn with_mono(mut self, mono: bool) -> Self {
-        self.mono = mono;
-        self
-    }
-
-    /// Get the effective output sample rate
+    /// Effective output sample rate.
     pub fn output_sample_rate(&self) -> u32 {
-        self.sample_rate.rate().unwrap_or(self.source_sample_rate)
+        self.sample_rate.unwrap_or(self.source_sample_rate)
     }
 
-    /// Check if resampling is needed
+    /// Whether resampling is needed.
     pub fn needs_resampling(&self) -> bool {
-        match self.sample_rate.rate() {
-            Some(rate) => rate != self.source_sample_rate,
-            None => false,
-        }
+        self.sample_rate
+            .map(|r| r != self.source_sample_rate)
+            .unwrap_or(false)
     }
 }
