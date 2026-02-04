@@ -1,4 +1,5 @@
 use crate::compat::{any, Box, HashMap, String, ToString, Vec};
+use crate::pdc;
 
 #[cfg(feature = "neural")]
 use crate::compat::Arc;
@@ -8,7 +9,7 @@ use fundsp::realnet::NetBackend;
 
 #[cfg(feature = "neural")]
 use crate::neural::{
-    BatchingStrategy, GraphAnalyzer, NeuralNodeManager, SharedNeuralNodeManager,
+    BatchingStrategy, GraphAnalyzer, NeuralModelId, NeuralNodeManager, SharedNeuralNodeManager,
 };
 
 /// Chain multiple nodes together in a linear signal flow.
@@ -205,63 +206,71 @@ pub struct TuttiNet {
 
     /// Optional user tags for nodes (for UI organization)
     node_tags: HashMap<NodeId, String>,
+
+    /// PDC delay nodes inserted during commit (tracked for removal on next commit)
+    pdc_delay_nodes: Vec<NodeId>,
+
+    /// Whether automatic PDC is enabled
+    pdc_enabled: bool,
+
+    /// Total graph latency from the last PDC analysis
+    total_latency: usize,
+
+    /// Per-node latency cache (populated during PDC analysis)
+    node_latency_cache: HashMap<NodeId, usize>,
 }
 
 impl TuttiNet {
-    #[cfg(all(test, not(feature = "neural")))]
-    pub(crate) fn new() -> (Self, NetBackend) {
-        Self::with_io(0, 2)
+    pub(crate) fn new(inputs: usize, outputs: usize) -> Self {
+        Self {
+            net: Net::new(inputs, outputs),
+            #[cfg(feature = "midi")]
+            midi_connections: Vec::new(),
+            #[cfg(feature = "midi")]
+            midi_registry: crate::midi::MidiRegistry::new(),
+            #[cfg(feature = "neural")]
+            neural_manager: Arc::new(NeuralNodeManager::new()),
+            #[cfg(feature = "neural")]
+            batching_strategy: None,
+            node_tags: HashMap::new(),
+            pdc_delay_nodes: Vec::new(),
+            pdc_enabled: true,
+            total_latency: 0,
+            node_latency_cache: HashMap::new(),
+        }
     }
 
-    #[cfg(all(test, feature = "neural"))]
-    pub(crate) fn new() -> (Self, NetBackend, SharedNeuralNodeManager) {
-        Self::with_io(0, 2)
-    }
-
-    #[cfg(not(feature = "neural"))]
-    pub(crate) fn with_io(inputs: usize, outputs: usize) -> (Self, NetBackend) {
-        let mut net = Net::new(inputs, outputs);
-        let backend = net.backend();
-        (
-            Self {
-                net,
-                #[cfg(feature = "midi")]
-                midi_connections: Vec::new(),
-                #[cfg(feature = "midi")]
-                midi_registry: crate::midi::MidiRegistry::new(),
-                node_tags: HashMap::new(),
-            },
-            backend,
-        )
-    }
-
-    #[cfg(feature = "neural")]
-    pub(crate) fn with_io(
-        inputs: usize,
-        outputs: usize,
-    ) -> (Self, NetBackend, SharedNeuralNodeManager) {
-        let mut net = Net::new(inputs, outputs);
-        let backend = net.backend();
-        let manager = Arc::new(NeuralNodeManager::new());
-        (
-            Self {
-                net,
-                #[cfg(feature = "midi")]
-                midi_connections: Vec::new(),
-                #[cfg(feature = "midi")]
-                midi_registry: crate::midi::MidiRegistry::new(),
-                neural_manager: manager.clone(),
-                batching_strategy: None,
-                node_tags: HashMap::new(),
-            },
-            backend,
-            manager,
-        )
+    /// Extract the real-time backend for the audio callback.
+    ///
+    /// Can only be called once (panics on second call).
+    pub(crate) fn backend(&mut self) -> NetBackend {
+        self.net.backend()
     }
 
     /// Add a node to the graph.
     pub fn add(&mut self, unit: Box<dyn AudioUnit>) -> NodeId {
         self.net.push(unit)
+    }
+
+    /// Add a neural AudioUnit and register it with the NeuralNodeManager.
+    ///
+    /// Equivalent to `add()` followed by `neural_manager().register()`.
+    /// The registration enables `GraphAnalyzer` to batch this node with
+    /// others sharing the same model for GPU-optimized inference.
+    ///
+    /// # Example
+    /// ```ignore
+    /// system.graph(|net| {
+    ///     let voice = builder.build_voice().unwrap();
+    ///     let id = net.add_neural(voice, builder.model_id());
+    ///     net.pipe_output(id);
+    /// });
+    /// ```
+    #[cfg(feature = "neural")]
+    pub fn add_neural(&mut self, unit: Box<dyn AudioUnit>, model_id: NeuralModelId) -> NodeId {
+        let id = self.add(unit);
+        self.neural_manager.register(id, model_id);
+        id
     }
 
     /// Add a node with a user tag for later lookup.
@@ -439,7 +448,7 @@ impl TuttiNet {
                 .unwrap_or_else(|| format!("Node {:?}", id)),
             inputs: unit.inputs(),
             outputs: unit.outputs(),
-            latency: 0,
+            latency: self.node_latency_cache.get(&id).copied().unwrap_or(0),
             tag: self.node_tags.get(&id).cloned(),
             type_name: any::type_name_of_val(unit).to_string(),
         })
@@ -457,9 +466,57 @@ impl TuttiNet {
     }
 
     /// Commit pending changes to the backend for real-time playback.
+    ///
+    /// When PDC is enabled, this analyzes the graph for latency mismatches and
+    /// automatically inserts delay nodes to align signals at merge points.
     pub fn commit(&mut self) {
+        // 1. Remove previously inserted PDC delay nodes
+        for node_id in self.pdc_delay_nodes.drain(..) {
+            if self.net.contains(node_id) {
+                self.net.remove(node_id);
+            }
+        }
+
+        // 2. Run PDC analysis and insert compensation delays
+        if self.pdc_enabled {
+            let analysis = pdc::graph_compensator::analyze(&mut self.net);
+
+            // Cache per-node latencies for node_info()
+            self.node_latency_cache = analysis.node_latencies;
+            self.total_latency = analysis.total_latency;
+
+            // Insert delay nodes for internal merge points
+            for comp in &analysis.compensations {
+                if comp.delay_samples == 0 {
+                    continue;
+                }
+                self.insert_pdc_delay(comp.node_id, comp.input_port, comp.delay_samples);
+            }
+
+            // Insert delay nodes for graph output channels
+            for comp in &analysis.output_compensations {
+                if comp.delay_samples == 0 {
+                    continue;
+                }
+                self.insert_output_pdc_delay(comp.output_channel, comp.delay_samples);
+            }
+
+            if self.total_latency > 0 {
+                tracing::debug!(
+                    "PDC: total latency {} samples, {} compensation delays inserted",
+                    self.total_latency,
+                    self.pdc_delay_nodes.len()
+                );
+            }
+        } else {
+            self.node_latency_cache.clear();
+            self.total_latency = 0;
+        }
+
+        // 3. Commit to backend (sends graph to audio thread)
         self.net.commit();
 
+        // 4. Neural batching analysis
         #[cfg(feature = "neural")]
         {
             if !self.neural_manager.is_empty() {
@@ -468,15 +525,58 @@ impl TuttiNet {
 
                 if let Some(ref strategy) = self.batching_strategy {
                     tracing::debug!(
-                        "Batching strategy: {} models, {} parallel groups, efficiency: {:.1}x",
+                        "Batching strategy: {} models, efficiency: {:.1}x",
                         strategy.model_count(),
-                        strategy.parallel_group_count(),
                         strategy.batch_efficiency()
                     );
                 }
             } else {
                 self.batching_strategy = None;
             }
+        }
+    }
+
+    /// Insert a PDC delay node on a specific input port of a node.
+    fn insert_pdc_delay(&mut self, target: NodeId, input_port: usize, delay_samples: usize) {
+        let source = self.net.source(target, input_port);
+        if let Source::Local(src_id, src_port) = source {
+            // Determine channel width from source node's output count
+            let src_outputs = self.net.outputs_in(src_id);
+            let target_inputs = self.net.inputs_in(target);
+
+            // Use mono delay for 1-channel connections, stereo for 2-channel
+            let pdc_node = if src_outputs == 1 || target_inputs == 1 {
+                self.net
+                    .push(Box::new(pdc::MonoPdcDelayUnit::new(delay_samples)))
+            } else {
+                self.net
+                    .push(Box::new(pdc::PdcDelayUnit::new(delay_samples)))
+            };
+
+            // Rewire: src → pdc → target
+            self.net.connect(src_id, src_port, pdc_node, 0);
+            self.net
+                .set_source(target, input_port, Source::Local(pdc_node, 0));
+
+            self.pdc_delay_nodes.push(pdc_node);
+        }
+    }
+
+    /// Insert a PDC delay node on a graph output channel.
+    fn insert_output_pdc_delay(&mut self, output_channel: usize, delay_samples: usize) {
+        let source = self.net.output_source(output_channel);
+        if let Source::Local(src_id, src_port) = source {
+            // Output channels are typically mono (one channel each)
+            let pdc_node = self
+                .net
+                .push(Box::new(pdc::MonoPdcDelayUnit::new(delay_samples)));
+
+            // Rewire: src → pdc → output
+            self.net.connect(src_id, src_port, pdc_node, 0);
+            self.net
+                .set_output_source(output_channel, Source::Local(pdc_node, 0));
+
+            self.pdc_delay_nodes.push(pdc_node);
         }
     }
 
@@ -629,22 +729,25 @@ impl TuttiNet {
     pub fn inner_ref(&self) -> &Net {
         &self.net
     }
-}
 
-impl Default for TuttiNet {
-    fn default() -> Self {
-        Self {
-            net: Net::new(0, 2),
-            #[cfg(feature = "midi")]
-            midi_connections: Vec::new(),
-            #[cfg(feature = "midi")]
-            midi_registry: crate::midi::MidiRegistry::new(),
-            #[cfg(feature = "neural")]
-            neural_manager: Arc::new(NeuralNodeManager::new()),
-            #[cfg(feature = "neural")]
-            batching_strategy: None,
-            node_tags: HashMap::new(),
-        }
+    /// Enable or disable automatic PDC (Plugin Delay Compensation).
+    ///
+    /// When enabled (default), `commit()` analyzes the graph for latency
+    /// mismatches and inserts delay nodes to align signals at merge points.
+    pub fn set_pdc_enabled(&mut self, enabled: bool) {
+        self.pdc_enabled = enabled;
+    }
+
+    /// Whether automatic PDC is enabled.
+    pub fn pdc_enabled(&self) -> bool {
+        self.pdc_enabled
+    }
+
+    /// Total graph latency in samples from the last `commit()`.
+    ///
+    /// This is the worst-case latency across all paths from any source to the output.
+    pub fn total_latency(&self) -> usize {
+        self.total_latency
     }
 }
 
@@ -653,26 +756,13 @@ mod tests {
     use super::*;
     use fundsp::prelude::*;
 
-    // Helper to create TuttiNet regardless of neural feature
-    #[cfg(not(feature = "neural"))]
     fn create_net() -> (TuttiNet, NetBackend) {
-        TuttiNet::new()
+        create_net_with_io(0, 2)
     }
 
-    #[cfg(feature = "neural")]
-    fn create_net() -> (TuttiNet, NetBackend) {
-        let (net, backend, _registry) = TuttiNet::new();
-        (net, backend)
-    }
-
-    #[cfg(not(feature = "neural"))]
     fn create_net_with_io(inputs: usize, outputs: usize) -> (TuttiNet, NetBackend) {
-        TuttiNet::with_io(inputs, outputs)
-    }
-
-    #[cfg(feature = "neural")]
-    fn create_net_with_io(inputs: usize, outputs: usize) -> (TuttiNet, NetBackend) {
-        let (net, backend, _registry) = TuttiNet::with_io(inputs, outputs);
+        let mut net = TuttiNet::new(inputs, outputs);
+        let backend = net.backend();
         (net, backend)
     }
 

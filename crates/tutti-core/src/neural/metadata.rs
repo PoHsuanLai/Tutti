@@ -42,51 +42,12 @@ impl core::fmt::Display for NeuralModelId {
     }
 }
 
-/// Metadata for a neural node in the graph (used in tests for GraphAnalyzer).
-#[derive(Debug, Clone)]
-#[allow(dead_code)] // Used in tests only
-pub(crate) struct NeuralNodeInfo {
-    pub model_id: NeuralModelId,
-    pub buffer_size: usize,
-    pub sample_rate: f32,
-    pub is_synth: bool,
-    pub latency_samples: usize,
-}
-
-#[allow(dead_code)] // Used in tests only
-impl NeuralNodeInfo {
-    /// Creates metadata for a neural synthesizer.
-    pub fn synth(model_id: NeuralModelId, buffer_size: usize, sample_rate: f32) -> Self {
-        Self {
-            model_id,
-            buffer_size,
-            sample_rate,
-            is_synth: true,
-            latency_samples: 0,
-        }
-    }
-
-    /// Creates metadata for a neural audio effect.
-    pub fn effect(model_id: NeuralModelId, buffer_size: usize, sample_rate: f32) -> Self {
-        Self {
-            model_id,
-            buffer_size,
-            sample_rate,
-            is_synth: false,
-            latency_samples: 0,
-        }
-    }
-
-    /// Sets the processing latency in samples (for PDC).
-    pub fn with_latency(mut self, samples: usize) -> Self {
-        self.latency_samples = samples;
-        self
-    }
-}
-
-/// Registry for neural node metadata.
+/// Registry for neural nodes in the audio graph.
+///
+/// Maps NodeId → NeuralModelId. This is all the graph analyzer needs
+/// to group nodes by model for batched inference.
 pub struct NeuralNodeManager {
-    nodes: DashMap<NodeId, NeuralNodeInfo>,
+    nodes: DashMap<NodeId, NeuralModelId>,
 }
 
 impl NeuralNodeManager {
@@ -97,19 +58,18 @@ impl NeuralNodeManager {
         }
     }
 
-    /// Registers a neural node with its metadata (used in tests only).
-    #[allow(dead_code)]
-    pub(crate) fn register(&self, node_id: NodeId, info: NeuralNodeInfo) {
+    /// Register a neural node with its model ID.
+    pub fn register(&self, node_id: NodeId, model_id: NeuralModelId) {
         tracing::debug!(
             "Registering neural node {:?} with model {}",
             node_id,
-            info.model_id
+            model_id
         );
-        self.nodes.insert(node_id, info);
+        self.nodes.insert(node_id, model_id);
     }
 
-    /// Unregisters a neural node.
-    pub(crate) fn unregister(&self, node_id: &NodeId) -> Option<NeuralNodeInfo> {
+    /// Unregister a neural node.
+    pub(crate) fn unregister(&self, node_id: &NodeId) -> Option<NeuralModelId> {
         let result = self.nodes.remove(node_id).map(|(_, v)| v);
         if result.is_some() {
             tracing::debug!("Unregistered neural node {:?}", node_id);
@@ -122,17 +82,11 @@ impl NeuralNodeManager {
         self.nodes.contains_key(node_id)
     }
 
-    /// Retrieves metadata for a neural node (used in tests only).
-    #[allow(dead_code)]
-    pub(crate) fn get(&self, node_id: &NodeId) -> Option<NeuralNodeInfo> {
-        self.nodes.get(node_id).map(|r| r.clone())
-    }
-
     /// Get all neural nodes grouped by model_id.
     pub(crate) fn group_by_model(&self) -> HashMap<NeuralModelId, Vec<NodeId>> {
         let mut groups: HashMap<NeuralModelId, Vec<NodeId>> = HashMap::new();
         for entry in self.nodes.iter() {
-            groups.entry(entry.model_id).or_default().push(*entry.key());
+            groups.entry(*entry.value()).or_default().push(*entry.key());
         }
         groups
     }
@@ -179,11 +133,11 @@ pub type SharedNeuralNodeManager = Arc<NeuralNodeManager>;
 mod tests {
     use super::*;
     use crate::compat::Box;
+
     #[test]
     fn test_model_id_generation() {
         let id1 = NeuralModelId::new();
         let id2 = NeuralModelId::new();
-        // Each ID should be unique
         assert_ne!(id1.as_u64(), id2.as_u64());
     }
 
@@ -207,26 +161,19 @@ mod tests {
 
         let registry = NeuralNodeManager::new();
 
-        // Create a real NodeId
         let mut net = Net::new(0, 2);
         let node_id = net.push(Box::new(dc(0.0f32)));
 
-        // Register
         let model_id = NeuralModelId::new();
-        let info = NeuralNodeInfo::synth(model_id, 512, 44100.0);
-        registry.register(node_id, info.clone());
+        registry.register(node_id, model_id);
 
         assert!(!registry.is_empty());
         assert_eq!(registry.len(), 1);
         assert!(registry.is_neural(&node_id));
 
-        let retrieved = registry.get(&node_id).unwrap();
-        assert_eq!(retrieved.model_id, model_id);
-        assert!(retrieved.is_synth);
-
-        // Unregister
         let removed = registry.unregister(&node_id);
         assert!(removed.is_some());
+        assert_eq!(removed.unwrap(), model_id);
         assert!(registry.is_empty());
         assert!(!registry.is_neural(&node_id));
     }
@@ -242,35 +189,17 @@ mod tests {
         let model_a = NeuralModelId::from_raw(1);
         let model_b = NeuralModelId::from_raw(2);
 
-        // Add 3 nodes: 2 with model_a, 1 with model_b
         let node1 = net.push(Box::new(dc(0.0f32)));
         let node2 = net.push(Box::new(dc(0.0f32)));
         let node3 = net.push(Box::new(dc(0.0f32)));
 
-        registry.register(node1, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        registry.register(node2, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        registry.register(node3, NeuralNodeInfo::effect(model_b, 512, 44100.0));
+        registry.register(node1, model_a);
+        registry.register(node2, model_a);
+        registry.register(node3, model_b);
 
         let groups = registry.group_by_model();
         assert_eq!(groups.len(), 2);
         assert_eq!(groups[&model_a].len(), 2);
         assert_eq!(groups[&model_b].len(), 1);
-    }
-
-    #[test]
-    fn test_neural_node_info_builders() {
-        let model_id = NeuralModelId::new();
-
-        let synth_info = NeuralNodeInfo::synth(model_id, 512, 44100.0);
-        assert!(synth_info.is_synth);
-        assert_eq!(synth_info.buffer_size, 512);
-        assert_eq!(synth_info.sample_rate, 44100.0);
-        assert_eq!(synth_info.latency_samples, 0);
-
-        let effect_info = NeuralNodeInfo::effect(model_id, 1024, 48000.0).with_latency(256);
-        assert!(!effect_info.is_synth);
-        assert_eq!(effect_info.buffer_size, 1024);
-        assert_eq!(effect_info.sample_rate, 48000.0);
-        assert_eq!(effect_info.latency_samples, 256);
     }
 }

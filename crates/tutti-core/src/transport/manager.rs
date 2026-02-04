@@ -6,6 +6,7 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 
 use super::fsm::{TransportEvent, TransportFSM};
 use super::position::{LoopRange, MusicalPosition};
+use super::sync::{SyncSnapshot, SyncSource, SyncState};
 use super::tempo_map::{TempoMap, TempoMapSnapshot, TimeSignature, BBT};
 use crate::compat::Ordering;
 use crate::{AtomicDouble, AtomicFlag, AtomicFloat, AtomicU8};
@@ -59,6 +60,9 @@ pub struct TransportManager {
     tempo_map: Arc<ArcSwap<TempoMap>>,
     tempo_map_shared: Arc<ArcSwap<TempoMapSnapshot>>,
 
+    // External sync state
+    sync_state: Arc<SyncState>,
+
     sample_rate: f64,
 }
 
@@ -90,6 +94,7 @@ impl TransportManager {
             motion_state: Arc::new(AtomicU8::new(MotionState::Stopped.to_u8())),
             tempo_map: Arc::new(ArcSwap::new(Arc::new(tempo_map))),
             tempo_map_shared,
+            sync_state: Arc::new(SyncState::new()),
             sample_rate,
         }
     }
@@ -367,6 +372,79 @@ impl TransportManager {
     pub fn samples_per_beat(&self) -> f64 {
         self.sample_rate / self.beats_per_second()
     }
+
+    // --- External Sync API ---
+
+    /// Get shared sync state (for butler thread access).
+    pub fn sync_state(&self) -> &Arc<SyncState> {
+        &self.sync_state
+    }
+
+    /// Set sync source (Internal, MTC, MIDI Clock, LTC).
+    pub fn set_sync_source(&self, source: SyncSource) {
+        self.sync_state.set_source(source);
+    }
+
+    /// Get current sync source.
+    pub fn get_sync_source(&self) -> SyncSource {
+        self.sync_state.source()
+    }
+
+    /// Get sync status snapshot for UI display.
+    pub fn sync_snapshot(&self) -> SyncSnapshot {
+        self.sync_state.snapshot()
+    }
+
+    /// Check if transport is slaved to external source.
+    /// Returns true only when external, following, AND locked.
+    pub fn is_slaved(&self) -> bool {
+        self.sync_state.is_external()
+            && self.sync_state.is_following()
+            && self.sync_state.is_locked()
+    }
+
+    /// Receive external position update (call when receiving MTC/LTC/MIDI Clock).
+    /// Updates sync state and optionally chases to external position.
+    pub fn receive_external_position(&self, beats: f64) {
+        self.sync_state.set_external_position(beats);
+
+        // If following external source and locked, update transport position
+        if self.sync_state.is_following() && self.sync_state.is_locked() {
+            // Apply offset if configured
+            let offset_samples = self.sync_state.offset_samples();
+            let offset_beats = if offset_samples != 0.0 {
+                offset_samples / self.samples_per_beat()
+            } else {
+                0.0
+            };
+            self.current_beat.set(beats + offset_beats);
+        }
+    }
+
+    /// Receive external tempo update (from MIDI Clock tempo detection).
+    pub fn receive_external_tempo(&self, bpm: f32) {
+        self.sync_state.set_external_tempo(bpm);
+
+        // If following external tempo, update transport tempo
+        if self.sync_state.is_following() && self.sync_state.is_locked() {
+            self.tempo.set(bpm);
+        }
+    }
+
+    /// Set sync offset in samples (positive = delay internal, negative = advance).
+    pub fn set_sync_offset(&self, samples: f64) {
+        self.sync_state.set_offset_samples(samples);
+    }
+
+    /// Enable/disable following external position.
+    pub fn set_following(&self, follow: bool) {
+        self.sync_state.set_following(follow);
+    }
+
+    /// Set SMPTE frame rate for MTC/LTC.
+    pub fn set_smpte_frame_rate(&self, rate: super::sync::SmpteFrameRate) {
+        self.sync_state.set_smpte_frame_rate(rate);
+    }
 }
 
 impl Default for TransportManager {
@@ -377,6 +455,7 @@ impl Default for TransportManager {
 
 #[cfg(test)]
 mod tests {
+    use super::super::sync::SyncStatus;
     use super::*;
 
     #[test]
@@ -563,5 +642,110 @@ mod tests {
         for handle in handles {
             handle.join().expect("Thread panicked");
         }
+    }
+
+    // --- External Sync Tests ---
+
+    #[test]
+    fn test_sync_default_state() {
+        let manager = TransportManager::new(48000.0);
+
+        assert_eq!(manager.get_sync_source(), SyncSource::Internal);
+        assert!(!manager.is_slaved());
+
+        let snap = manager.sync_snapshot();
+        assert_eq!(snap.source, SyncSource::Internal);
+        assert_eq!(snap.status, SyncStatus::Unlocked);
+        assert!(!snap.following);
+    }
+
+    #[test]
+    fn test_sync_source_change() {
+        let manager = TransportManager::new(48000.0);
+
+        manager.set_sync_source(SyncSource::MidiTimecode);
+        assert_eq!(manager.get_sync_source(), SyncSource::MidiTimecode);
+
+        let snap = manager.sync_snapshot();
+        assert_eq!(snap.source, SyncSource::MidiTimecode);
+        // Status should be Locking when switching to external
+        assert_eq!(snap.status, SyncStatus::Locking);
+
+        // Switch back to internal
+        manager.set_sync_source(SyncSource::Internal);
+        assert_eq!(manager.get_sync_source(), SyncSource::Internal);
+        let snap = manager.sync_snapshot();
+        assert_eq!(snap.status, SyncStatus::Unlocked);
+    }
+
+    #[test]
+    fn test_external_position_following() {
+        let manager = TransportManager::new(48000.0);
+
+        // Set up external sync
+        manager.set_sync_source(SyncSource::MidiClock);
+        manager.sync_state().set_status(SyncStatus::Locked);
+        manager.set_following(true);
+
+        assert!(manager.is_slaved());
+
+        // Receive external position
+        manager.receive_external_position(16.0);
+
+        // Position should be updated
+        assert!((manager.get_current_beat() - 16.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_external_tempo_following() {
+        let manager = TransportManager::new(48000.0);
+
+        // Set up external sync
+        manager.set_sync_source(SyncSource::MidiClock);
+        manager.sync_state().set_status(SyncStatus::Locked);
+        manager.set_following(true);
+
+        // Receive external tempo
+        manager.receive_external_tempo(140.0);
+
+        // Tempo should be updated
+        assert!((manager.get_tempo() - 140.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_sync_offset() {
+        let manager = TransportManager::new(48000.0);
+
+        // Set up external sync with offset
+        manager.set_sync_source(SyncSource::MidiTimecode);
+        manager.sync_state().set_status(SyncStatus::Locked);
+        manager.set_following(true);
+
+        // Set offset of 24000 samples (1 beat at 120 BPM, 48kHz)
+        manager.set_sync_offset(24000.0);
+
+        // Receive external position
+        manager.receive_external_position(8.0);
+
+        // Position should include offset: 8.0 + 1.0 = 9.0 beats
+        assert!((manager.get_current_beat() - 9.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_not_following_when_unlocked() {
+        let manager = TransportManager::new(48000.0);
+
+        // Set external source but don't lock
+        manager.set_sync_source(SyncSource::MidiClock);
+        manager.set_following(true);
+
+        // Not slaved because status is Locking, not Locked
+        assert!(!manager.is_slaved());
+
+        // Receive external position
+        manager.receive_external_position(32.0);
+
+        // Position should NOT be updated (still at 0)
+        assert!((manager.get_current_beat() - 0.0).abs() < 0.001);
     }
 }

@@ -14,8 +14,8 @@ use crate::transport::{Metronome, TransportHandle, TransportManager};
 #[cfg(feature = "std")]
 use crate::output::AudioEngine;
 
-#[cfg(feature = "neural")]
-use crate::neural::NeuralNodeManager;
+#[cfg(feature = "midi")]
+use crate::midi::MidiRoutingTable;
 
 /// Complete audio system with DSP graph, transport, metering, PDC, and neural audio.
 pub struct TuttiSystem {
@@ -26,11 +26,13 @@ pub struct TuttiSystem {
     metering: Arc<MeteringManager>,
     metronome: Arc<Metronome>,
     pdc: Arc<PdcManager>,
-    #[cfg(feature = "neural")]
-    neural: Arc<NeuralNodeManager>,
     sample_rate: f64,
     #[cfg(not(feature = "std"))]
     channels: usize,
+
+    /// MIDI routing table for channel/port/layer routing
+    #[cfg(all(feature = "std", feature = "midi"))]
+    midi_routing: Mutex<MidiRoutingTable>,
 }
 
 impl TuttiSystem {
@@ -100,6 +102,13 @@ impl TuttiSystem {
         let mut net = self.net.lock();
         let result = f(&mut net);
         net.commit(); // Auto-commit to audio thread
+
+        // Feed graph-level total latency into PdcManager for sampler butler
+        let total_latency = net.total_latency();
+        if total_latency > 0 {
+            self.pdc.set_channel_latency(0, total_latency);
+        }
+
         result
     }
 
@@ -141,30 +150,6 @@ impl TuttiSystem {
         &self.pdc
     }
 
-    /// Get the neural node manager (neural feature only).
-    ///
-    /// The neural manager tracks which Net nodes are neural processors
-    /// and enables GPU batching optimization via [`GraphAnalyzer`](crate::GraphAnalyzer).
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Register a neural synth
-    /// let node_id = system.graph(|net| {
-    ///     net.push(builder.build_voice()?)
-    /// });
-    ///
-    /// system.neural().register(node_id, NeuralNodeInfo::synth(
-    ///     builder.model_id(),
-    ///     512,
-    ///     44100.0
-    /// ));
-    /// ```
-    #[cfg(feature = "neural")]
-    pub fn neural(&self) -> &Arc<NeuralNodeManager> {
-        &self.neural
-    }
-
     /// Clone the DSP graph for offline export.
     ///
     /// This creates a snapshot of the current audio graph that can be rendered
@@ -173,6 +158,65 @@ impl TuttiSystem {
     /// Used internally by the export system.
     pub fn clone_net(&self) -> fundsp::net::Net {
         self.net.lock().clone_net()
+    }
+
+    /// Configure MIDI routing.
+    ///
+    /// Use this to set up channel-based, port-based, or layered MIDI routing.
+    /// All methods are chainable. Changes are automatically committed to the
+    /// audio thread when the closure returns.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Channel-based routing (GM-style)
+    /// system.midi_routing(|r| {
+    ///     r.channel(0, lead_synth_id)
+    ///      .channel(1, bass_synth_id)
+    ///      .channel(9, drum_kit_id);
+    /// });
+    ///
+    /// // Layering (same input to multiple synths)
+    /// system.midi_routing(|r| {
+    ///     r.channel_layer(0, &[strings_id, brass_id, choir_id]);
+    /// });
+    ///
+    /// // Port-based routing (multiple keyboards)
+    /// system.midi_routing(|r| {
+    ///     r.port(0, main_synth_id)
+    ///      .port(1, controller_synth_id);
+    /// });
+    /// ```
+    #[cfg(all(feature = "std", feature = "midi"))]
+    pub fn midi_routing<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut MidiRoutingTable) -> R,
+    {
+        let mut routing = self.midi_routing.lock();
+        let result = f(&mut routing);
+        routing.commit(); // Auto-commit to audio thread
+        result
+    }
+
+    /// Set a simple MIDI target (all MIDI → one synth).
+    ///
+    /// This is a convenience method for the common case of routing all hardware
+    /// MIDI to a single synth. For more sophisticated routing, use `midi_routing()`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let synth_id = system.graph(|net| {
+    ///     let id = net.add(Box::new(soundfont_unit));
+    ///     net.pipe_output(id);
+    ///     net.node(id).get_id()
+    /// });
+    ///
+    /// system.set_midi_target(synth_id);
+    /// ```
+    #[cfg(all(feature = "std", feature = "midi"))]
+    pub fn set_midi_target(&self, unit_id: u64) {
+        self.midi_routing(|r| {
+            r.clear().fallback(unit_id);
+        });
     }
 }
 
@@ -185,6 +229,10 @@ pub struct TuttiSystemBuilder {
     sample_rate: Option<f64>,
     inputs: usize,
     outputs: usize,
+
+    /// MIDI input source for hardware MIDI routing (feature: midi)
+    #[cfg(feature = "midi")]
+    midi_input: Option<Arc<dyn crate::midi::MidiInputSource>>,
 }
 
 impl TuttiSystemBuilder {
@@ -214,6 +262,29 @@ impl TuttiSystemBuilder {
         self
     }
 
+    /// Set the MIDI input source for hardware MIDI routing.
+    ///
+    /// The input source provides MIDI events from hardware ports. These events
+    /// are read in the audio callback and routed to registered audio nodes.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let midi_system = MidiSystem::builder().io().build()?;
+    /// let system = TuttiSystem::builder()
+    ///     .midi_input(midi_system.port_manager())
+    ///     .build()?;
+    ///
+    /// // Then configure routing:
+    /// system.midi_routing(|r| {
+    ///     r.add_channel_route(0, synth_id);
+    /// });
+    /// ```
+    #[cfg(feature = "midi")]
+    pub fn midi_input(mut self, input: Arc<dyn crate::midi::MidiInputSource>) -> Self {
+        self.midi_input = Some(input);
+        self
+    }
+
     /// Build and start the audio system.
     pub fn build(self) -> Result<TuttiSystem> {
         #[cfg(feature = "std")]
@@ -229,11 +300,8 @@ impl TuttiSystemBuilder {
         let inputs = self.inputs;
         let outputs = if self.outputs == 0 { 2 } else { self.outputs };
 
-        #[cfg(not(feature = "neural"))]
-        let (net, backend) = TuttiNet::with_io(inputs, outputs);
-
-        #[cfg(feature = "neural")]
-        let (net, backend, neural) = TuttiNet::with_io(inputs, outputs);
+        let mut net = TuttiNet::new(inputs, outputs);
+        let backend = net.backend();
 
         let transport = Arc::new(TransportManager::new(sample_rate));
         let metering = Arc::new(MeteringManager::new(sample_rate));
@@ -242,12 +310,34 @@ impl TuttiSystemBuilder {
         // Initialize PDC with outputs count (channels = outputs for now)
         let pdc = Arc::new(PdcManager::new(outputs, 0));
 
+        // Create MIDI routing table
+        #[cfg(all(feature = "std", feature = "midi"))]
+        let midi_routing = {
+            let table = MidiRoutingTable::new();
+            table
+        };
+
         #[cfg(feature = "std")]
         {
             let mut callback_state =
                 AudioCallbackState::new(transport.clone(), metering.clone(), sample_rate);
 
             callback_state.set_net_backend(backend);
+
+            // Wire up MIDI input routing if configured
+            #[cfg(feature = "midi")]
+            {
+                if let Some(midi_input) = self.midi_input {
+                    callback_state.set_midi_input(midi_input);
+                }
+
+                // Clone the MIDI registry from the net for the callback
+                let midi_registry = net.midi_registry().clone();
+                callback_state.set_midi_registry(midi_registry);
+
+                // Share the routing snapshot with the callback
+                callback_state.set_midi_routing(midi_routing.snapshot_arc());
+            }
 
             engine.start(callback_state)?;
         }
@@ -263,11 +353,11 @@ impl TuttiSystemBuilder {
             metering,
             metronome,
             pdc,
-            #[cfg(feature = "neural")]
-            neural,
             sample_rate,
             #[cfg(not(feature = "std"))]
             channels: outputs,
+            #[cfg(all(feature = "std", feature = "midi"))]
+            midi_routing: Mutex::new(midi_routing),
         })
     }
 }

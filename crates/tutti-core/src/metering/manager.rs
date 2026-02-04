@@ -4,6 +4,10 @@ use super::{AtomicAmplitude, AtomicStereoAnalysis, CpuMeter, StereoAnalysisSnaps
 use crate::compat::{Arc, HashMap, Mutex};
 use crossbeam_channel::Receiver;
 use ebur128::{EbuR128, Mode};
+use ringbuf::{
+    traits::{Producer, Split},
+    HeapCons, HeapProd, HeapRb,
+};
 
 /// Stereo sample pair (left, right).
 type StereoSample = (f32, f32);
@@ -27,6 +31,10 @@ pub struct MeteringManager {
 
     master_rx: MasterMeterRx,
     channel_rxs: ChannelMeterRxs,
+
+    /// Ring buffer producer for analysis tap (opt-in via enable_analysis_tap)
+    analysis_tap_enabled: Arc<crate::lockfree::AtomicFlag>,
+    analysis_tap_producer: Mutex<Option<HeapProd<(f32, f32)>>>,
 
     sample_rate: f64,
 }
@@ -52,6 +60,9 @@ impl MeteringManager {
 
             master_rx: Arc::new(Mutex::new(None)),
             channel_rxs: Arc::new(Mutex::new(HashMap::new())),
+
+            analysis_tap_enabled: Arc::new(crate::lockfree::AtomicFlag::new(false)),
+            analysis_tap_producer: Mutex::new(None),
 
             sample_rate,
         }
@@ -199,5 +210,51 @@ impl MeteringManager {
     /// Removes a channel buffer.
     pub fn remove_channel_buffer(&self, channel: usize) {
         self.channel_rxs.lock().remove(&channel);
+    }
+
+    /// Enable the analysis tap and return the consumer end of the ring buffer.
+    ///
+    /// Creates a SPSC ring buffer (~3 seconds at 44.1kHz). The audio callback
+    /// pushes stereo pairs via `push_analysis_tap()`. The caller owns the
+    /// consumer and drains it from an analysis thread.
+    pub fn enable_analysis_tap(&self) -> HeapCons<(f32, f32)> {
+        let capacity = 131072; // ~3s at 44.1kHz
+        let rb = HeapRb::<(f32, f32)>::new(capacity);
+        let (prod, cons) = rb.split();
+        *self.analysis_tap_producer.lock() = Some(prod);
+        self.analysis_tap_enabled.set(true);
+        cons
+    }
+
+    /// Disable the analysis tap and drop the producer.
+    pub fn disable_analysis_tap(&self) {
+        self.analysis_tap_enabled.set(false);
+        *self.analysis_tap_producer.lock() = None;
+    }
+
+    /// Returns whether the analysis tap is enabled.
+    pub fn is_analysis_tap_enabled(&self) -> bool {
+        self.analysis_tap_enabled.get()
+    }
+
+    /// Push interleaved stereo samples to the analysis tap (RT-safe).
+    ///
+    /// Called from the audio callback. Drops samples if the buffer is full
+    /// or the lock is contended (never blocks). No-op if the tap is disabled.
+    #[inline]
+    pub fn push_analysis_tap(&self, output: &[f32], frames: usize) {
+        if !self.analysis_tap_enabled.get() {
+            return;
+        }
+        // try_lock: skip this callback if the producer is being swapped
+        if let Some(ref mut guard) = self.analysis_tap_producer.try_lock() {
+            if let Some(ref mut prod) = **guard {
+                for i in 0..frames {
+                    let l = output[i * 2];
+                    let r = output[i * 2 + 1];
+                    let _ = prod.try_push((l, r));
+                }
+            }
+        }
     }
 }

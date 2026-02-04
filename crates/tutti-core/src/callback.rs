@@ -6,6 +6,11 @@ use crate::transport::TransportManager;
 use fundsp::audiounit::AudioUnit;
 use fundsp::realnet::NetBackend;
 
+#[cfg(feature = "midi")]
+use crate::midi::{MidiInputSource, MidiRegistry, MidiRoutingSnapshot};
+#[cfg(feature = "midi")]
+use arc_swap::ArcSwap;
+
 /// State for the real-time audio callback.
 /// Uses `UnsafeCell` for interior mutability. Only access from the audio thread.
 pub(crate) struct AudioCallbackState {
@@ -14,6 +19,19 @@ pub(crate) struct AudioCallbackState {
     pub(crate) metering: Arc<MeteringManager>,
     pub(crate) sample_position: AtomicU64,
     pub(crate) sample_rate: f64,
+
+    /// MIDI input source (hardware/virtual ports) - optional
+    #[cfg(feature = "midi")]
+    midi_input: Option<Arc<dyn MidiInputSource>>,
+
+    /// MIDI registry for routing events to nodes - optional
+    #[cfg(feature = "midi")]
+    midi_registry: Option<MidiRegistry>,
+
+    /// MIDI routing snapshot for RT-safe access to routing configuration.
+    /// Uses ArcSwap for lock-free atomic updates from the main thread.
+    #[cfg(feature = "midi")]
+    midi_routing: Arc<ArcSwap<MidiRoutingSnapshot>>,
 }
 
 unsafe impl Send for AudioCallbackState {}
@@ -31,11 +49,36 @@ impl AudioCallbackState {
             metering,
             sample_position: AtomicU64::new(0),
             sample_rate,
+            #[cfg(feature = "midi")]
+            midi_input: None,
+            #[cfg(feature = "midi")]
+            midi_registry: None,
+            #[cfg(feature = "midi")]
+            midi_routing: Arc::new(ArcSwap::from_pointee(MidiRoutingSnapshot::empty())),
         }
     }
 
     pub(crate) fn set_net_backend(&mut self, backend: NetBackend) {
         unsafe { *self.net_backend.get() = Some(backend) }
+    }
+
+    /// Set the MIDI input source for hardware MIDI routing.
+    #[cfg(feature = "midi")]
+    pub(crate) fn set_midi_input(&mut self, input: Arc<dyn MidiInputSource>) {
+        self.midi_input = Some(input);
+    }
+
+    /// Set the MIDI registry for routing events to audio nodes.
+    #[cfg(feature = "midi")]
+    pub(crate) fn set_midi_registry(&mut self, registry: MidiRegistry) {
+        self.midi_registry = Some(registry);
+    }
+
+    /// Set the MIDI routing snapshot Arc for RT-safe access.
+    /// The MidiRoutingTable commits changes to this Arc.
+    #[cfg(feature = "midi")]
+    pub(crate) fn set_midi_routing(&mut self, routing: Arc<ArcSwap<MidiRoutingSnapshot>>) {
+        self.midi_routing = routing;
     }
 
     #[inline]
@@ -57,6 +100,10 @@ fn process_audio_inner(state: &AudioCallbackState, output: &mut [f32]) {
 
     // Process any pending transport commands (from UI thread)
     state.transport.process_commands();
+
+    // Process hardware MIDI input and route to audio nodes
+    #[cfg(feature = "midi")]
+    process_midi_input(state, frames);
 
     // Advance transport
     if !state.transport.is_paused() {
@@ -82,6 +129,49 @@ fn process_audio_inner(state: &AudioCallbackState, output: &mut [f32]) {
 
     // NOTE: LUFS metering is handled in the CPAL callback closure (output/core.rs)
     // to avoid heap allocations and Mutex locks on the RT thread.
+}
+
+/// Process MIDI input from hardware and route to the audio graph.
+///
+/// Uses the MidiRoutingSnapshot for channel/port/layer routing.
+///
+/// # RT Safety
+/// This function is called from the audio thread and uses only lock-free operations:
+/// - ArcSwap::load() for routing snapshot
+/// - Bounded channel try_send() for registry queuing
+#[cfg(feature = "midi")]
+#[inline]
+fn process_midi_input(state: &AudioCallbackState, frames: usize) {
+    // Early return if no MIDI input or registry configured
+    let (midi_input, midi_registry) = match (&state.midi_input, &state.midi_registry) {
+        (Some(input), Some(registry)) => (input, registry),
+        _ => return,
+    };
+
+    // Load routing snapshot (RT-safe, lock-free)
+    let routing = state.midi_routing.load();
+
+    if !routing.has_routes() {
+        // No routing configured, discard MIDI input
+        // Still call cycle_read to drain the buffer and prevent overflow
+        let _ = midi_input.cycle_read(frames);
+        return;
+    }
+
+    // Read all pending MIDI events from hardware ports (RT-safe)
+    let events = midi_input.cycle_read(frames);
+
+    if events.is_empty() {
+        return;
+    }
+
+    // Route events through the routing table
+    for &(port, event) in events {
+        // Get all target units for this event
+        for target in routing.route(port, &event) {
+            midi_registry.queue(target, &[event]);
+        }
+    }
 }
 
 #[cfg(test)]

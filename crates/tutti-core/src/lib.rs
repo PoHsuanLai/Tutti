@@ -53,15 +53,15 @@ pub use net_frontend::{NodeInfo, TuttiNet};
 pub(crate) mod transport;
 pub use transport::{
     automation_curves, AutomationEnvelopeFn, AutomationReaderInput, Metronome, MetronomeHandle,
-    MetronomeMode, MotionState, TempoMap, TimeSignature, TransportClock, TransportHandle,
-    TransportManager, BBT,
+    MetronomeMode, MotionState, SmpteFrameRate, SyncSnapshot, SyncSource, SyncState, SyncStatus,
+    TempoMap, TimeSignature, TransportClock, TransportHandle, TransportManager, BBT,
 };
 
 // Metering
 pub(crate) mod metering;
 pub use metering::{
-    AtomicAmplitude, AtomicStereoAnalysis, CpuMeter, CpuMetrics, MeteringManager,
-    StereoAnalysisSnapshot,
+    analyze_loudness, analyze_true_peak, AtomicAmplitude, AtomicStereoAnalysis, CpuMeter,
+    CpuMetrics, LoudnessResult, MeteringManager, StereoAnalysisSnapshot,
 };
 
 // Plugin delay compensation
@@ -120,7 +120,10 @@ pub(crate) mod output;
 pub mod midi;
 
 #[cfg(feature = "midi")]
-pub use midi::{AsMidiAudioUnit, MidiAudioUnit, MidiEvent, MidiRegistry};
+pub use midi::{
+    AsMidiAudioUnit, MidiAudioUnit, MidiEvent, MidiInputSource, MidiRegistry, MidiRoute,
+    MidiRoutingSnapshot, MidiRoutingTable, NoMidiInput,
+};
 
 // Feature-gated: Neural audio
 #[cfg(feature = "neural")]

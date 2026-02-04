@@ -10,7 +10,6 @@ use hashbrown::HashSet;
 #[derive(Debug, Clone, Default)]
 pub struct BatchingStrategy {
     pub model_batches: HashMap<NeuralModelId, Vec<NodeId>>,
-    pub parallel_groups: Vec<Vec<NodeId>>,
     pub execution_order: HashMap<NodeId, usize>,
     pub total_neural_nodes: usize,
 }
@@ -34,11 +33,6 @@ impl BatchingStrategy {
     /// Get count of unique models.
     pub fn model_count(&self) -> usize {
         self.model_batches.len()
-    }
-
-    /// Get count of parallel groups.
-    pub fn parallel_group_count(&self) -> usize {
-        self.parallel_groups.len()
     }
 }
 
@@ -65,108 +59,14 @@ impl<'a> GraphAnalyzer<'a> {
             return BatchingStrategy::default();
         }
 
-        // 2. Find independent subgraphs (parallel groups)
-        let parallel_groups = self.find_parallel_groups();
-
-        // 3. Compute execution order
+        // 2. Compute execution order (topological sort)
         let execution_order = self.compute_execution_order();
 
         BatchingStrategy {
             model_batches,
-            parallel_groups,
             execution_order,
             total_neural_nodes,
         }
-    }
-
-    /// Find independent subgraphs containing neural nodes.
-    fn find_parallel_groups(&self) -> Vec<Vec<NodeId>> {
-        let neural_nodes: HashSet<NodeId> = self.manager.all_nodes().into_iter().collect();
-
-        if neural_nodes.is_empty() {
-            return Vec::new();
-        }
-
-        // Pre-size collections based on neural node count (typical graphs have few groups)
-        let node_count = neural_nodes.len();
-        let mut visited = HashSet::with_capacity(node_count);
-        let mut groups = Vec::with_capacity(node_count.min(8)); // Rarely >8 parallel groups
-
-        for &node_id in &neural_nodes {
-            if visited.contains(&node_id) {
-                continue;
-            }
-
-            // BFS to find all connected neural nodes
-            let group = self.find_connected_component(node_id, &neural_nodes, &mut visited);
-            if !group.is_empty() {
-                groups.push(group);
-            }
-        }
-
-        groups
-    }
-
-    /// BFS to find all neural nodes connected to `start`.
-    fn find_connected_component(
-        &self,
-        start: NodeId,
-        neural_nodes: &HashSet<NodeId>,
-        visited: &mut HashSet<NodeId>,
-    ) -> Vec<NodeId> {
-        // Pre-size for typical component size (most groups are small, <16 nodes)
-        let estimated_size = neural_nodes.len().min(16);
-        let mut component = Vec::with_capacity(estimated_size);
-        let mut queue = VecDeque::with_capacity(estimated_size);
-        let mut seen_in_traversal = HashSet::with_capacity(estimated_size);
-
-        queue.push_back(start);
-        seen_in_traversal.insert(start);
-
-        while let Some(current_id) = queue.pop_front() {
-            // If this node is neural and not yet visited, add to component
-            if neural_nodes.contains(&current_id) && !visited.contains(&current_id) {
-                visited.insert(current_id);
-                component.push(current_id);
-            }
-
-            // Skip if node not in net (safety check)
-            if !self.net.contains(current_id) {
-                continue;
-            }
-
-            // Find upstream connections (nodes that feed into this one)
-            let inputs = self.net.inputs_in(current_id);
-            for i in 0..inputs {
-                if let Source::Local(src_id, _) = self.net.source(current_id, i) {
-                    if !seen_in_traversal.contains(&src_id) {
-                        seen_in_traversal.insert(src_id);
-                        queue.push_back(src_id);
-                    }
-                }
-            }
-
-            // Find downstream connections (nodes this one feeds into)
-            // We need to check all nodes to find those that reference current_id
-            for other_id in self.net.ids() {
-                if seen_in_traversal.contains(other_id) {
-                    continue;
-                }
-
-                let other_inputs = self.net.inputs_in(*other_id);
-                for i in 0..other_inputs {
-                    if let Source::Local(src_id, _) = self.net.source(*other_id, i) {
-                        if src_id == current_id {
-                            seen_in_traversal.insert(*other_id);
-                            queue.push_back(*other_id);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        component
     }
 
     /// Compute topological execution order for neural nodes.
@@ -274,7 +174,7 @@ impl<'a> GraphAnalyzer<'a> {
 mod tests {
     use super::*;
     use crate::compat::Box;
-    use crate::neural::metadata::{NeuralModelId, NeuralNodeInfo};
+    use crate::neural::metadata::NeuralModelId;
     use fundsp::prelude::*;
 
     fn create_test_net_and_manager() -> (Net, NeuralNodeManager) {
@@ -300,7 +200,7 @@ mod tests {
 
         let model_id = NeuralModelId::from_raw(1);
         let node_id = net.push(Box::new(dc(0.0f32)));
-        manager.register(node_id, NeuralNodeInfo::synth(model_id, 512, 44100.0));
+        manager.register(node_id, model_id);
 
         let analyzer = GraphAnalyzer::new(&net, &manager);
         let strategy = analyzer.analyze();
@@ -323,10 +223,10 @@ mod tests {
         let node3 = net.push(Box::new(dc(0.0f32)));
         let node4 = net.push(Box::new(dc(0.0f32)));
 
-        manager.register(node1, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(node2, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(node3, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(node4, NeuralNodeInfo::synth(model_a, 512, 44100.0));
+        manager.register(node1, model_a);
+        manager.register(node2, model_a);
+        manager.register(node3, model_a);
+        manager.register(node4, model_a);
 
         let analyzer = GraphAnalyzer::new(&net, &manager);
         let strategy = analyzer.analyze();
@@ -350,10 +250,10 @@ mod tests {
         let node3 = net.push(Box::new(dc(0.0f32)));
         let node4 = net.push(Box::new(dc(0.0f32)));
 
-        manager.register(node1, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(node2, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(node3, NeuralNodeInfo::synth(model_b, 512, 44100.0));
-        manager.register(node4, NeuralNodeInfo::synth(model_b, 512, 44100.0));
+        manager.register(node1, model_a);
+        manager.register(node2, model_a);
+        manager.register(node3, model_b);
+        manager.register(node4, model_b);
 
         let analyzer = GraphAnalyzer::new(&net, &manager);
         let strategy = analyzer.analyze();
@@ -363,52 +263,6 @@ mod tests {
         assert_eq!(strategy.model_batches[&model_a].len(), 2);
         assert_eq!(strategy.model_batches[&model_b].len(), 2);
         assert_eq!(strategy.batch_efficiency(), 2.0); // 4 nodes / 2 batches
-    }
-
-    #[test]
-    fn test_parallel_groups_independent() {
-        let (mut net, manager) = create_test_net_and_manager();
-
-        let model_a = NeuralModelId::from_raw(1);
-
-        // Two completely independent neural nodes (no connections)
-        let node1 = net.push(Box::new(dc(0.0f32)));
-        let node2 = net.push(Box::new(dc(0.0f32)));
-
-        manager.register(node1, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(node2, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-
-        let analyzer = GraphAnalyzer::new(&net, &manager);
-        let strategy = analyzer.analyze();
-
-        // Each node should be in its own parallel group (no connections between them)
-        assert_eq!(strategy.parallel_group_count(), 2);
-    }
-
-    #[test]
-    fn test_parallel_groups_connected() {
-        let (mut net, manager) = create_test_net_and_manager();
-
-        let model_a = NeuralModelId::from_raw(1);
-
-        // neural1 → effect → neural2 (connected chain)
-        let neural1 = net.push(Box::new(pass())); // 1 in, 1 out
-        let effect = net.push(Box::new(pass())); // 1 in, 1 out
-        let neural2 = net.push(Box::new(pass())); // 1 in, 1 out
-
-        // Connect: neural1 → effect → neural2
-        net.connect(neural1, 0, effect, 0);
-        net.connect(effect, 0, neural2, 0);
-
-        manager.register(neural1, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(neural2, NeuralNodeInfo::effect(model_a, 512, 44100.0));
-
-        let analyzer = GraphAnalyzer::new(&net, &manager);
-        let strategy = analyzer.analyze();
-
-        // Both neural nodes should be in the same parallel group (connected)
-        assert_eq!(strategy.parallel_group_count(), 1);
-        assert_eq!(strategy.parallel_groups[0].len(), 2);
     }
 
     #[test]
@@ -423,8 +277,8 @@ mod tests {
 
         net.connect(neural1, 0, neural2, 0);
 
-        manager.register(neural1, NeuralNodeInfo::synth(model_a, 512, 44100.0));
-        manager.register(neural2, NeuralNodeInfo::effect(model_a, 512, 44100.0));
+        manager.register(neural1, model_a);
+        manager.register(neural2, model_a);
 
         let analyzer = GraphAnalyzer::new(&net, &manager);
         let strategy = analyzer.analyze();
@@ -462,9 +316,9 @@ mod tests {
         net.connect(mixer, 0, amp_sim, 0);
         net.connect(mixer, 1, amp_sim, 1);
 
-        manager.register(ddsp1, NeuralNodeInfo::synth(model_ddsp, 512, 44100.0));
-        manager.register(ddsp2, NeuralNodeInfo::synth(model_ddsp, 512, 44100.0));
-        manager.register(amp_sim, NeuralNodeInfo::effect(model_amp, 512, 44100.0));
+        manager.register(ddsp1, model_ddsp);
+        manager.register(ddsp2, model_ddsp);
+        manager.register(amp_sim, model_amp);
 
         let analyzer = GraphAnalyzer::new(&net, &manager);
         let strategy = analyzer.analyze();
@@ -474,9 +328,6 @@ mod tests {
         assert_eq!(strategy.model_count(), 2);
         assert_eq!(strategy.model_batches[&model_ddsp].len(), 2);
         assert_eq!(strategy.model_batches[&model_amp].len(), 1);
-
-        // All nodes are connected, so one parallel group
-        assert_eq!(strategy.parallel_group_count(), 1);
 
         // Execution order: ddsp1 and ddsp2 before amp_sim
         let order_ddsp1 = strategy.execution_order[&ddsp1];

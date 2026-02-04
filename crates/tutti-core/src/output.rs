@@ -133,6 +133,7 @@ where
                 let frames = data.len() / channels;
 
                 process_dsp(&state, frames, &mut output_f32);
+                state.metering.push_analysis_tap(&output_f32, frames);
                 update_lufs_metering(&state, frames, &output_f32, &mut lufs_left, &mut lufs_right);
                 write_output(data, channels, &output_f32);
             }));
