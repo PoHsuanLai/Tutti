@@ -39,6 +39,8 @@ pub struct ExportBuilder {
     sample_rate: f64,
     duration_seconds: Option<f64>,
     options: ExportOptions,
+    /// When true, trim the initial latency from the rendered audio.
+    compensate_latency: bool,
 }
 
 impl ExportBuilder {
@@ -49,6 +51,7 @@ impl ExportBuilder {
             sample_rate,
             duration_seconds: None,
             options: ExportOptions::default(),
+            compensate_latency: false,
         }
     }
 
@@ -80,6 +83,21 @@ impl ExportBuilder {
     /// Set normalization mode.
     pub fn normalize(mut self, mode: NormalizationMode) -> Self {
         self.options.normalization = mode;
+        self
+    }
+
+    /// Trim initial latency from the rendered audio.
+    ///
+    /// When enabled, the graph's causal latency (from look-ahead limiters,
+    /// linear-phase filters, etc.) is measured and the corresponding number
+    /// of leading silent samples are removed from the output. The render
+    /// duration is extended internally so the exported audio is still the
+    /// requested length.
+    ///
+    /// Disable this when exporting stems that need to stay time-aligned
+    /// with other stems (the pre-delay keeps them in sync).
+    pub fn compensate_latency(mut self, enabled: bool) -> Self {
+        self.compensate_latency = enabled;
         self
     }
 
@@ -156,9 +174,17 @@ impl ExportBuilder {
         let mut render_net = self.net;
         render_net.set_sample_rate(self.sample_rate);
 
+        // Measure latency and extend render duration if compensating
+        let latency_samples = if self.compensate_latency {
+            render_net.latency().unwrap_or(0.0).floor() as usize
+        } else {
+            0
+        };
+        let extra_duration = latency_samples as f64 / self.sample_rate;
+
         let wave = tutti_core::dsp::Wave::render_with_progress(
             self.sample_rate,
-            duration,
+            duration + extra_duration,
             &mut render_net,
             |p| {
                 on_progress(ExportProgress {
@@ -168,12 +194,13 @@ impl ExportBuilder {
             },
         );
 
-        let mut left = Vec::with_capacity(wave.length());
-        let mut right = Vec::with_capacity(wave.length());
+        let output_length = (duration * self.sample_rate).round() as usize;
+        let mut left = Vec::with_capacity(output_length);
+        let mut right = Vec::with_capacity(output_length);
 
-        for i in 0..wave.length() {
-            left.push(wave.at(0, i));
-            right.push(wave.at(1, i));
+        for i in 0..output_length {
+            left.push(wave.at(0, i + latency_samples));
+            right.push(wave.at(1, i + latency_samples));
         }
 
         Ok((left, right))

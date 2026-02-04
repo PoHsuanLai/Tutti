@@ -21,7 +21,7 @@ use crate::export_builder::{ExportPhase, ExportProgress};
 /// Export stereo audio to WAV file.
 pub fn export_wav(path: &str, left: &[f32], right: &[f32], options: &ExportOptions) -> Result<()> {
     use crate::dsp::{
-        apply_dither, analyze_loudness, normalize_loudness, normalize_peak, resample_stereo,
+        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
         DitherState,
     };
     use crate::options::NormalizationMode;
@@ -103,7 +103,7 @@ pub fn export_wav_with_progress(
     on_progress: impl Fn(ExportProgress),
 ) -> Result<()> {
     use crate::dsp::{
-        apply_dither, analyze_loudness, normalize_loudness, normalize_peak, resample_stereo,
+        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
         DitherState,
     };
     use crate::options::NormalizationMode;

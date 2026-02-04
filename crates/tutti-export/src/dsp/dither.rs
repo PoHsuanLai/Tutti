@@ -114,7 +114,6 @@ pub fn apply_dither(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +175,4 @@ mod tests {
         // TPDF can go up to 2 LSBs
         assert!(max_sample < max_noise * 3.0);
     }
-
 }

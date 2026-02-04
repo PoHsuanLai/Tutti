@@ -36,7 +36,7 @@ impl Default for FlacConfig {
 /// Export stereo audio to FLAC file.
 pub fn export_flac(path: &str, left: &[f32], right: &[f32], options: &ExportOptions) -> Result<()> {
     use crate::dsp::{
-        apply_dither, analyze_loudness, normalize_loudness, normalize_peak, resample_stereo,
+        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
         DitherState,
     };
     use crate::options::NormalizationMode;
@@ -119,7 +119,7 @@ pub fn export_flac_with_progress(
     on_progress: impl Fn(ExportProgress),
 ) -> Result<()> {
     use crate::dsp::{
-        apply_dither, analyze_loudness, normalize_loudness, normalize_peak, resample_stereo,
+        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
         DitherState,
     };
     use crate::options::NormalizationMode;
