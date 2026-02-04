@@ -293,6 +293,7 @@ impl TransientDetector {
         let std_dev = variance.sqrt();
 
         let adaptive_threshold = mean + std_dev * self.threshold * 3.0;
+        let max_val = values.iter().cloned().fold(0.0f32, f32::max);
 
         // Find local maxima above threshold
         for i in 1..detection_fn.len() - 1 {
@@ -301,8 +302,6 @@ impl TransientDetector {
             let (_, next_val) = detection_fn[i + 1];
 
             if val > prev_val && val > next_val && val > adaptive_threshold {
-                // Normalize strength to 0-1
-                let max_val = values.iter().cloned().fold(0.0f32, f32::max);
                 let strength = if max_val > 0.0 {
                     (val / max_val).min(1.0)
                 } else {
@@ -314,19 +313,6 @@ impl TransientDetector {
         }
 
         peaks
-    }
-
-    /// Analyze and return transient positions as sample indices
-    pub fn detect_positions(&mut self, samples: &[f32]) -> Vec<usize> {
-        self.detect(samples)
-            .into_iter()
-            .map(|t| t.sample_position)
-            .collect()
-    }
-
-    /// Analyze and return transient times in seconds
-    pub fn detect_times(&mut self, samples: &[f32]) -> Vec<f64> {
-        self.detect(samples).into_iter().map(|t| t.time).collect()
     }
 
     /// Clean up transient list by removing closely spaced detections

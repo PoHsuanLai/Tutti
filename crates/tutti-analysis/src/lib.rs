@@ -58,8 +58,11 @@ pub mod waveform;
 #[cfg(feature = "cache")]
 pub mod cache;
 
+#[cfg(feature = "live")]
+pub mod live;
+
 // Fluent API handle
-pub mod handle;
+mod handle;
 
 // Re-export main types at crate root for convenience
 pub use correlation::{CorrelationMeter, StereoAnalysis};
@@ -71,5 +74,8 @@ pub use waveform::{MultiResolutionSummary, StereoWaveformSummary, WaveformBlock,
 
 #[cfg(feature = "cache")]
 pub use cache::ThumbnailCache;
+
+#[cfg(feature = "live")]
+pub use live::LiveAnalysisState;
 
 pub use handle::AnalysisHandle;

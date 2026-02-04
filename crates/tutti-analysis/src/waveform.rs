@@ -50,7 +50,7 @@ impl WaveformSummary {
     }
 
     /// Create with pre-allocated capacity
-    pub fn with_capacity(samples_per_block: usize, num_blocks: usize) -> Self {
+    pub(crate) fn with_capacity(samples_per_block: usize, num_blocks: usize) -> Self {
         Self {
             blocks: Vec::with_capacity(num_blocks),
             samples_per_block,
@@ -66,11 +66,6 @@ impl WaveformSummary {
     /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
-    }
-
-    /// Get block at index
-    pub fn get(&self, index: usize) -> Option<&WaveformBlock> {
-        self.blocks.get(index)
     }
 
     /// Get the overall peak level
@@ -138,7 +133,7 @@ pub struct StereoWaveformSummary {
 
 impl StereoWaveformSummary {
     /// Create a new stereo summary
-    pub fn new(samples_per_block: usize) -> Self {
+    pub(crate) fn new(samples_per_block: usize) -> Self {
         Self {
             left: WaveformSummary::new(samples_per_block),
             right: WaveformSummary::new(samples_per_block),

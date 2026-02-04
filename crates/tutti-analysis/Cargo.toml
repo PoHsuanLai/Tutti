@@ -12,6 +12,10 @@ categories = ["multimedia::audio"]
 # FFT for spectral analysis (transient detection, pitch detection)
 rustfft = "6"
 
+# Lock-free ring buffer and pointer swap for live analysis
+ringbuf = { version = "0.4", optional = true }
+arc-swap = { version = "1", optional = true }
+
 # LRU cache for thumbnail caching
 lru = { version = "0.12", optional = true }
 
@@ -20,5 +24,6 @@ serde = { version = "1", features = ["derive"], optional = true }
 
 [features]
 default = []
+live = ["ringbuf", "arc-swap"]
 cache = ["lru"]
 serialization = ["serde"]
