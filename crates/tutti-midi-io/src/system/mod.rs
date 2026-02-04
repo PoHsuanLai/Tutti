@@ -27,17 +27,31 @@
 //! let event = midi.note_on(0, 60, 100);
 //! ```
 
+mod builder;
+
+#[cfg(feature = "mpe")]
+mod mpe_handle;
+
+#[cfg(feature = "midi2")]
+mod midi2_handle;
+
+pub use builder::MidiSystemBuilder;
+
+#[cfg(feature = "mpe")]
+pub use mpe_handle::MpeHandle;
+
+#[cfg(feature = "midi2")]
+pub use midi2_handle::Midi2Handle;
+
 use crate::error::Result;
 use crate::event::MidiEvent;
-use crate::multi_port::{MidiPortManager, PortInfo};
+use crate::port::{MidiPortManager, PortInfo};
 use std::sync::Arc;
 
 #[cfg(feature = "midi-io")]
 use crate::error::Error;
 #[cfg(feature = "midi-io")]
-use crate::input::{MidiInputDevice, MidiInputManager};
-#[cfg(feature = "midi-io")]
-use crate::output::{MidiOutputManager, MidiOutputMessage};
+use crate::io::{MidiInputDevice, MidiInputManager, MidiOutputManager, MidiOutputMessage};
 
 #[cfg(feature = "mpe")]
 use crate::mpe::{MpeMode, MpeProcessor, PerNoteExpression};
@@ -60,21 +74,21 @@ pub struct MidiSystem {
     inner: Arc<MidiSystemInner>,
 }
 
-struct MidiSystemInner {
-    port_manager: Arc<MidiPortManager>,
+pub(crate) struct MidiSystemInner {
+    pub(crate) port_manager: Arc<MidiPortManager>,
     #[cfg(feature = "midi-io")]
-    input_manager: Option<Arc<MidiInputManager>>,
+    pub(crate) input_manager: Option<Arc<MidiInputManager>>,
     #[cfg(feature = "midi-io")]
-    output_manager: Option<Arc<MidiOutputManager>>,
+    pub(crate) output_manager: Option<Arc<MidiOutputManager>>,
     /// MPE processor with interior mutability for channel allocation
     ///
     /// Uses RwLock because:
     /// - Reading expression state (audio thread) is lock-free via atomics in PerNoteExpression
     /// - Channel allocation (outgoing MPE) requires mutation and is not time-critical
     #[cfg(feature = "mpe")]
-    mpe_processor: Option<Arc<RwLock<MpeProcessor>>>,
-    cc_manager: Option<Arc<crate::cc_manager::CCMappingManager>>,
-    output_collector: Option<Arc<crate::output_collector::MidiOutputAggregator>>,
+    pub(crate) mpe_processor: Option<Arc<RwLock<MpeProcessor>>>,
+    pub(crate) cc_manager: Option<Arc<crate::cc::CCMappingManager>>,
+    pub(crate) output_collector: Option<Arc<crate::output_collector::MidiOutputAggregator>>,
 }
 
 impl MidiSystem {
@@ -437,467 +451,13 @@ impl MidiSystem {
     }
 
     /// Get direct access to the CC mapping manager (advanced usage)
-    pub fn cc_manager(&self) -> Option<Arc<crate::cc_manager::CCMappingManager>> {
+    pub fn cc_manager(&self) -> Option<Arc<crate::cc::CCMappingManager>> {
         self.inner.cc_manager.clone()
     }
 
     /// Get direct access to the MIDI output collector (advanced usage)
     pub fn output_collector(&self) -> Option<Arc<crate::output_collector::MidiOutputAggregator>> {
         self.inner.output_collector.clone()
-    }
-}
-
-// ============================================================================
-// MidiSystemBuilder
-// ============================================================================
-
-/// Builder for configuring MidiSystem
-pub struct MidiSystemBuilder {
-    #[cfg(feature = "midi-io")]
-    enable_io: bool,
-    #[cfg(feature = "mpe")]
-    mpe_mode: Option<MpeMode>,
-    enable_cc_mapping: bool,
-    enable_output_collector: bool,
-}
-
-#[allow(clippy::derivable_impls)]
-impl Default for MidiSystemBuilder {
-    fn default() -> Self {
-        Self {
-            #[cfg(feature = "midi-io")]
-            enable_io: false,
-            #[cfg(feature = "mpe")]
-            mpe_mode: None,
-            enable_cc_mapping: false,
-            enable_output_collector: false,
-        }
-    }
-}
-
-impl MidiSystemBuilder {
-    /// Enable hardware MIDI I/O
-    #[cfg(feature = "midi-io")]
-    pub fn io(mut self) -> Self {
-        self.enable_io = true;
-        self
-    }
-
-    /// Enable MPE with the given mode
-    #[cfg(feature = "mpe")]
-    pub fn mpe(mut self, mode: MpeMode) -> Self {
-        self.mpe_mode = Some(mode);
-        self
-    }
-
-    /// Enable CC mapping manager
-    pub fn cc_mapping(mut self) -> Self {
-        self.enable_cc_mapping = true;
-        self
-    }
-
-    /// Enable MIDI output collector (for collecting MIDI from audio nodes)
-    pub fn output_collector(mut self) -> Self {
-        self.enable_output_collector = true;
-        self
-    }
-
-    /// Build the MIDI system
-    pub fn build(self) -> Result<MidiSystem> {
-        let port_manager = Arc::new(MidiPortManager::new(256));
-
-        // Create MPE processor before input manager so it can be passed in
-        #[cfg(feature = "mpe")]
-        let mpe_processor = self
-            .mpe_mode
-            .map(|mode| Arc::new(RwLock::new(MpeProcessor::new(mode))));
-
-        #[cfg(feature = "midi-io")]
-        let (input_manager, output_manager) = if self.enable_io {
-            let input = MidiInputManager::new(
-                port_manager.clone(),
-                #[cfg(feature = "mpe")]
-                mpe_processor.clone(),
-            );
-            let output = MidiOutputManager::new();
-            (Some(Arc::new(input)), Some(Arc::new(output)))
-        } else {
-            (None, None)
-        };
-
-        let cc_manager = if self.enable_cc_mapping {
-            Some(Arc::new(crate::cc_manager::CCMappingManager::new()))
-        } else {
-            None
-        };
-
-        let output_collector = if self.enable_output_collector {
-            Some(Arc::new(
-                crate::output_collector::MidiOutputAggregator::new(),
-            ))
-        } else {
-            None
-        };
-
-        Ok(MidiSystem {
-            inner: Arc::new(MidiSystemInner {
-                port_manager,
-                #[cfg(feature = "midi-io")]
-                input_manager,
-                #[cfg(feature = "midi-io")]
-                output_manager,
-                #[cfg(feature = "mpe")]
-                mpe_processor,
-                cc_manager,
-                output_collector,
-            }),
-        })
-    }
-}
-
-// ============================================================================
-// Sub-Handles
-// ============================================================================
-
-/// Handle for MPE functionality
-#[cfg(feature = "mpe")]
-pub struct MpeHandle {
-    processor: Option<Arc<RwLock<MpeProcessor>>>,
-}
-
-#[cfg(feature = "mpe")]
-impl MpeHandle {
-    /// Create a new MPE handle (internal use only)
-    pub(crate) fn new(processor: Option<Arc<RwLock<MpeProcessor>>>) -> Self {
-        Self { processor }
-    }
-
-    /// Get the shared per-note expression state
-    pub fn expression(&self) -> Option<Arc<PerNoteExpression>> {
-        self.processor.as_ref().map(|p| p.read().expression())
-    }
-
-    /// Get pitch bend for a note (combined per-note + global)
-    ///
-    /// Returns normalized value: -1.0 (max down) to 1.0 (max up)
-    #[inline]
-    pub fn pitch_bend(&self, note: u8) -> f32 {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().expression().get_pitch_bend(note))
-            .unwrap_or(0.0)
-    }
-
-    /// Get per-note pitch bend only (without global)
-    #[inline]
-    pub fn pitch_bend_per_note(&self, note: u8) -> f32 {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().expression().get_pitch_bend_per_note(note))
-            .unwrap_or(0.0)
-    }
-
-    /// Get global pitch bend (from master channel)
-    #[inline]
-    pub fn pitch_bend_global(&self) -> f32 {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().expression().get_pitch_bend_global())
-            .unwrap_or(0.0)
-    }
-
-    /// Get pressure for a note (max of per-note and global)
-    ///
-    /// Returns normalized value: 0.0 to 1.0
-    #[inline]
-    pub fn pressure(&self, note: u8) -> f32 {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().expression().get_pressure(note))
-            .unwrap_or(0.0)
-    }
-
-    /// Get per-note pressure only
-    #[inline]
-    pub fn pressure_per_note(&self, note: u8) -> f32 {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().expression().get_pressure_per_note(note))
-            .unwrap_or(0.0)
-    }
-
-    /// Get slide (CC74) for a note
-    ///
-    /// Returns normalized value: 0.0 to 1.0
-    #[inline]
-    pub fn slide(&self, note: u8) -> f32 {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().expression().get_slide(note))
-            .unwrap_or(0.5)
-    }
-
-    /// Check if a note is currently active
-    #[inline]
-    pub fn is_note_active(&self, note: u8) -> bool {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().expression().is_active(note))
-            .unwrap_or(false)
-    }
-
-    /// Get the current MPE mode
-    pub fn mode(&self) -> MpeMode {
-        self.processor
-            .as_ref()
-            .map(|p| p.read().mode().clone())
-            .unwrap_or(MpeMode::Disabled)
-    }
-
-    /// Check if MPE is enabled
-    pub fn is_enabled(&self) -> bool {
-        self.processor
-            .as_ref()
-            .map(|p| !matches!(p.read().mode(), MpeMode::Disabled))
-            .unwrap_or(false)
-    }
-
-    // ========================================================================
-    // Incoming: Process unified MIDI events
-    // ========================================================================
-
-    /// Process a unified MIDI event (MIDI 1.0 or 2.0)
-    ///
-    /// Dispatches to the appropriate handler based on the event type.
-    /// This allows external callers to feed events into the MPE processor.
-    #[cfg(feature = "midi2")]
-    pub fn process_event(&self, event: &crate::UnifiedMidiEvent) {
-        if let Some(ref p) = self.processor {
-            p.write().process_unified(event);
-        }
-    }
-
-    // ========================================================================
-    // Outgoing MPE: Send notes with automatic channel allocation
-    // ========================================================================
-
-    /// Allocate a channel for outgoing MPE note
-    ///
-    /// Call this before sending a Note On to allocate an MPE channel.
-    /// Returns the channel to use, or None if MPE is disabled.
-    ///
-    /// # Example
-    /// ```ignore
-    /// if let Some(channel) = midi.mpe().allocate_channel(60) {
-    ///     midi.send_note_on(channel, 60, 100)?;
-    /// }
-    /// ```
-    pub fn allocate_channel(&self, note: u8) -> Option<u8> {
-        self.processor
-            .as_ref()
-            .and_then(|p| p.write().allocate_channel_for_note(note))
-    }
-
-    /// Release a channel after Note Off
-    ///
-    /// Frees the channel for reuse by other notes.
-    pub fn release_channel(&self, note: u8) {
-        if let Some(ref p) = self.processor {
-            p.write().release_channel_for_note(note);
-        }
-    }
-
-    /// Get the channel currently assigned to a note
-    ///
-    /// Returns None if the note is not currently playing or MPE is disabled.
-    pub fn get_channel(&self, note: u8) -> Option<u8> {
-        self.processor
-            .as_ref()
-            .and_then(|p| p.read().get_channel_for_note(note))
-    }
-
-    /// Check if using lower zone
-    pub fn has_lower_zone(&self) -> bool {
-        self.processor
-            .as_ref()
-            .map(|p| {
-                matches!(
-                    p.read().mode(),
-                    MpeMode::LowerZone(_) | MpeMode::DualZone { .. }
-                )
-            })
-            .unwrap_or(false)
-    }
-
-    /// Check if using upper zone
-    pub fn has_upper_zone(&self) -> bool {
-        self.processor
-            .as_ref()
-            .map(|p| {
-                matches!(
-                    p.read().mode(),
-                    MpeMode::UpperZone(_) | MpeMode::DualZone { .. }
-                )
-            })
-            .unwrap_or(false)
-    }
-
-    /// Reset all MPE state
-    ///
-    /// Clears all channel allocations and resets expression values.
-    /// Call this when stopping playback or changing MPE configuration.
-    pub fn reset(&self) {
-        if let Some(ref p) = self.processor {
-            p.write().reset();
-        }
-    }
-}
-
-/// Handle for MIDI 2.0 functionality
-#[cfg(feature = "midi2")]
-pub struct Midi2Handle;
-
-#[cfg(feature = "midi2")]
-impl Midi2Handle {
-    // ==================== Event Creation ====================
-
-    /// Create a MIDI 2.0 Note On event
-    ///
-    /// * `note` - MIDI note number (0-127)
-    /// * `velocity` - Normalized velocity (0.0-1.0)
-    /// * `channel` - MIDI channel (0-15)
-    pub fn note_on(&self, note: u8, velocity: f32, channel: u8) -> Midi2Event {
-        use midi2::prelude::*;
-        let vel16 = (velocity.clamp(0.0, 1.0) * 65535.0) as u16;
-        Midi2Event::note_on(
-            0,
-            u4::new(0),
-            u4::new(channel.min(15)),
-            u7::new(note.min(127)),
-            vel16,
-        )
-    }
-
-    /// Create a MIDI 2.0 Note Off event
-    pub fn note_off(&self, note: u8, velocity: f32, channel: u8) -> Midi2Event {
-        use midi2::prelude::*;
-        let vel16 = (velocity.clamp(0.0, 1.0) * 65535.0) as u16;
-        Midi2Event::note_off(
-            0,
-            u4::new(0),
-            u4::new(channel.min(15)),
-            u7::new(note.min(127)),
-            vel16,
-        )
-    }
-
-    /// Create a MIDI 2.0 per-note pitch bend event
-    ///
-    /// * `note` - MIDI note number (0-127)
-    /// * `bend` - Normalized pitch bend (-1.0 to 1.0, 0.0 = center)
-    /// * `channel` - MIDI channel (0-15)
-    pub fn per_note_pitch_bend(&self, note: u8, bend: f32, channel: u8) -> Midi2Event {
-        use midi2::prelude::*;
-        let bend_clamped = bend.clamp(-1.0, 1.0);
-        let bend32 = ((bend_clamped as f64 + 1.0) * 0x80000000_u32 as f64) as u32;
-        Midi2Event::per_note_pitch_bend(
-            0,
-            u4::new(0),
-            u4::new(channel.min(15)),
-            u7::new(note.min(127)),
-            bend32,
-        )
-    }
-
-    /// Create a MIDI 2.0 channel pitch bend event
-    pub fn channel_pitch_bend(&self, bend: f32, channel: u8) -> Midi2Event {
-        use midi2::prelude::*;
-        let bend_clamped = bend.clamp(-1.0, 1.0);
-        let bend32 = ((bend_clamped as f64 + 1.0) * 0x80000000_u32 as f64) as u32;
-        Midi2Event::channel_pitch_bend(0, u4::new(0), u4::new(channel.min(15)), bend32)
-    }
-
-    /// Create a MIDI 2.0 Control Change event
-    pub fn control_change(&self, cc: u8, value: f32, channel: u8) -> Midi2Event {
-        use midi2::prelude::*;
-        let val32 = (value.clamp(0.0, 1.0) as f64 * 0xFFFFFFFF_u32 as f64) as u32;
-        Midi2Event::control_change(
-            0,
-            u4::new(0),
-            u4::new(channel.min(15)),
-            u7::new(cc.min(127)),
-            val32,
-        )
-    }
-
-    /// Create a MIDI 2.0 per-note pressure (poly aftertouch) event
-    pub fn key_pressure(&self, note: u8, pressure: f32, channel: u8) -> Midi2Event {
-        use midi2::prelude::*;
-        let press32 = (pressure.clamp(0.0, 1.0) as f64 * 0xFFFFFFFF_u32 as f64) as u32;
-        Midi2Event::key_pressure(
-            0,
-            u4::new(0),
-            u4::new(channel.min(15)),
-            u7::new(note.min(127)),
-            press32,
-        )
-    }
-
-    /// Create a MIDI 2.0 channel pressure (aftertouch) event
-    pub fn channel_pressure(&self, pressure: f32, channel: u8) -> Midi2Event {
-        use midi2::prelude::*;
-        let press32 = (pressure.clamp(0.0, 1.0) as f64 * 0xFFFFFFFF_u32 as f64) as u32;
-        Midi2Event::channel_pressure(0, u4::new(0), u4::new(channel.min(15)), press32)
-    }
-
-    // ==================== Conversion ====================
-
-    /// Convert a MIDI 1.0 event to MIDI 2.0 (upsamples resolution)
-    pub fn convert_to_midi2(&self, event: &MidiEvent) -> Option<Midi2Event> {
-        crate::midi2::midi1_to_midi2(event)
-    }
-
-    /// Convert a MIDI 2.0 event to MIDI 1.0 (downsamples resolution)
-    pub fn convert_to_midi1(&self, event: &Midi2Event) -> Option<MidiEvent> {
-        event.to_midi1()
-    }
-
-    // ==================== Value Conversion Utilities ====================
-
-    /// Convert 7-bit MIDI 1.0 velocity to 16-bit MIDI 2.0
-    #[inline]
-    pub fn velocity_to_16bit(&self, v: u8) -> u16 {
-        crate::midi2::midi1_velocity_to_midi2(v)
-    }
-
-    /// Convert 16-bit MIDI 2.0 velocity to 7-bit MIDI 1.0
-    #[inline]
-    pub fn velocity_to_7bit(&self, v: u16) -> u8 {
-        crate::midi2::midi2_velocity_to_midi1(v)
-    }
-
-    /// Convert 7-bit MIDI 1.0 CC value to 32-bit MIDI 2.0
-    #[inline]
-    pub fn cc_to_32bit(&self, v: u8) -> u32 {
-        crate::midi2::midi1_cc_to_midi2(v)
-    }
-
-    /// Convert 32-bit MIDI 2.0 CC value to 7-bit MIDI 1.0
-    #[inline]
-    pub fn cc_to_7bit(&self, v: u32) -> u8 {
-        crate::midi2::midi2_cc_to_midi1(v)
-    }
-
-    /// Convert 14-bit MIDI 1.0 pitch bend to 32-bit MIDI 2.0
-    #[inline]
-    pub fn pitch_bend_to_32bit(&self, v: u16) -> u32 {
-        crate::midi2::midi1_pitch_bend_to_midi2(v)
-    }
-
-    /// Convert 32-bit MIDI 2.0 pitch bend to 14-bit MIDI 1.0
-    #[inline]
-    pub fn pitch_bend_to_14bit(&self, v: u32) -> u16 {
-        crate::midi2::midi2_pitch_bend_to_midi1(v)
     }
 }
 

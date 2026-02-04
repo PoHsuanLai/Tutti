@@ -1,7 +1,10 @@
-//! MIDI 2.0 high-resolution messages.
+//! MIDI 2.0 event type with sample-accurate timing.
 
 use midi2::channel_voice2::NoteAttribute;
 use midi2::prelude::*;
+
+use super::convert::midi2_velocity_to_midi1;
+use super::Midi2MessageType;
 
 /// Helper to extract [u32; 2] from a message's data slice
 #[inline]
@@ -375,8 +378,10 @@ impl Midi2Event {
     /// Convert to MIDI 1.0 event (lossy - reduces resolution).
     ///
     /// Returns None for MIDI 2.0-only message types (per-note pitch bend, per-note controllers).
-    pub fn to_midi1(&self) -> Option<super::MidiEvent> {
+    pub fn to_midi1(&self) -> Option<crate::MidiEvent> {
         use midi_msg::{Channel, ChannelVoiceMsg, ControlChange};
+
+        use super::convert::midi2_cc_to_midi1;
 
         let channel = Channel::from_u8(self.channel());
         let frame = self.frame_offset;
@@ -384,7 +389,7 @@ impl Midi2Event {
         match self.message_type() {
             Midi2MessageType::NoteOn { note, velocity, .. } => {
                 let vel = midi2_velocity_to_midi1(velocity);
-                Some(super::MidiEvent::new(
+                Some(crate::MidiEvent::new(
                     frame,
                     channel,
                     ChannelVoiceMsg::NoteOn {
@@ -395,7 +400,7 @@ impl Midi2Event {
             }
             Midi2MessageType::NoteOff { note, velocity } => {
                 let vel = midi2_velocity_to_midi1(velocity);
-                Some(super::MidiEvent::new(
+                Some(crate::MidiEvent::new(
                     frame,
                     channel,
                     ChannelVoiceMsg::NoteOff {
@@ -406,7 +411,7 @@ impl Midi2Event {
             }
             Midi2MessageType::ControlChange { controller, value } => {
                 let val = midi2_cc_to_midi1(value);
-                Some(super::MidiEvent::new(
+                Some(crate::MidiEvent::new(
                     frame,
                     channel,
                     ChannelVoiceMsg::ControlChange {
@@ -421,7 +426,7 @@ impl Midi2Event {
                 // MIDI 2.0 pitch bend is 32-bit unsigned, center at 0x80000000
                 // MIDI 1.0 pitch bend is 14-bit unsigned, center at 8192
                 let bend_14 = (bend >> 18) as u16; // Scale 32-bit to 14-bit
-                Some(super::MidiEvent::new(
+                Some(crate::MidiEvent::new(
                     frame,
                     channel,
                     ChannelVoiceMsg::PitchBend { bend: bend_14 },
@@ -430,7 +435,7 @@ impl Midi2Event {
             Midi2MessageType::ChannelPressure { pressure } => {
                 // 32-bit to 7-bit
                 let press = (pressure >> 25) as u8;
-                Some(super::MidiEvent::new(
+                Some(crate::MidiEvent::new(
                     frame,
                     channel,
                     ChannelVoiceMsg::ChannelPressure { pressure: press },
@@ -438,7 +443,7 @@ impl Midi2Event {
             }
             Midi2MessageType::KeyPressure { note, pressure } => {
                 let press = (pressure >> 25) as u8;
-                Some(super::MidiEvent::new(
+                Some(crate::MidiEvent::new(
                     frame,
                     channel,
                     ChannelVoiceMsg::PolyPressure {
@@ -447,7 +452,7 @@ impl Midi2Event {
                     },
                 ))
             }
-            Midi2MessageType::ProgramChange { program, .. } => Some(super::MidiEvent::new(
+            Midi2MessageType::ProgramChange { program, .. } => Some(crate::MidiEvent::new(
                 frame,
                 channel,
                 ChannelVoiceMsg::ProgramChange { program },
@@ -465,244 +470,10 @@ impl Midi2Event {
     }
 }
 
-/// Parsed MIDI 2.0 message type with extracted data.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Midi2MessageType {
-    /// Note On with 16-bit velocity and optional attribute
-    NoteOn {
-        note: u8,
-        velocity: u16,
-        attribute: Option<u16>,
-    },
-    /// Note Off with 16-bit velocity
-    NoteOff { note: u8, velocity: u16 },
-    /// Per-note pitch bend (32-bit, center at 0x80000000)
-    PerNotePitchBend { note: u8, bend: u32 },
-    /// Control Change (32-bit value)
-    ControlChange { controller: u8, value: u32 },
-    /// Channel-wide pitch bend (32-bit, center at 0x80000000)
-    ChannelPitchBend { bend: u32 },
-    /// Channel pressure/aftertouch (32-bit)
-    ChannelPressure { pressure: u32 },
-    /// Per-note pressure/aftertouch (32-bit)
-    KeyPressure { note: u8, pressure: u32 },
-    /// Program change with optional 14-bit bank select
-    ProgramChange {
-        program: u8,
-        /// Bank as 14-bit value (MSB << 7 | LSB)
-        bank: Option<u16>,
-    },
-    /// Registered per-note controller
-    RegisteredPerNoteController { note: u8, index: u8, value: u32 },
-    /// Assignable per-note controller
-    AssignablePerNoteController { note: u8, index: u8, value: u32 },
-    /// Registered controller (RPN)
-    RegisteredController { bank: u8, index: u8, value: u32 },
-    /// Assignable controller (NRPN)
-    AssignableController { bank: u8, index: u8, value: u32 },
-    /// Per-note management (detach, reset)
-    PerNoteManagement { note: u8, detach: bool, reset: bool },
-    /// Unknown opcode
-    Unknown { opcode: u8 },
-}
-
-/// Convert 7-bit MIDI 1.0 velocity to 16-bit MIDI 2.0.
-///
-/// Uses the MIDI 2.0 specification's recommended scaling:
-/// - 0 stays 0 (note off)
-/// - 1-127 maps linearly to 0x0200-0xFFFF
-///
-/// This ensures perfect round-trip conversion.
-#[inline]
-pub fn midi1_velocity_to_midi2(v: u8) -> u16 {
-    if v == 0 {
-        0
-    } else {
-        // Scale 1-127 to 1-65535, then map to 0x0200-0xFFFF range
-        // This is the MIDI 2.0 spec's scaling formula
-        let v7 = v as u32;
-        // Bit replication: v << 9 | v << 2 | v >> 5
-        // But for perfect round-trip, we use: (v * 65535 / 127)
-        ((v7 * 65535 + 63) / 127) as u16
-    }
-}
-
-/// Convert 16-bit MIDI 2.0 velocity to 7-bit MIDI 1.0.
-///
-/// Uses the inverse of the MIDI 2.0 specification's scaling.
-#[inline]
-pub fn midi2_velocity_to_midi1(v: u16) -> u8 {
-    if v == 0 {
-        0
-    } else {
-        // Inverse of midi1_velocity_to_midi2
-        let v16 = v as u32;
-        ((v16 * 127 + 32767) / 65535).min(127) as u8
-    }
-}
-
-/// Convert 7-bit MIDI 1.0 CC value to 32-bit MIDI 2.0.
-#[inline]
-pub fn midi1_cc_to_midi2(v: u8) -> u32 {
-    if v == 0 {
-        0
-    } else if v == 127 {
-        0xFFFF_FFFF
-    } else {
-        // Linear scaling for perfect round-trip
-        let v7 = v as u64;
-        ((v7 * 0xFFFF_FFFF + 63) / 127) as u32
-    }
-}
-
-/// Convert 32-bit MIDI 2.0 CC value to 7-bit MIDI 1.0.
-#[inline]
-pub fn midi2_cc_to_midi1(v: u32) -> u8 {
-    if v == 0 {
-        0
-    } else {
-        // Inverse scaling
-        let v32 = v as u64;
-        ((v32 * 127 + 0x7FFF_FFFF) / 0xFFFF_FFFF).min(127) as u8
-    }
-}
-
-/// Convert 14-bit MIDI 1.0 pitch bend to 32-bit MIDI 2.0.
-///
-/// MIDI 1.0: 0-16383, center at 8192
-/// MIDI 2.0: 0-0xFFFFFFFF, center at 0x80000000
-#[inline]
-pub fn midi1_pitch_bend_to_midi2(v: u16) -> u32 {
-    if v == 0 {
-        0
-    } else if v == 16383 {
-        0xFFFF_FFFF
-    } else {
-        let v14 = v as u64;
-        ((v14 * 0xFFFF_FFFF + 8191) / 16383) as u32
-    }
-}
-
-/// Convert 32-bit MIDI 2.0 pitch bend to 14-bit MIDI 1.0.
-#[inline]
-pub fn midi2_pitch_bend_to_midi1(v: u32) -> u16 {
-    if v == 0 {
-        0
-    } else {
-        let v32 = v as u64;
-        ((v32 * 16383 + 0x7FFF_FFFF) / 0xFFFF_FFFF).min(16383) as u16
-    }
-}
-
-/// Convert MIDI 1.0 MidiEvent to MIDI 2.0 Midi2Event.
-///
-/// This upsamples resolution (7-bit to 16-bit velocity, etc).
-pub fn midi1_to_midi2(event: &super::MidiEvent) -> Option<Midi2Event> {
-    use midi_msg::ChannelVoiceMsg;
-
-    let group = u4::new(0);
-    let channel = u4::new(event.channel as u8);
-
-    match event.msg {
-        ChannelVoiceMsg::NoteOn { note, velocity } => Some(Midi2Event::note_on(
-            event.frame_offset,
-            group,
-            channel,
-            u7::new(note),
-            midi1_velocity_to_midi2(velocity),
-        )),
-        ChannelVoiceMsg::NoteOff { note, velocity } => Some(Midi2Event::note_off(
-            event.frame_offset,
-            group,
-            channel,
-            u7::new(note),
-            midi1_velocity_to_midi2(velocity),
-        )),
-        ChannelVoiceMsg::ControlChange { control } => {
-            if let midi_msg::ControlChange::CC { control: cc, value } = control {
-                Some(Midi2Event::control_change(
-                    event.frame_offset,
-                    group,
-                    channel,
-                    u7::new(cc),
-                    midi1_cc_to_midi2(value),
-                ))
-            } else {
-                None // Other CC types (high-res, RPN, etc) need special handling
-            }
-        }
-        ChannelVoiceMsg::PitchBend { bend } => Some(Midi2Event::channel_pitch_bend(
-            event.frame_offset,
-            group,
-            channel,
-            midi1_pitch_bend_to_midi2(bend),
-        )),
-        ChannelVoiceMsg::ChannelPressure { pressure } => Some(Midi2Event::channel_pressure(
-            event.frame_offset,
-            group,
-            channel,
-            midi1_cc_to_midi2(pressure), // Same scaling as CC
-        )),
-        ChannelVoiceMsg::PolyPressure { note, pressure } => Some(Midi2Event::key_pressure(
-            event.frame_offset,
-            group,
-            channel,
-            u7::new(note),
-            midi1_cc_to_midi2(pressure),
-        )),
-        ChannelVoiceMsg::ProgramChange { program } => Some(Midi2Event::program_change(
-            event.frame_offset,
-            group,
-            channel,
-            u7::new(program),
-            None,
-        )),
-        _ => None, // High-res note on/off handled separately
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_velocity_conversion_roundtrip() {
-        // Test edge cases
-        assert_eq!(midi2_velocity_to_midi1(midi1_velocity_to_midi2(0)), 0);
-        assert_eq!(midi2_velocity_to_midi1(midi1_velocity_to_midi2(1)), 1);
-        assert_eq!(midi2_velocity_to_midi1(midi1_velocity_to_midi2(64)), 64);
-        assert_eq!(midi2_velocity_to_midi1(midi1_velocity_to_midi2(127)), 127);
-
-        // Test all 7-bit values roundtrip correctly
-        for v in 0..=127u8 {
-            let midi2 = midi1_velocity_to_midi2(v);
-            let back = midi2_velocity_to_midi1(midi2);
-            assert_eq!(back, v, "velocity {} failed roundtrip", v);
-        }
-    }
-
-    #[test]
-    fn test_cc_conversion_roundtrip() {
-        for v in 0..=127u8 {
-            let midi2 = midi1_cc_to_midi2(v);
-            let back = midi2_cc_to_midi1(midi2);
-            assert_eq!(back, v, "CC {} failed roundtrip", v);
-        }
-    }
-
-    #[test]
-    fn test_pitch_bend_conversion_roundtrip() {
-        // Test key values
-        assert_eq!(midi2_pitch_bend_to_midi1(midi1_pitch_bend_to_midi2(0)), 0);
-        assert_eq!(
-            midi2_pitch_bend_to_midi1(midi1_pitch_bend_to_midi2(8192)),
-            8192
-        );
-        assert_eq!(
-            midi2_pitch_bend_to_midi1(midi1_pitch_bend_to_midi2(16383)),
-            16383
-        );
-    }
+    use crate::midi2::convert::midi1_velocity_to_midi2;
 
     #[test]
     fn test_note_on_creation() {
@@ -756,30 +527,6 @@ mod tests {
             }
             _ => panic!("Expected ControlChange"),
         }
-    }
-
-    #[test]
-    fn test_midi1_to_midi2_conversion() {
-        use midi_msg::{Channel, ChannelVoiceMsg};
-
-        let midi1 = super::super::MidiEvent::new(
-            100,
-            Channel::Ch1,
-            ChannelVoiceMsg::NoteOn {
-                note: 60,
-                velocity: 100,
-            },
-        );
-
-        let midi2 = midi1_to_midi2(&midi1).unwrap();
-        assert_eq!(midi2.frame_offset, 100);
-        assert_eq!(midi2.channel(), 0);
-        assert!(midi2.is_note_on());
-        assert_eq!(midi2.note(), Some(60));
-
-        // Velocity should be upsampled
-        let vel = midi2.velocity_16bit().unwrap();
-        assert!(vel > 100 * 256); // Should be much larger than 7-bit
     }
 
     #[test]

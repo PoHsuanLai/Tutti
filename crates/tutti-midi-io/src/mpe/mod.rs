@@ -4,450 +4,19 @@
 // but they are part of the public API and tested directly.
 #![allow(dead_code)]
 
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
-use super::MidiEvent;
+use crate::MidiEvent;
 use midi_msg::ChannelVoiceMsg;
 
-/// MPE Zone type
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum MpeZone {
-    /// Lower Zone
-    Lower,
-    /// Upper Zone
-    Upper,
-    /// Single channel mode
-    SingleChannel(u8),
-}
+mod expression;
+mod voice_map;
+mod zone;
 
-/// Zone configuration for MPE
-#[derive(Clone, Debug)]
-pub struct MpeZoneConfig {
-    pub zone: MpeZone,
-    pub master_channel: u8,
-    pub member_count: u8,
-    pub pitch_bend_range: u8,
-    pub enabled: bool,
-}
+pub use expression::PerNoteExpression;
+pub use zone::{MpeMode, MpeZone, MpeZoneConfig};
 
-impl MpeZoneConfig {
-    /// Create a Lower Zone configuration
-    pub fn lower(member_count: u8) -> Self {
-        let member_count = member_count.clamp(1, 15);
-        Self {
-            zone: MpeZone::Lower,
-            master_channel: 0, // Ch1 (0-indexed)
-            member_count,
-            pitch_bend_range: 48,
-            enabled: true,
-        }
-    }
-
-    /// Create an Upper Zone configuration
-    pub fn upper(member_count: u8) -> Self {
-        let member_count = member_count.clamp(1, 15);
-        Self {
-            zone: MpeZone::Upper,
-            master_channel: 15, // Ch16 (0-indexed)
-            member_count,
-            pitch_bend_range: 48,
-            enabled: true,
-        }
-    }
-
-    /// Create a single channel configuration
-    pub fn single_channel(channel: u8) -> Self {
-        Self {
-            zone: MpeZone::SingleChannel(channel.min(15)),
-            master_channel: channel.min(15),
-            member_count: 0,
-            pitch_bend_range: 2, // Standard non-MPE default
-            enabled: true,
-        }
-    }
-
-    /// Set the pitch bend range in semitones
-    pub fn with_pitch_bend_range(mut self, semitones: u8) -> Self {
-        self.pitch_bend_range = semitones;
-        self
-    }
-
-    /// Check if a channel is the master channel
-    #[inline]
-    pub fn is_master_channel(&self, channel: u8) -> bool {
-        channel == self.master_channel
-    }
-
-    /// Check if a channel is a member channel
-    #[inline]
-    pub fn is_member_channel(&self, channel: u8) -> bool {
-        match self.zone {
-            MpeZone::Lower => {
-                // Members: Ch2 (1) to Ch(1+member_count)
-                channel >= 1 && channel <= self.member_count
-            }
-            MpeZone::Upper => {
-                // Members: Ch15 (14) down to Ch(16-member_count)
-                let lowest_member = 15 - self.member_count;
-                channel >= lowest_member && channel <= 14
-            }
-            MpeZone::SingleChannel(_) => false,
-        }
-    }
-
-    /// Check if this zone handles the given channel
-    #[inline]
-    pub fn handles_channel(&self, channel: u8) -> bool {
-        self.is_master_channel(channel) || self.is_member_channel(channel)
-    }
-
-    /// Get member channels as a range
-    pub fn member_channel_range(&self) -> std::ops::RangeInclusive<u8> {
-        match self.zone {
-            MpeZone::Lower => 1..=self.member_count,
-            MpeZone::Upper => (15 - self.member_count)..=14,
-            MpeZone::SingleChannel(ch) => ch..=ch,
-        }
-    }
-}
-
-/// MPE mode configuration
-#[derive(Clone, Debug, Default)]
-pub enum MpeMode {
-    #[default]
-    Disabled,
-    LowerZone(MpeZoneConfig),
-    UpperZone(MpeZoneConfig),
-    DualZone {
-        lower: MpeZoneConfig,
-        upper: MpeZoneConfig,
-    },
-}
-
-/// RT-safe atomic float
-#[derive(Debug)]
-struct AtomicF32(AtomicU32);
-
-impl AtomicF32 {
-    const fn new(value: f32) -> Self {
-        Self(AtomicU32::new(value.to_bits()))
-    }
-
-    #[inline]
-    fn load(&self) -> f32 {
-        f32::from_bits(self.0.load(Ordering::Relaxed))
-    }
-
-    #[inline]
-    fn store(&self, value: f32) {
-        self.0.store(value.to_bits(), Ordering::Relaxed);
-    }
-}
-
-impl Default for AtomicF32 {
-    fn default() -> Self {
-        Self::new(0.0)
-    }
-}
-
-/// Lock-free per-note expression state.
-pub struct PerNoteExpression {
-    pitch_bend: [AtomicF32; 128],
-    pressure: [AtomicF32; 128],
-    slide: [AtomicF32; 128],
-    active: [AtomicBool; 128],
-    global_pitch_bend: AtomicF32,
-    global_pressure: AtomicF32,
-}
-
-impl Default for PerNoteExpression {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl PerNoteExpression {
-    /// Create new per-note expression state
-    pub fn new() -> Self {
-        Self {
-            pitch_bend: std::array::from_fn(|_| AtomicF32::new(0.0)),
-            pressure: std::array::from_fn(|_| AtomicF32::new(0.0)),
-            slide: std::array::from_fn(|_| AtomicF32::new(0.0)),
-            active: std::array::from_fn(|_| AtomicBool::new(false)),
-            global_pitch_bend: AtomicF32::new(0.0),
-            global_pressure: AtomicF32::new(0.0),
-        }
-    }
-
-    /// Mark a note as active and reset its expression values
-    ///
-    /// Call this on Note On to initialize expression state.
-    #[inline]
-    pub fn note_on(&self, note: u8) {
-        if note < 128 {
-            self.pitch_bend[note as usize].store(0.0);
-            self.pressure[note as usize].store(0.0);
-            self.slide[note as usize].store(0.5); // CC74 default is center
-            self.active[note as usize].store(true, Ordering::Relaxed);
-        }
-    }
-
-    /// Mark a note as inactive
-    ///
-    /// Call this on Note Off.
-    #[inline]
-    pub fn note_off(&self, note: u8) {
-        if note < 128 {
-            self.active[note as usize].store(false, Ordering::Relaxed);
-        }
-    }
-
-    /// Set pitch bend for a specific note
-    ///
-    /// `value` is normalized: -1.0 (max bend down) to 1.0 (max bend up)
-    #[inline]
-    pub fn set_pitch_bend(&self, note: u8, value: f32) {
-        if note < 128 {
-            self.pitch_bend[note as usize].store(value.clamp(-1.0, 1.0));
-        }
-    }
-
-    /// Set pressure for a specific note
-    #[inline]
-    pub fn set_pressure(&self, note: u8, value: f32) {
-        if note < 128 {
-            self.pressure[note as usize].store(value.clamp(0.0, 1.0));
-        }
-    }
-
-    /// Set slide (CC74) for a specific note
-    #[inline]
-    pub fn set_slide(&self, note: u8, value: f32) {
-        if note < 128 {
-            self.slide[note as usize].store(value.clamp(0.0, 1.0));
-        }
-    }
-
-    /// Set global pitch bend (affects all notes)
-    #[inline]
-    pub fn set_global_pitch_bend(&self, value: f32) {
-        self.global_pitch_bend.store(value.clamp(-1.0, 1.0));
-    }
-
-    /// Set global pressure (affects all notes)
-    #[inline]
-    pub fn set_global_pressure(&self, value: f32) {
-        self.global_pressure.store(value.clamp(0.0, 1.0));
-    }
-
-    /// Get pitch bend for a note
-    #[inline]
-    pub fn get_pitch_bend(&self, note: u8) -> f32 {
-        if note < 128 {
-            let per_note = self.pitch_bend[note as usize].load();
-            let global = self.global_pitch_bend.load();
-            (per_note + global).clamp(-1.0, 1.0)
-        } else {
-            0.0
-        }
-    }
-
-    /// Get per-note pitch bend
-    #[inline]
-    pub fn get_pitch_bend_per_note(&self, note: u8) -> f32 {
-        if note < 128 {
-            self.pitch_bend[note as usize].load()
-        } else {
-            0.0
-        }
-    }
-
-    /// Get global pitch bend
-    #[inline]
-    pub fn get_pitch_bend_global(&self) -> f32 {
-        self.global_pitch_bend.load()
-    }
-
-    /// Get pressure for a note
-    #[inline]
-    pub fn get_pressure(&self, note: u8) -> f32 {
-        if note < 128 {
-            let per_note = self.pressure[note as usize].load();
-            let global = self.global_pressure.load();
-            // Use max for pressure (typical MPE behavior)
-            per_note.max(global)
-        } else {
-            0.0
-        }
-    }
-
-    /// Get per-note pressure
-    #[inline]
-    pub fn get_pressure_per_note(&self, note: u8) -> f32 {
-        if note < 128 {
-            self.pressure[note as usize].load()
-        } else {
-            0.0
-        }
-    }
-
-    /// Get slide for a note
-    #[inline]
-    pub fn get_slide(&self, note: u8) -> f32 {
-        if note < 128 {
-            self.slide[note as usize].load()
-        } else {
-            0.5
-        }
-    }
-
-    /// Check if a note is currently active
-    #[inline]
-    pub fn is_active(&self, note: u8) -> bool {
-        if note < 128 {
-            self.active[note as usize].load(Ordering::Relaxed)
-        } else {
-            false
-        }
-    }
-
-    /// Reset all expression values
-    pub fn reset(&self) {
-        for i in 0..128 {
-            self.pitch_bend[i].store(0.0);
-            self.pressure[i].store(0.0);
-            self.slide[i].store(0.5);
-            self.active[i].store(false, Ordering::Relaxed);
-        }
-        self.global_pitch_bend.store(0.0);
-        self.global_pressure.store(0.0);
-    }
-}
-
-/// Maps member channels to active notes for MIDI 1.0 MPE
-///
-/// In MPE, each note gets its own channel. This struct tracks which
-/// channel is currently playing which note, allowing proper routing
-/// of per-channel expression to per-note expression.
-#[derive(Debug)]
-pub(crate) struct MpeChannelVoiceMap {
-    /// Channel (0-15) → Note number (or None if unused)
-    channel_to_note: [Option<u8>; 16],
-    /// Note number → Channel (or None if not playing)
-    note_to_channel: [Option<u8>; 128],
-    /// Round-robin index for channel allocation
-    next_channel_index: usize,
-    /// Zone configuration for channel validation
-    zone_config: MpeZoneConfig,
-}
-
-impl MpeChannelVoiceMap {
-    /// Create a new channel-voice map for a zone
-    pub(crate) fn new(zone_config: MpeZoneConfig) -> Self {
-        Self {
-            channel_to_note: [None; 16],
-            note_to_channel: [None; 128],
-            next_channel_index: 0,
-            zone_config,
-        }
-    }
-
-    /// Assign a channel to a note (on Note On)
-    ///
-    /// Returns the assigned channel, or None if no channels available.
-    pub fn assign_note(&mut self, note: u8) -> Option<u8> {
-        if note >= 128 {
-            return None;
-        }
-
-        // If note is already assigned, return its channel
-        if let Some(ch) = self.note_to_channel[note as usize] {
-            return Some(ch);
-        }
-
-        // Find a free member channel using round-robin
-        let member_range = self.zone_config.member_channel_range();
-        let member_count = *member_range.end() - *member_range.start() + 1;
-
-        for offset in 0..member_count {
-            let index = (self.next_channel_index + offset as usize) % member_count as usize;
-            let channel = *member_range.start() + index as u8;
-
-            if self.channel_to_note[channel as usize].is_none() {
-                // Found a free channel
-                self.channel_to_note[channel as usize] = Some(note);
-                self.note_to_channel[note as usize] = Some(channel);
-                self.next_channel_index = (index + 1) % member_count as usize;
-                return Some(channel);
-            }
-        }
-
-        // No free channels - voice stealing would go here
-        // For now, reuse the oldest channel (round-robin)
-        let channel = *member_range.start() + self.next_channel_index as u8;
-        if let Some(old_note) = self.channel_to_note[channel as usize] {
-            self.note_to_channel[old_note as usize] = None;
-        }
-        self.channel_to_note[channel as usize] = Some(note);
-        self.note_to_channel[note as usize] = Some(channel);
-        self.next_channel_index = (self.next_channel_index + 1) % member_count as usize;
-        Some(channel)
-    }
-
-    /// Release a note (on Note Off)
-    pub fn release_note(&mut self, note: u8) {
-        if note >= 128 {
-            return;
-        }
-
-        if let Some(channel) = self.note_to_channel[note as usize] {
-            self.channel_to_note[channel as usize] = None;
-            self.note_to_channel[note as usize] = None;
-        }
-    }
-
-    /// Get the note playing on a channel
-    #[inline]
-    pub fn get_note_for_channel(&self, channel: u8) -> Option<u8> {
-        if channel < 16 {
-            self.channel_to_note[channel as usize]
-        } else {
-            None
-        }
-    }
-
-    /// Get the channel assigned to a note
-    #[inline]
-    pub fn get_channel_for_note(&self, note: u8) -> Option<u8> {
-        if note < 128 {
-            self.note_to_channel[note as usize]
-        } else {
-            None
-        }
-    }
-
-    /// Check if this map handles the given channel
-    #[inline]
-    pub fn handles_channel(&self, channel: u8) -> bool {
-        self.zone_config.handles_channel(channel)
-    }
-
-    /// Clear all mappings
-    pub fn clear(&mut self) {
-        self.channel_to_note = [None; 16];
-        self.note_to_channel = [None; 128];
-        self.next_channel_index = 0;
-    }
-}
-
-/// Zone information for a channel
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct ZoneInfo {
-    is_master: bool,
-    is_member: bool,
-    is_lower_zone: bool,
-}
+pub(crate) use voice_map::{MpeChannelVoiceMap, ZoneInfo};
 
 /// Processes MIDI input and routes to per-note expression
 ///
@@ -689,8 +258,8 @@ impl MpeProcessor {
     /// MIDI 2.0 has native per-note pitch bend and controllers,
     /// so no channel-voice mapping is needed.
     #[cfg(feature = "midi2")]
-    pub fn process_midi2(&self, event: &super::midi2::Midi2Event) {
-        use super::midi2::Midi2MessageType;
+    pub fn process_midi2(&self, event: &crate::midi2::Midi2Event) {
+        use crate::midi2::Midi2MessageType;
 
         match event.message_type() {
             Midi2MessageType::NoteOn { note, .. } => {
@@ -829,33 +398,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_zone_config_lower() {
-        let config = MpeZoneConfig::lower(10);
-        assert_eq!(config.master_channel, 0);
-        assert_eq!(config.member_count, 10);
-        assert!(config.is_master_channel(0));
-        assert!(!config.is_master_channel(1));
-        assert!(config.is_member_channel(1));
-        assert!(config.is_member_channel(10));
-        assert!(!config.is_member_channel(11));
-        assert!(!config.is_member_channel(0));
-    }
-
-    #[test]
-    fn test_zone_config_upper() {
-        let config = MpeZoneConfig::upper(5);
-        assert_eq!(config.master_channel, 15);
-        assert_eq!(config.member_count, 5);
-        assert!(config.is_master_channel(15));
-        assert!(!config.is_master_channel(14));
-        // Upper zone: members are 15-member_count to 14 (i.e., 10 to 14)
-        assert!(config.is_member_channel(14));
-        assert!(config.is_member_channel(10));
-        assert!(!config.is_member_channel(9));
-        assert!(!config.is_member_channel(15));
-    }
-
-    #[test]
     fn test_per_note_expression() {
         let expr = PerNoteExpression::new();
 
@@ -899,29 +441,6 @@ mod tests {
 
         expr.set_pressure(60, 1.5);
         assert!((expr.get_pressure(60) - 1.0).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_channel_voice_map() {
-        let config = MpeZoneConfig::lower(3);
-        let mut map = MpeChannelVoiceMap::new(config);
-
-        // Assign note 60
-        let ch1 = map.assign_note(60);
-        assert!(ch1.is_some());
-        assert!(map.get_channel_for_note(60).is_some());
-
-        // Assign note 62
-        let ch2 = map.assign_note(62);
-        assert!(ch2.is_some());
-        assert_ne!(ch1, ch2);
-
-        // Release note 60
-        map.release_note(60);
-        assert!(map.get_channel_for_note(60).is_none());
-
-        // Note 62 should still be assigned
-        assert!(map.get_channel_for_note(62).is_some());
     }
 
     #[test]
@@ -978,11 +497,11 @@ mod tests {
 
         // Note on
         let note_on =
-            super::super::midi2::Midi2Event::note_on(0, u4::new(0), u4::new(0), u7::new(60), 65535);
+            crate::midi2::Midi2Event::note_on(0, u4::new(0), u4::new(0), u7::new(60), 65535);
         processor.process_midi2(&note_on);
 
         // Per-note pitch bend (max up)
-        let pitch_bend = super::super::midi2::Midi2Event::per_note_pitch_bend(
+        let pitch_bend = crate::midi2::Midi2Event::per_note_pitch_bend(
             0,
             u4::new(0),
             u4::new(0),

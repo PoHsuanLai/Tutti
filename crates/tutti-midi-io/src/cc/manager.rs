@@ -1,6 +1,6 @@
 //! MIDI CC mapping manager with MIDI learn support.
 
-use crate::cc_mapping::{CCMapping, CCNumber, CCTarget, MappingId, MidiChannel};
+use super::mapping::{CCMapping, CCNumber, CCTarget, MappingId, MidiChannel};
 use arc_swap::ArcSwap;
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicU64, Ordering};

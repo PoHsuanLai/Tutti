@@ -5,8 +5,8 @@
 
 #![cfg_attr(not(feature = "midi-io"), allow(unused_imports, dead_code))]
 
-use super::async_port::InputProducerHandle;
-use super::multi_port::MidiPortManager;
+use crate::port::async_port::InputProducerHandle;
+use crate::port::MidiPortManager;
 use crate::MidiEvent;
 use crossbeam_channel::{bounded, Receiver, Sender};
 #[cfg(feature = "midi-io")]

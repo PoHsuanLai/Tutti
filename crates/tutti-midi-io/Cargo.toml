@@ -17,6 +17,9 @@ thiserror = "2"
 tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
 
+# Core types (MidiEvent, lockfree atomics)
+tutti-core = { path = "../tutti-core", default-features = false, features = ["midi"] }
+
 # Lock-free
 ringbuf = "0.4"
 crossbeam-channel = "0.5"

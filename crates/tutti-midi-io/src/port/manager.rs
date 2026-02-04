@@ -3,7 +3,8 @@
 //! Manages multiple AsyncMidiPort instances for simultaneous MIDI I/O.
 //! Index-based for RT-safe direct Vec access, with arc-swap for lock-free updates.
 
-use super::async_port::{AsyncMidiPort, MidiEvent};
+use super::async_port::{AsyncMidiPort, OutputProducerHandle};
+use crate::MidiEvent;
 use arc_swap::ArcSwap;
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -27,7 +28,7 @@ pub struct PortInfo {
 pub struct MidiPortManager {
     input_ports: Arc<ArcSwap<Vec<Arc<AsyncMidiPort>>>>,
     output_ports: Arc<ArcSwap<Vec<Arc<AsyncMidiPort>>>>,
-    output_handles: Arc<ArcSwap<Vec<super::async_port::OutputProducerHandle>>>,
+    output_handles: Arc<ArcSwap<Vec<OutputProducerHandle>>>,
     port_info: Arc<RwLock<Vec<PortInfo>>>,
     fifo_size: usize,
     event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
@@ -314,6 +315,22 @@ impl MidiPortManager {
 impl Default for MidiPortManager {
     fn default() -> Self {
         Self::new(2048)
+    }
+}
+
+// Implement MidiInputSource trait from tutti-core for audio callback integration
+impl tutti_core::midi::MidiInputSource for MidiPortManager {
+    /// Read all pending MIDI events from hardware ports.
+    ///
+    /// This is the bridge between hardware MIDI (via midir) and the audio callback.
+    /// Called once per audio buffer to collect all events that arrived since the last call.
+    fn cycle_read(&self, nframes: usize) -> &[(usize, tutti_core::midi::MidiEvent)] {
+        self.cycle_start_read_all_inputs(nframes)
+    }
+
+    fn has_active_inputs(&self) -> bool {
+        let input_ports = self.input_ports.load();
+        input_ports.iter().any(|port| port.is_active())
     }
 }
 

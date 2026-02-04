@@ -1,359 +1,41 @@
 //! RT-safe MIDI event types with sample-accurate timing.
+//!
+//! Core types (`MidiEvent`, `RawMidiEvent`, `MidiEventBuilder`) are defined in
+//! `tutti-core` and re-exported here. This module adds MIDI 2.0 extensions.
 
-use midi_msg::{Channel, ChannelVoiceMsg, MidiMsg};
+// Re-export core MIDI types from tutti-core
+pub use tutti_core::midi::{MidiEvent, RawMidiEvent};
 
-/// RT-safe MIDI event with sample-accurate frame offset.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MidiEvent {
-    /// Sample offset within the current buffer (0 = first sample)
-    pub frame_offset: usize,
-    /// MIDI channel (0-15)
-    pub channel: Channel,
-    /// The channel voice message
-    pub msg: ChannelVoiceMsg,
-}
+// Re-export ControlChange for tests
+#[cfg(test)]
+pub(crate) use tutti_core::midi::ControlChange;
 
-impl MidiEvent {
-    /// Create a new MIDI event
-    #[inline]
-    pub fn new(frame_offset: usize, channel: Channel, msg: ChannelVoiceMsg) -> Self {
-        Self {
-            frame_offset,
-            channel,
-            msg,
-        }
-    }
-
-    /// Create a builder for note-on events
-    ///
-    /// # Example
-    /// ```ignore
-    /// let event = MidiEvent::note_on_builder(60, 100)
-    ///     .channel(5)
-    ///     .offset(480)
-    ///     .build();
-    /// ```
-    #[inline]
-    pub fn note_on_builder(note: u8, velocity: u8) -> MidiEventBuilder {
-        MidiEventBuilder {
-            frame_offset: 0,
-            channel: 0,
-            msg: ChannelVoiceMsg::NoteOn { note, velocity },
-        }
-    }
-
-    /// Create a builder for note-off events
-    #[inline]
-    pub fn note_off_builder(note: u8) -> MidiEventBuilder {
-        MidiEventBuilder {
-            frame_offset: 0,
-            channel: 0,
-            msg: ChannelVoiceMsg::NoteOff { note, velocity: 0 },
-        }
-    }
-
-    /// Create a builder for control change events
-    #[inline]
-    pub fn cc_builder(control: u8, value: u8) -> MidiEventBuilder {
-        MidiEventBuilder {
-            frame_offset: 0,
-            channel: 0,
-            msg: ChannelVoiceMsg::ControlChange {
-                control: midi_msg::ControlChange::CC { control, value },
-            },
-        }
-    }
-
-    /// Create a builder for pitch bend events
-    #[inline]
-    pub fn bend_builder(bend: u16) -> MidiEventBuilder {
-        MidiEventBuilder {
-            frame_offset: 0,
-            channel: 0,
-            msg: ChannelVoiceMsg::PitchBend { bend },
-        }
-    }
-
-    /// Create a builder for program change events
-    #[inline]
-    pub fn program_builder(program: u8) -> MidiEventBuilder {
-        MidiEventBuilder {
-            frame_offset: 0,
-            channel: 0,
-            msg: ChannelVoiceMsg::ProgramChange { program },
-        }
-    }
-
-    /// Create a builder for aftertouch events
-    #[inline]
-    pub fn aftertouch_builder(pressure: u8) -> MidiEventBuilder {
-        MidiEventBuilder {
-            frame_offset: 0,
-            channel: 0,
-            msg: ChannelVoiceMsg::ChannelPressure { pressure },
-        }
-    }
-
-    /// Create a note on event
-    ///
-    /// Internal use only. Public API should use `MidiEvent::note_on_builder()`
-    #[inline]
-    pub(crate) fn note_on(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
-        Self {
-            frame_offset,
-            channel: Channel::from_u8(channel),
-            msg: ChannelVoiceMsg::NoteOn { note, velocity },
-        }
-    }
-
-    /// Create a note off event
-    ///
-    /// Internal use only. Public API should use `MidiEvent::note_off_builder()`
-    #[inline]
-    pub(crate) fn note_off(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
-        Self {
-            frame_offset,
-            channel: Channel::from_u8(channel),
-            msg: ChannelVoiceMsg::NoteOff { note, velocity },
-        }
-    }
-
-    /// Create a control change event
-    ///
-    /// Internal use only. Public API should use `MidiEvent::cc_builder()`
-    #[inline]
-    pub(crate) fn control_change(frame_offset: usize, channel: u8, cc: u8, value: u8) -> Self {
-        Self {
-            frame_offset,
-            channel: Channel::from_u8(channel),
-            msg: ChannelVoiceMsg::ControlChange {
-                control: midi_msg::ControlChange::CC { control: cc, value },
-            },
-        }
-    }
-
-    /// Create a pitch bend event
-    ///
-    /// Internal use only. Public API should use `MidiEvent::bend_builder()`
-    #[inline]
-    pub(crate) fn pitch_bend(frame_offset: usize, channel: u8, bend: u16) -> Self {
-        Self {
-            frame_offset,
-            channel: Channel::from_u8(channel),
-            msg: ChannelVoiceMsg::PitchBend { bend },
-        }
-    }
-
-    /// Create a channel aftertouch event
-    ///
-    /// Internal use only. Public API should use `MidiEvent::aftertouch_builder()`
-    #[inline]
-    pub(crate) fn aftertouch(frame_offset: usize, channel: u8, pressure: u8) -> Self {
-        Self {
-            frame_offset,
-            channel: Channel::from_u8(channel),
-            msg: ChannelVoiceMsg::ChannelPressure { pressure },
-        }
-    }
-
-    /// Create a poly aftertouch event
-    ///
-    /// Internal use only. Public API should use builder pattern
-    #[inline]
-    pub(crate) fn poly_aftertouch(
-        frame_offset: usize,
-        channel: u8,
-        note: u8,
-        pressure: u8,
-    ) -> Self {
-        Self {
-            frame_offset,
-            channel: Channel::from_u8(channel),
-            msg: ChannelVoiceMsg::PolyPressure { note, pressure },
-        }
-    }
-
-    /// Get MIDI channel (0-15)
-    #[inline]
-    pub fn channel_num(&self) -> u8 {
-        self.channel as u8
-    }
-
-    /// Check if this is a note on event
-    #[inline]
-    pub fn is_note_on(&self) -> bool {
-        matches!(self.msg, ChannelVoiceMsg::NoteOn { velocity, .. } if velocity > 0)
-    }
-
-    /// Check if this is a note off event
-    #[inline]
-    pub fn is_note_off(&self) -> bool {
-        matches!(
-            self.msg,
-            ChannelVoiceMsg::NoteOff { .. } | ChannelVoiceMsg::NoteOn { velocity: 0, .. }
-        )
-    }
-
-    /// Get note number (for note on/off events)
-    #[inline]
-    pub fn note(&self) -> Option<u8> {
-        match self.msg {
-            ChannelVoiceMsg::NoteOn { note, .. }
-            | ChannelVoiceMsg::NoteOff { note, .. }
-            | ChannelVoiceMsg::HighResNoteOn { note, .. }
-            | ChannelVoiceMsg::HighResNoteOff { note, .. }
-            | ChannelVoiceMsg::PolyPressure { note, .. } => Some(note),
-            _ => None,
-        }
-    }
-
-    /// Get velocity (for note on/off events)
-    #[inline]
-    pub fn velocity(&self) -> Option<u8> {
-        match self.msg {
-            ChannelVoiceMsg::NoteOn { velocity, .. }
-            | ChannelVoiceMsg::NoteOff { velocity, .. } => Some(velocity),
-            ChannelVoiceMsg::HighResNoteOn { velocity, .. }
-            | ChannelVoiceMsg::HighResNoteOff { velocity, .. } => {
-                // High-res velocity is 14-bit, return upper 7 bits
-                Some((velocity >> 7) as u8)
-            }
-            _ => None,
-        }
-    }
-
-    /// Convert to a full MidiMsg for serialization
-    #[inline]
-    pub fn to_midi_msg(&self) -> MidiMsg {
-        MidiMsg::ChannelVoice {
-            channel: self.channel,
-            msg: self.msg,
-        }
-    }
-
-    /// Serialize to MIDI bytes
-    #[inline]
-    pub fn to_bytes(&self) -> Vec<u8> {
-        self.to_midi_msg().to_midi()
-    }
-
-    /// Parse from MIDI bytes
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, midi_msg::ParseError> {
-        Self::from_bytes_with_offset(bytes, 0)
-    }
-
-    /// Parse from MIDI bytes with a frame offset
-    pub fn from_bytes_with_offset(
-        bytes: &[u8],
-        frame_offset: usize,
-    ) -> Result<Self, midi_msg::ParseError> {
-        let (msg, _len) = MidiMsg::from_midi(bytes)?;
-        match msg {
-            MidiMsg::ChannelVoice { channel, msg } => Ok(Self {
-                frame_offset,
-                channel,
-                msg,
-            }),
-            _ => Err(midi_msg::ParseError::Invalid(
-                "Expected ChannelVoice message",
-            )),
-        }
-    }
-}
-
-/// Raw 3-byte MIDI event for unparsed storage.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct RawMidiEvent {
-    /// Sample offset within the current buffer
-    pub frame_offset: usize,
-    /// Raw MIDI data (up to 3 bytes for channel messages)
-    pub data: [u8; 3],
-    /// Number of valid bytes in data (1-3)
-    pub len: u8,
-}
-
-impl RawMidiEvent {
-    /// Create a new raw MIDI event
-    #[inline]
-    pub fn new(frame_offset: usize, data: [u8; 3], len: u8) -> Self {
-        Self {
-            frame_offset,
-            data,
-            len,
-        }
-    }
-
-    /// Get MIDI status byte
-    #[inline]
-    pub fn status(&self) -> u8 {
-        self.data[0] & 0xF0
-    }
-
-    /// Get MIDI channel (0-15)
-    #[inline]
-    pub fn channel(&self) -> u8 {
-        self.data[0] & 0x0F
-    }
-
-    /// Try to parse into a MidiEvent
-    pub fn to_midi_event(&self) -> Result<MidiEvent, midi_msg::ParseError> {
-        MidiEvent::from_bytes_with_offset(&self.data[..self.len as usize], self.frame_offset)
-    }
-}
-
-impl From<MidiEvent> for RawMidiEvent {
-    fn from(event: MidiEvent) -> Self {
-        let bytes = event.to_bytes();
-        let mut data = [0u8; 3];
-        let len = bytes.len().min(3);
-        data[..len].copy_from_slice(&bytes[..len]);
-        Self {
-            frame_offset: event.frame_offset,
-            data,
-            len: len as u8,
-        }
-    }
-}
-
+// Import ChannelVoiceMsg for midi2 feature functions
 #[cfg(feature = "midi2")]
-impl MidiEvent {
-    /// Get velocity as normalized f32 (0.0-1.0)
-    #[inline]
-    pub fn velocity_normalized(&self) -> Option<f32> {
-        match self.msg {
-            ChannelVoiceMsg::NoteOn { velocity, .. }
-            | ChannelVoiceMsg::NoteOff { velocity, .. } => Some(velocity as f32 / 127.0),
-            ChannelVoiceMsg::HighResNoteOn { velocity, .. }
-            | ChannelVoiceMsg::HighResNoteOff { velocity, .. } => {
-                // High-res velocity is 14-bit (0-16383)
-                Some(velocity as f32 / 16383.0)
-            }
-            _ => None,
-        }
-    }
+use tutti_core::midi::ChannelVoiceMsg;
 
-    /// Get velocity as 16-bit MIDI 2.0 value
-    #[inline]
-    pub fn velocity_16bit(&self) -> Option<u16> {
-        match self.msg {
-            ChannelVoiceMsg::NoteOn { velocity, .. }
-            | ChannelVoiceMsg::NoteOff { velocity, .. } => {
-                Some(super::midi2::midi1_velocity_to_midi2(velocity))
-            }
-            ChannelVoiceMsg::HighResNoteOn { velocity, .. }
-            | ChannelVoiceMsg::HighResNoteOff { velocity, .. } => {
-                // High-res velocity is 14-bit, scale to 16-bit
-                Some(((velocity as u32 * 65535) / 16383) as u16)
-            }
-            _ => None,
+/// Get velocity as 16-bit MIDI 2.0 value
+#[cfg(feature = "midi2")]
+#[inline]
+pub fn velocity_16bit(event: &MidiEvent) -> Option<u16> {
+    match event.msg {
+        ChannelVoiceMsg::NoteOn { velocity, .. } | ChannelVoiceMsg::NoteOff { velocity, .. } => {
+            Some(super::midi2::midi1_velocity_to_midi2(velocity))
         }
+        ChannelVoiceMsg::HighResNoteOn { velocity, .. }
+        | ChannelVoiceMsg::HighResNoteOff { velocity, .. } => {
+            // High-res velocity is 14-bit, scale to 16-bit
+            Some(((velocity as u32 * 65535) / 16383) as u16)
+        }
+        _ => None,
     }
+}
 
-    /// Convert to MIDI 2.0 event
-    #[inline]
-    pub fn to_midi2(&self) -> Option<super::midi2::Midi2Event> {
-        super::midi2::midi1_to_midi2(self)
-    }
+/// Convert MIDI 1.0 event to MIDI 2.0 event
+#[cfg(feature = "midi2")]
+#[inline]
+pub fn to_midi2(event: &MidiEvent) -> Option<super::midi2::Midi2Event> {
+    super::midi2::midi1_to_midi2(event)
 }
 
 /// Unified MIDI 1.0/2.0 event.
@@ -435,7 +117,7 @@ impl UnifiedMidiEvent {
     #[inline]
     pub fn velocity_16bit(&self) -> Option<u16> {
         match self {
-            UnifiedMidiEvent::V1(e) => e.velocity_16bit(),
+            UnifiedMidiEvent::V1(e) => velocity_16bit(e),
             UnifiedMidiEvent::V2(e) => e.velocity_16bit(),
         }
     }
@@ -453,7 +135,7 @@ impl UnifiedMidiEvent {
     #[inline]
     pub fn to_midi2(&self) -> Option<super::midi2::Midi2Event> {
         match self {
-            UnifiedMidiEvent::V1(e) => e.to_midi2(),
+            UnifiedMidiEvent::V1(e) => to_midi2(e),
             UnifiedMidiEvent::V2(e) => Some(*e),
         }
     }
@@ -482,62 +164,6 @@ impl From<MidiEvent> for UnifiedMidiEvent {
 impl From<super::midi2::Midi2Event> for UnifiedMidiEvent {
     fn from(event: super::midi2::Midi2Event) -> Self {
         UnifiedMidiEvent::V2(event)
-    }
-}
-
-/// Builder for MIDI events with fluent API.
-///
-/// Allows setting channel and frame offset while providing sensible defaults.
-///
-/// # Example
-/// ```ignore
-/// use tutti_midi::MidiEvent;
-///
-/// // Simple case (defaults: channel=0, offset=0)
-/// let event = MidiEvent::note(60, 100).build();
-///
-/// // With channel
-/// let event = MidiEvent::note(60, 100).channel(5).build();
-///
-/// // With timing
-/// let event = MidiEvent::note(60, 100).offset(480).build();
-///
-/// // Both
-/// let event = MidiEvent::note(60, 100)
-///     .channel(5)
-///     .offset(480)
-///     .build();
-/// ```
-#[derive(Clone, Copy, Debug)]
-pub struct MidiEventBuilder {
-    frame_offset: usize,
-    channel: u8,
-    msg: ChannelVoiceMsg,
-}
-
-impl MidiEventBuilder {
-    /// Set the MIDI channel (0-15)
-    #[inline]
-    pub fn channel(mut self, channel: u8) -> Self {
-        self.channel = channel;
-        self
-    }
-
-    /// Set the frame offset (sample-accurate timing)
-    #[inline]
-    pub fn offset(mut self, frame_offset: usize) -> Self {
-        self.frame_offset = frame_offset;
-        self
-    }
-
-    /// Build the final MidiEvent
-    #[inline]
-    pub fn build(self) -> MidiEvent {
-        MidiEvent {
-            frame_offset: self.frame_offset,
-            channel: Channel::from_u8(self.channel),
-            msg: self.msg,
-        }
     }
 }
 
@@ -578,7 +204,7 @@ mod tests {
         assert_eq!(event.channel_num(), 5);
         match event.msg {
             ChannelVoiceMsg::ControlChange { control } => match control {
-                midi_msg::ControlChange::CC { control: cc, value } => {
+                ControlChange::CC { control: cc, value } => {
                     assert_eq!(cc, 7);
                     assert_eq!(value, 127);
                 }
@@ -666,7 +292,7 @@ mod tests {
         assert_eq!(event.channel_num(), 2);
         match event.msg {
             ChannelVoiceMsg::ControlChange { control } => match control {
-                midi_msg::ControlChange::CC { control: cc, value } => {
+                ControlChange::CC { control: cc, value } => {
                     assert_eq!(cc, 7);
                     assert_eq!(value, 127);
                 }
@@ -694,33 +320,33 @@ mod tests {
         #[test]
         fn test_velocity_normalized() {
             let event = MidiEvent::note_on(0, 0, 60, 127);
-            let norm = event.velocity_normalized().unwrap();
+            let norm = velocity_normalized(&event).unwrap();
             assert!((norm - 1.0).abs() < 0.01);
 
             let event = MidiEvent::note_on(0, 0, 60, 0);
-            let norm = event.velocity_normalized().unwrap();
+            let norm = velocity_normalized(&event).unwrap();
             assert!((norm - 0.0).abs() < 0.01);
 
             let event = MidiEvent::note_on(0, 0, 60, 64);
-            let norm = event.velocity_normalized().unwrap();
+            let norm = velocity_normalized(&event).unwrap();
             assert!((norm - 0.5).abs() < 0.02);
         }
 
         #[test]
         fn test_velocity_16bit() {
             let event = MidiEvent::note_on(0, 0, 60, 127);
-            let vel16 = event.velocity_16bit().unwrap();
+            let vel16 = velocity_16bit(&event).unwrap();
             assert_eq!(vel16, 65535);
 
             let event = MidiEvent::note_on(0, 0, 60, 0);
-            let vel16 = event.velocity_16bit().unwrap();
+            let vel16 = velocity_16bit(&event).unwrap();
             assert_eq!(vel16, 0);
         }
 
         #[test]
         fn test_to_midi2_conversion() {
             let event = MidiEvent::note_on(100, 5, 60, 100);
-            let midi2 = event.to_midi2().unwrap();
+            let midi2 = to_midi2(&event).unwrap();
 
             assert_eq!(midi2.frame_offset, 100);
             assert_eq!(midi2.channel(), 5);
