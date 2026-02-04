@@ -340,8 +340,7 @@ impl Vst2Instance {
         let num_events = api_events.len() as i32;
 
         // Box the events to get stable pointers
-        let boxed_events: Vec<Box<api::MidiEvent>> =
-            api_events.into_iter().map(Box::new).collect();
+        let boxed_events: Vec<Box<api::MidiEvent>> = api_events.into_iter().map(Box::new).collect();
 
         // Create event pointers (cast MidiEvent* to Event*)
         let event_ptrs: Vec<*mut api::Event> = boxed_events

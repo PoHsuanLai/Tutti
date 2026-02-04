@@ -7,9 +7,8 @@ use std::path::Path;
 
 use crate::error::{BridgeError, LoadStage, Result};
 use crate::protocol::{
-    AudioBuffer, AudioBuffer64, MidiEvent, MidiEventVec, NoteExpressionChanges,
-    NoteExpressionType, ParameterChanges, ParameterPoint, ParameterQueue, PluginMetadata,
-    TransportInfo,
+    AudioBuffer, AudioBuffer64, MidiEvent, MidiEventVec, NoteExpressionChanges, NoteExpressionType,
+    ParameterChanges, ParameterPoint, ParameterQueue, PluginMetadata, TransportInfo,
 };
 
 // Import tutti_midi_io types for conversion
@@ -81,13 +80,13 @@ impl Vst3Instance {
     /// Set the sample format (f32 or f64).
     pub fn set_sample_format(&mut self, format: crate::protocol::SampleFormat) -> Result<()> {
         let use_f64 = matches!(format, crate::protocol::SampleFormat::Float64);
-        self.inner.set_use_f64(use_f64).map_err(|e| {
-            BridgeError::LoadFailed {
+        self.inner
+            .set_use_f64(use_f64)
+            .map_err(|e| BridgeError::LoadFailed {
                 path: std::path::PathBuf::from("format"),
                 stage: LoadStage::Initialization,
                 reason: e.to_string(),
-            }
-        })
+            })
     }
 
     /// Process audio with MIDI events.
@@ -111,7 +110,9 @@ impl Vst3Instance {
         let transport = vst3_host::TransportState::new();
 
         // Process through vst3-host (unified API)
-        let (output_midi, _) = self.inner.process(&mut vst3_buffer, &vst3_midi, None, &[], &transport);
+        let (output_midi, _) =
+            self.inner
+                .process(&mut vst3_buffer, &vst3_midi, None, &[], &transport);
 
         // Convert output MIDI back to Tutti format
         output_midi
@@ -139,7 +140,9 @@ impl Vst3Instance {
 
         let vst3_transport = convert_transport_to_vst3(transport);
 
-        let (output_midi, _) = self.inner.process(&mut vst3_buffer, &vst3_midi, None, &[], &vst3_transport);
+        let (output_midi, _) =
+            self.inner
+                .process(&mut vst3_buffer, &vst3_midi, None, &[], &vst3_transport);
 
         output_midi
             .into_iter()
@@ -204,7 +207,9 @@ impl Vst3Instance {
         );
 
         let transport = vst3_host::TransportState::new();
-        let (output_midi, _) = self.inner.process(&mut vst3_buffer, &vst3_midi, None, &[], &transport);
+        let (output_midi, _) =
+            self.inner
+                .process(&mut vst3_buffer, &vst3_midi, None, &[], &transport);
 
         output_midi
             .into_iter()
@@ -230,7 +235,9 @@ impl Vst3Instance {
         );
 
         let vst3_transport = convert_transport_to_vst3(transport);
-        let (output_midi, _) = self.inner.process(&mut vst3_buffer, &vst3_midi, None, &[], &vst3_transport);
+        let (output_midi, _) =
+            self.inner
+                .process(&mut vst3_buffer, &vst3_midi, None, &[], &vst3_transport);
 
         output_midi
             .into_iter()
@@ -289,7 +296,9 @@ impl Vst3Instance {
 
         let transport = vst3_host::TransportState::new();
         let empty_midi: Vec<TuttiMidiWrapper> = vec![];
-        let _ = self.inner.process::<f64, _>(&mut vst3_buffer, &empty_midi, None, &[], &transport);
+        let _ = self
+            .inner
+            .process::<f64, _>(&mut vst3_buffer, &empty_midi, None, &[], &transport);
     }
 
     /// Set sample rate.
@@ -671,10 +680,7 @@ fn convert_vst3_midi_to_tutti(event: &vst3_host::MidiEvent) -> Option<MidiEvent>
             pressure: (pressure * 127.0) as u8,
         },
         vst3_host::MidiData::ControlChange { cc, value } => ChannelVoiceMsg::ControlChange {
-            control: ControlChange::CC {
-                control: cc,
-                value,
-            },
+            control: ControlChange::CC { control: cc, value },
         },
         vst3_host::MidiData::ProgramChange { program } => {
             ChannelVoiceMsg::ProgramChange { program }

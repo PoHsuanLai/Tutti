@@ -38,12 +38,10 @@ impl IpcMidiEvent {
     }
 
     pub fn to_midi_event(&self) -> Option<MidiEvent> {
-        MidiEvent::from_bytes(self.as_bytes())
-            .ok()
-            .map(|mut e| {
-                e.frame_offset = self.frame_offset;
-                e
-            })
+        MidiEvent::from_bytes(self.as_bytes()).ok().map(|mut e| {
+            e.frame_offset = self.frame_offset;
+            e
+        })
     }
 }
 
@@ -303,9 +301,13 @@ pub enum HostMessage {
 /// Bridge to host message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BridgeMessage {
-    PluginLoaded { metadata: Box<PluginMetadata> },
+    PluginLoaded {
+        metadata: Box<PluginMetadata>,
+    },
     PluginUnloaded,
-    AudioProcessed { latency_us: u64 },
+    AudioProcessed {
+        latency_us: u64,
+    },
     AudioProcessedMidi {
         latency_us: u64,
         midi_output: IpcMidiEventVec,
@@ -316,14 +318,30 @@ pub enum BridgeMessage {
         param_output: ParameterChanges,
         note_expression_output: NoteExpressionChanges,
     },
-    ParameterValue { value: Option<f32> },
-    ParameterList { parameters: Vec<ParameterInfo> },
-    ParameterInfoResponse { info: Option<ParameterInfo> },
-    StateData { data: Vec<u8> },
-    EditorOpened { width: u32, height: u32 },
+    ParameterValue {
+        value: Option<f32>,
+    },
+    ParameterList {
+        parameters: Vec<ParameterInfo>,
+    },
+    ParameterInfoResponse {
+        info: Option<ParameterInfo>,
+    },
+    StateData {
+        data: Vec<u8>,
+    },
+    EditorOpened {
+        width: u32,
+        height: u32,
+    },
     EditorClosed,
-    ParameterChanged { index: i32, value: f32 },
-    Error { message: String },
+    ParameterChanged {
+        index: i32,
+        value: f32,
+    },
+    Error {
+        message: String,
+    },
     Ready,
     Shutdown,
 }
@@ -397,7 +415,10 @@ mod tests {
 
     #[test]
     fn test_ipc_midi_event_roundtrip() {
-        let event = MidiEvent::note_on_builder(60, 100).channel(0).offset(128).build();
+        let event = MidiEvent::note_on_builder(60, 100)
+            .channel(0)
+            .offset(128)
+            .build();
         let ipc_event = IpcMidiEvent::from(&event);
         assert_eq!(ipc_event.frame_offset, 128);
         assert_eq!(ipc_event.len, 3);
@@ -412,8 +433,14 @@ mod tests {
     #[test]
     fn test_midi_message_serialization() {
         let midi_events: IpcMidiEventVec = vec![
-            MidiEvent::note_on_builder(60, 100).channel(0).offset(0).build(),
-            MidiEvent::note_on_builder(64, 100).channel(0).offset(128).build(),
+            MidiEvent::note_on_builder(60, 100)
+                .channel(0)
+                .offset(0)
+                .build(),
+            MidiEvent::note_on_builder(64, 100)
+                .channel(0)
+                .offset(128)
+                .build(),
             MidiEvent::cc_builder(7, 64).channel(0).offset(256).build(),
         ]
         .iter()
@@ -439,8 +466,10 @@ mod tests {
                 assert_eq!(num_samples, 512);
                 assert_eq!(decoded_events.len(), 3);
 
-                let events: Vec<MidiEvent> =
-                    decoded_events.iter().filter_map(|e| e.to_midi_event()).collect();
+                let events: Vec<MidiEvent> = decoded_events
+                    .iter()
+                    .filter_map(|e| e.to_midi_event())
+                    .collect();
                 assert_eq!(events.len(), 3);
                 assert_eq!(events[0].frame_offset, 0);
                 assert!(events[0].is_note_on());
@@ -457,8 +486,14 @@ mod tests {
     #[test]
     fn test_midi_output_response_serialization() {
         let midi_output: IpcMidiEventVec = vec![
-            MidiEvent::note_off_builder(60).channel(0).offset(512).build(),
-            MidiEvent::note_off_builder(64).channel(0).offset(640).build(),
+            MidiEvent::note_off_builder(60)
+                .channel(0)
+                .offset(512)
+                .build(),
+            MidiEvent::note_off_builder(64)
+                .channel(0)
+                .offset(640)
+                .build(),
         ]
         .iter()
         .map(IpcMidiEvent::from)
@@ -480,8 +515,10 @@ mod tests {
                 assert_eq!(latency_us, 1500);
                 assert_eq!(decoded_output.len(), 2);
 
-                let events: Vec<MidiEvent> =
-                    decoded_output.iter().filter_map(|e| e.to_midi_event()).collect();
+                let events: Vec<MidiEvent> = decoded_output
+                    .iter()
+                    .filter_map(|e| e.to_midi_event())
+                    .collect();
                 assert!(events[0].is_note_off());
                 assert!(events[1].is_note_off());
             }

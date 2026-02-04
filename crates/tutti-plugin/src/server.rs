@@ -261,7 +261,9 @@ impl PluginServer {
             HostMessage::SetParameter { param_id, value } => {
                 if let Some(ref mut plugin) = self.plugin {
                     // Use unified trait method - all loaders use param_id directly
-                    plugin.as_instance_mut().set_parameter(param_id, value as f64);
+                    plugin
+                        .as_instance_mut()
+                        .set_parameter(param_id, value as f64);
                 }
 
                 Ok(None)
@@ -456,7 +458,9 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    let output = plugin.as_instance_mut().process_f64(&mut audio_buffer, &ctx);
+                    let output = plugin
+                        .as_instance_mut()
+                        .process_f64(&mut audio_buffer, &ctx);
                     self.midi_output_buffer = output.midi_events;
 
                     // Write output from pre-allocated buffers
@@ -499,7 +503,9 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    let output = plugin.as_instance_mut().process_f32(&mut audio_buffer, &ctx);
+                    let output = plugin
+                        .as_instance_mut()
+                        .process_f32(&mut audio_buffer, &ctx);
                     self.midi_output_buffer = output.midi_events;
 
                     // Write output from pre-allocated buffers
@@ -600,7 +606,9 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    let output = plugin.as_instance_mut().process_f64(&mut audio_buffer, &ctx);
+                    let output = plugin
+                        .as_instance_mut()
+                        .process_f64(&mut audio_buffer, &ctx);
                     self.midi_output_buffer = output.midi_events;
                     param_output = output.param_changes;
                     note_expression_output = output.note_expression;
@@ -645,7 +653,9 @@ impl PluginServer {
                         sample_rate,
                     };
 
-                    let output = plugin.as_instance_mut().process_f32(&mut audio_buffer, &ctx);
+                    let output = plugin
+                        .as_instance_mut()
+                        .process_f32(&mut audio_buffer, &ctx);
                     self.midi_output_buffer = output.midi_events;
                     param_output = output.param_changes;
                     note_expression_output = output.note_expression;
