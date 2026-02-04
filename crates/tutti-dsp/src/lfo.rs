@@ -21,7 +21,7 @@ pub enum LfoShape {
 
 impl LfoShape {
     #[inline]
-    pub fn evaluate(&self, phase: f32) -> f32 {
+    pub(crate) fn evaluate(&self, phase: f32) -> f32 {
         match self {
             LfoShape::Sine => (phase * std::f32::consts::TAU).sin(),
             LfoShape::Triangle => {
