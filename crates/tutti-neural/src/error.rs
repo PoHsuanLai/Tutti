@@ -15,10 +15,6 @@ pub(crate) enum GpuError {
     /// No suitable GPU device found
     #[error("No GPU device available")]
     NoGpuAvailable,
-
-    /// Resource not found
-    #[error("Resource not found: {0}")]
-    ResourceNotFound(String),
 }
 
 /// Errors that can occur during neural audio processing

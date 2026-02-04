@@ -1,171 +1,52 @@
-//! Neural synth models with automatic kernel fusion.
+//! Neural model loading and inference.
+//!
+//! Models are loaded as opaque closures: `Tensor<B, 2> -> Tensor<B, 2>`.
+//! The architecture is determined by the model file - no hardcoded structs needed.
 
 use burn::prelude::*;
 use burn::tensor::backend::Backend;
+use std::sync::Arc;
 
-/// Neural synth model.
-#[derive(Module, Debug)]
-pub struct FusedNeuralSynthModel<B: Backend> {
-    pub harmonic_net: HarmonicNetwork<B>,
-    pub filter_net: FilterNetwork<B>,
-    pub output_proj: nn::Linear<B>,
+/// A loaded neural model as an opaque forward function.
+///
+/// Wraps any Burn `Module` into a callable `Tensor<B, 2> -> Tensor<B, 2>`.
+/// The architecture comes from the model file, not from hardcoded structs.
+///
+/// # Usage
+/// ```rust,ignore
+/// // Load any model architecture
+/// let model = NeuralModel::load("amp_sim.mpk", &device, || MyAmpModel::new(&device))?;
+///
+/// // Just call forward - don't care about internals
+/// let output = model.forward(input);
+/// ```
+pub struct NeuralModel<B: Backend> {
+    forward_fn: Arc<dyn Fn(Tensor<B, 2>) -> Tensor<B, 2> + Send>,
 }
 
-#[derive(Module, Debug)]
-pub struct HarmonicNetwork<B: Backend> {
-    pub fc1: nn::Linear<B>,
-    pub fc2: nn::Linear<B>,
-    pub fc3: nn::Linear<B>,
-}
-
-#[derive(Module, Debug)]
-pub struct FilterNetwork<B: Backend> {
-    pub fc1: nn::Linear<B>,
-    pub fc2: nn::Linear<B>,
-}
-
-impl<B: Backend> FusedNeuralSynthModel<B> {
-    /// Create a model with random weights.
-    pub fn new(device: &B::Device) -> Self {
-        let harmonic_net = HarmonicNetwork {
-            fc1: nn::LinearConfig::new(128, 256).init(device),
-            fc2: nn::LinearConfig::new(256, 256).init(device),
-            fc3: nn::LinearConfig::new(256, 64).init(device),
-        };
-
-        let filter_net = FilterNetwork {
-            fc1: nn::LinearConfig::new(128, 128).init(device),
-            fc2: nn::LinearConfig::new(128, 64).init(device),
-        };
-
-        let output_proj = nn::LinearConfig::new(128, 2).init(device);
-
+impl<B: Backend> NeuralModel<B> {
+    /// Create from any Burn Module that implements a `forward` method.
+    ///
+    /// The closure captures the model and calls its forward pass.
+    /// Only requires `Send` (not `Sync`) because the model lives on a single
+    /// dedicated inference thread.
+    pub fn from_forward(f: impl Fn(Tensor<B, 2>) -> Tensor<B, 2> + Send + 'static) -> Self {
         Self {
-            harmonic_net,
-            filter_net,
-            output_proj,
+            forward_fn: Arc::new(f),
         }
     }
 
-    /// Load model from file (supports .onnx, .mpk, .safetensors).
-    pub fn load_from_file(
-        path: impl AsRef<std::path::Path>,
-        device: &B::Device,
-    ) -> Result<Self, crate::error::Error>
-    where
-        B::FloatElem: burn::serde::de::DeserializeOwned,
-    {
-        let path = path.as_ref();
-        let ext = path.extension().and_then(|s| s.to_str()).ok_or_else(|| {
-            crate::error::Error::InvalidPath("Invalid file extension".to_string())
-        })?;
-
-        match ext {
-            "onnx" => Self::load_from_onnx(path, device),
-            "mpk" => Self::load_from_burn_mpk(path, device),
-            "safetensors" => Err(crate::error::Error::InvalidConfig("SafeTensors support disabled (burn-import 0.20 has compilation issues). Use .mpk format instead.".to_string())),
-            _ => Err(crate::error::Error::InvalidPath(format!("Unsupported model format: .{}", ext))),
-        }
-    }
-
-    /// Load from ONNX format
-    ///
-    /// ONNX runtime loading is not supported by Burn. ONNX models must be
-    /// pre-converted to Burn's native `.mpk` format or to `.safetensors`
-    /// using the `burn-import` CLI tool at build time.
-    ///
-    /// ```bash
-    /// # Convert ONNX to Burn format:
-    /// burn-import onnx model.onnx --out-type burn model.mpk
-    /// ```
-    fn load_from_onnx(
-        _path: &std::path::Path,
-        _device: &B::Device,
-    ) -> Result<Self, crate::error::Error> {
-        Err(crate::error::Error::InvalidConfig(
-            "ONNX runtime loading is not supported. \
-             Pre-convert your model using: burn-import onnx <model.onnx> --out-type burn <model.mpk> \
-             or export as .safetensors from your training framework."
-                .to_string(),
-        ))
-    }
-
-    /// Load from Burn's native MessagePack format
-    ///
-    /// This is Burn's native format - fastest and most optimized.
-    fn load_from_burn_mpk(
-        path: &std::path::Path,
-        device: &B::Device,
-    ) -> Result<Self, crate::error::Error>
-    where
-        B::FloatElem: burn::serde::de::DeserializeOwned,
-    {
-        use burn::record::{BinFileRecorder, FullPrecisionSettings, Recorder};
-
-        // Create recorder for loading
-        let recorder = BinFileRecorder::<FullPrecisionSettings>::default();
-
-        // Load model record from file
-        let record = recorder.load(path.to_path_buf(), device)?;
-
-        // Initialize model structure and load weights
-        let model = Self::new(device).load_record(record);
-
-        Ok(model)
-    }
-
-    /// Load from SafeTensors format
-    ///
-    /// SafeTensors is a secure format from HuggingFace - prevents arbitrary code execution.
-    /// Uses `burn-import`'s SafeTensorsFileRecorder for runtime loading.
-    ///
-    /// Key names in the SafeTensors file must match the Burn model structure:
-    /// - `harmonic_net.fc1.weight`, `harmonic_net.fc1.bias`
-    /// - `harmonic_net.fc2.weight`, `harmonic_net.fc2.bias`
-    /// - etc.
-    ///
-    /// If the model was exported from PyTorch, use key remapping to adapt names.
-    // SafeTensors loading disabled due to burn-import 0.20 compilation issues
-    // TODO: Re-enable when burn-import 0.21+ is available
-    #[allow(dead_code)]
-    fn load_from_safetensors(
-        _path: &std::path::Path,
-        _device: &B::Device,
-    ) -> Result<Self, crate::error::Error> {
-        Err(crate::error::Error::InvalidConfig(
-            "SafeTensors support temporarily disabled (burn-import 0.20 has compilation issues). \
-             Use .mpk format instead. Convert with: burn-import onnx <model.onnx> --out-type burn <model.mpk>"
-                .to_string(),
-        ))
-    }
-
-    /// Forward pass with automatic kernel fusion
-    ///
-    /// CubeCL will automatically fuse:
-    /// - Linear → ReLU → Linear chains
-    /// - Multiple small tensor operations
-    /// - Memory transfers between operations
+    /// Run the forward pass.
     pub fn forward(&self, input: Tensor<B, 2>) -> Tensor<B, 2> {
-        // Harmonic path - these ops will be fused by CubeCL
-        let h1 = self.harmonic_net.fc1.forward(input.clone());
-        let h1 = burn::tensor::activation::relu(h1);
-        let h2 = self.harmonic_net.fc2.forward(h1);
-        let h2 = burn::tensor::activation::relu(h2);
-        let harmonics = self.harmonic_net.fc3.forward(h2);
+        (self.forward_fn)(input)
+    }
+}
 
-        // Filter path - these ops will also be fused
-        let f1 = self.filter_net.fc1.forward(input);
-        let f1 = burn::tensor::activation::relu(f1);
-        let filters = self.filter_net.fc2.forward(f1);
-
-        // Concatenate and project
-        let combined = Tensor::cat(vec![harmonics, filters], 1);
-
-        // CubeCL fusion optimizations applied:
-        // - Linear operations batched
-        // - ReLU fused with preceding ops
-        // - Reduced memory transfers
-        self.output_proj.forward(combined)
+impl<B: Backend> Clone for NeuralModel<B> {
+    fn clone(&self) -> Self {
+        Self {
+            forward_fn: Arc::clone(&self.forward_fn),
+        }
     }
 }
 
@@ -178,68 +59,39 @@ mod tests {
     type TestBackend = NdArray<f32>;
 
     #[test]
-    fn test_fused_model_creation() {
-        let device = NdArrayDevice::default();
-        let _model: FusedNeuralSynthModel<TestBackend> = FusedNeuralSynthModel::new(&device);
-        // Model should be created successfully (no panic)
-    }
-
-    #[test]
-    fn test_fused_forward_pass() {
-        let device = NdArrayDevice::default();
-        let model: FusedNeuralSynthModel<TestBackend> = FusedNeuralSynthModel::new(&device);
-
-        // Create dummy input [batch_size=4, features=128]
-        let input = Tensor::<TestBackend, 2>::zeros([4, 128], &device);
-
-        // Run forward pass
-        let output = model.forward(input);
-
-        // Check output shape [batch_size=4, output=2]
-        assert_eq!(output.shape().dims, [4, 2]);
-    }
-
-    #[test]
-    fn test_save_and_load_mpk() {
-        use burn::record::{BinFileRecorder, FullPrecisionSettings, Recorder};
-        use std::fs;
+    fn test_identity_model() {
+        let model = NeuralModel::<TestBackend>::from_forward(|input| input);
 
         let device = NdArrayDevice::default();
-
-        // Create a model with random weights
-        let model: FusedNeuralSynthModel<TestBackend> = FusedNeuralSynthModel::new(&device);
-
-        // Save to .mpk file
-        let temp_dir = std::env::temp_dir();
-        let model_path = temp_dir.join("test_model.mpk");
-
-        let recorder = BinFileRecorder::<FullPrecisionSettings>::default();
-        let record = model.clone().into_record();
-        recorder
-            .record(record, model_path.clone())
-            .expect("Failed to save model");
-
-        // Load from .mpk file
-        let loaded_model = FusedNeuralSynthModel::load_from_file(&model_path, &device)
-            .expect("Failed to load model");
-
-        // Test that loaded model produces output
         let input = Tensor::<TestBackend, 2>::ones([2, 128], &device);
-        let output = loaded_model.forward(input);
-        assert_eq!(output.shape().dims, [2, 2]);
+        let output = model.forward(input.clone());
 
-        // Cleanup
-        let _ = fs::remove_file(model_path);
+        assert_eq!(output.shape().dims, [2, 128]);
     }
 
     #[test]
-    fn test_onnx_error_message() {
-        let device = NdArrayDevice::default();
-        let result = FusedNeuralSynthModel::<TestBackend>::load_from_file("fake.onnx", &device);
+    fn test_custom_forward() {
+        // Any forward logic works - just wrap in a closure
+        let model = NeuralModel::<TestBackend>::from_forward(|input| {
+            // Scale + relu as a simple custom forward pass
+            let scaled = input.mul_scalar(2.0);
+            burn::tensor::activation::relu(scaled)
+        });
 
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err();
-        assert!(err_msg.contains("burn-import"));
-        assert!(err_msg.contains("ONNX"));
+        let device = NdArrayDevice::default();
+        let input = Tensor::<TestBackend, 2>::zeros([4, 64], &device);
+        let output = model.forward(input);
+        assert_eq!(output.shape().dims, [4, 64]);
+    }
+
+    #[test]
+    fn test_clone() {
+        let model = NeuralModel::<TestBackend>::from_forward(|input| input);
+        let model2 = model.clone();
+
+        let device = NdArrayDevice::default();
+        let input = Tensor::<TestBackend, 2>::ones([1, 10], &device);
+        let output = model2.forward(input);
+        assert_eq!(output.shape().dims, [1, 10]);
     }
 }

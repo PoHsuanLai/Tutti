@@ -1,84 +1,55 @@
 //! GPU-accelerated neural audio synthesis and effects
 //!
-//! This crate provides neural audio processing using GPU inference (Burn ML framework).
-//! All neural processors implement `AudioUnit` and use lock-free queues for RT-safety.
-//!
-//! ## Architecture
-//!
-//! - **Synthesis** - Neural synthesizers (DDSP, WaveRNN, neural vocoders)
-//!   - GPU inference generates control parameters (pitch, amplitude, filters)
-//!   - Lock-free queues transfer from inference thread → audio thread
-//!   - Audio thread renders DSP using FunDSP (no GPU blocking in RT path)
-//!
-//! - **Effects** - Neural audio effects (amp sims, compressors, reverbs)
-//!   - Direct audio processing on audio thread (must be RT-safe)
-//!   - GPU batching for multiple instances
-//!
-//! ## Available Models
-//!
-//! - **DDSP** - Differentiable Digital Signal Processing
-//!   - Harmonic plus noise synthesis
-//!   - Learned synthesis parameters
-//!
-//! - **Neural Vocoder** - Voice synthesis from mel-spectrograms
-//!   - WaveRNN architecture
-//!   - Real-time capable
+//! Pure tensor API: register models, run forward passes.
+//! AudioUnit nodes handle the translation to/from synth params and audio buffers.
 //!
 //! ## Usage
 //!
 //! ```rust,ignore
 //! use tutti_neural::NeuralSystem;
+//! use tutti_core::{NeuralSynthBuilder, NeuralEffectBuilder};
 //!
 //! let neural = NeuralSystem::builder()
 //!     .sample_rate(44100.0)
 //!     .buffer_size(512)
 //!     .build()?;
 //!
-//! // Load ONNX model
-//! let model = neural.load_synth_model("violin.onnx")?;
+//! let synth = neural.load_synth_model("violin.onnx")?;
+//! let voice = synth.build_voice()?;  // Box<dyn AudioUnit>
 //!
-//! // Create voice (returns AudioUnit)
-//! let voice = neural.synth().build_voice(&model)?;
-//!
-//! // Add to audio graph
-//! engine.graph(|net| {
-//!     let node = net.add(voice);
-//!     net.pipe_output(node);
-//! });
+//! let effect = neural.load_effect_model("amp_sim.onnx")?;
+//! let fx = effect.build_effect()?;   // Box<dyn AudioUnit>
 //! ```
-//!
-//! ## RT-Safety
-//!
-//! Neural inference runs on a separate thread and never blocks the audio thread.
-//! Results are transferred via lock-free SPSC queues with bounded latency.
 
-pub mod error;
+// Error types
+mod error;
 pub use error::{Error, Result};
 
+// System facade
 mod system;
-pub use system::{
-    EffectHandle, GpuInfo, NeuralModel, NeuralSystem, NeuralSystemBuilder, SynthHandle,
-};
+pub use system::{GpuInfo, InferenceConfig, NeuralSystem, NeuralSystemBuilder};
 
 // Fluent handle
 mod handle;
 pub use handle::NeuralHandle;
 
-pub use gpu::{InferenceConfig, ModelType, VoiceId};
-pub use tutti_core::neural::{BatchingStrategy, NeuralNodeManager};
-pub use tutti_core::AudioUnit;
+// Unified inference engine
+mod engine;
+pub use engine::{NeuralEngine, ResponseChannel, TensorRequest};
 
-pub mod model;
-pub mod registry;
+// AudioUnit nodes
+mod synth_node;
+pub use synth_node::NeuralSynthNode;
 
-// Registry functions
-pub use registry::{
-    register_all_neural_models, register_neural_directory, register_neural_effects,
-    register_neural_model, register_neural_synth_models, ModelType as NeuralModelType,
-    NeuralModelMetadata,
+mod effect_node;
+pub use effect_node::NeuralEffectNode;
+
+// Re-export core traits for convenience
+pub use tutti_core::{
+    ArcNeuralEffectBuilder, ArcNeuralSynthBuilder, NeuralEffectBuilder, NeuralModelId,
+    NeuralSynthBuilder,
 };
 
-pub(crate) mod backend;
-pub(crate) mod effects;
+// Internal
+mod backend;
 pub(crate) mod gpu;
-pub(crate) mod synthesis;

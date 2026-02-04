@@ -25,7 +25,6 @@ wgpu = "26"  # Match burn 0.20's wgpu version (26.0.1)
 # Lock-free data structures
 crossbeam-channel = "0.5.15"
 dashmap = "6.1"
-thingbuf = "0.1"
 
 # Utilities
 tracing = "0.1"

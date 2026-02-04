@@ -1,14 +1,122 @@
-//! Neural audio system with synthesis and effects.
+//! Neural audio system — unified engine for synthesis and effects.
 
 use crate::backend::BackendPool;
-use crate::effects::SyncEffectBuilder;
-use crate::error::{Error, Result};
-use crate::gpu::{InferenceConfig, ModelType, NeuralModelId, VoiceId};
-use crate::synthesis::SyncNeuralSynthBuilder;
+use crate::effect_node::NeuralEffectNode;
+use crate::engine::{NeuralEngine, TensorRequest};
+use crate::error::Result;
+use crate::gpu::{shared_effect_queue, NeuralModelId};
+use crate::synth_node::NeuralSynthNode;
+
+pub use crate::gpu::InferenceConfig;
 use burn::backend::NdArray;
+use crossbeam_channel::Sender;
 use std::sync::Arc;
-use tutti_core::neural::{BatchingStrategy, NeuralNodeManager};
 use tutti_core::AudioUnit;
+
+// ============================================================================
+// NeuralSystem
+// ============================================================================
+
+/// Main neural audio system.
+///
+/// Wraps a single `NeuralEngine` (one inference thread) and provides
+/// ergonomic methods for loading models and building AudioUnit instances.
+#[derive(Clone)]
+pub struct NeuralSystem {
+    inner: Arc<NeuralSystemInner>,
+}
+
+struct NeuralSystemInner {
+    backend_pool: BackendPool,
+    inference_config: InferenceConfig,
+    sample_rate: f32,
+    buffer_size: usize,
+    engine: NeuralEngine,
+}
+
+impl NeuralSystem {
+    pub fn builder() -> NeuralSystemBuilder {
+        NeuralSystemBuilder::default()
+    }
+
+    /// Load a neural synth model.
+    ///
+    /// Returns an `Arc<dyn NeuralSynthBuilder>` that can build voices
+    /// and integrates with tutti-core's graph-aware batching.
+    pub fn load_synth_model(&self, name: &str) -> Result<Arc<dyn tutti_core::NeuralSynthBuilder>> {
+        let model_name = stem_or(name, "Unknown");
+
+        // TODO: Load actual model weights from file.
+        let id = self.inner.engine.register_model(|| {
+            crate::gpu::fusion::NeuralModel::<NdArray>::from_forward(|input| input)
+        })?;
+
+        Ok(Arc::new(SynthBuilder {
+            model_id: id,
+            name: model_name,
+            sample_rate: self.inner.sample_rate,
+            buffer_size: self.inner.buffer_size,
+            request_tx: self.inner.engine.request_sender(),
+        }))
+    }
+
+    /// Load a neural effect model.
+    ///
+    /// Returns an `Arc<dyn NeuralEffectBuilder>` that can build effects
+    /// and integrates with tutti-core's graph-aware batching.
+    pub fn load_effect_model(
+        &self,
+        name: &str,
+    ) -> Result<Arc<dyn tutti_core::NeuralEffectBuilder>> {
+        let model_name = stem_or(name, "Unknown");
+
+        // TODO: Load actual model weights from file.
+        let id = self.inner.engine.register_model(|| {
+            crate::gpu::fusion::NeuralModel::<NdArray>::from_forward(|input| input)
+        })?;
+
+        Ok(Arc::new(EffectBuilder {
+            model_id: id,
+            name: model_name,
+            sample_rate: self.inner.sample_rate,
+            buffer_size: self.inner.buffer_size,
+            request_tx: self.inner.engine.request_sender(),
+        }))
+    }
+
+    // ==================== System Info ====================
+
+    pub fn has_gpu(&self) -> bool {
+        self.inner.backend_pool.has_gpu()
+    }
+
+    pub fn gpu_info(&self) -> Option<GpuInfo> {
+        self.inner.backend_pool.gpu_info().map(|info| GpuInfo {
+            name: info.name.clone(),
+            backend: format!("{:?}", info.backend),
+            max_memory_mb: info.max_memory_mb,
+        })
+    }
+
+    pub fn sample_rate(&self) -> f32 {
+        self.inner.sample_rate
+    }
+
+    pub fn buffer_size(&self) -> usize {
+        self.inner.buffer_size
+    }
+
+    pub fn inference_config(&self) -> &InferenceConfig {
+        &self.inner.inference_config
+    }
+
+    /// Forward a batching strategy to the inference engine.
+    ///
+    /// Best-effort: silently drops if the command channel is full.
+    pub fn update_strategy(&self, strategy: tutti_core::BatchingStrategy) {
+        self.inner.engine.update_strategy(strategy);
+    }
+}
 
 /// GPU device information.
 #[derive(Debug, Clone)]
@@ -18,229 +126,19 @@ pub struct GpuInfo {
     pub max_memory_mb: Option<u64>,
 }
 
-/// Reference to a loaded neural model.
-#[derive(Debug, Clone)]
-pub struct NeuralModel {
-    id: NeuralModelId,
-    name: String,
-    model_type: ModelType,
-}
-
-impl NeuralModel {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn model_type(&self) -> ModelType {
-        self.model_type
-    }
-}
-
-/// Main neural audio system.
-#[derive(Clone)]
-pub struct NeuralSystem {
-    inner: Arc<NeuralSystemInner>,
-}
-
-struct NeuralSystemInner {
-    backend_pool: BackendPool,
-
-    /// Inference configuration
-    inference_config: InferenceConfig,
-
-    /// Sample rate
-    sample_rate: f32,
-
-    /// Audio buffer size
-    buffer_size: usize,
-
-    /// Loaded synth builders (keyed by model path for dedup)
-    synth_builders: dashmap::DashMap<NeuralModelId, Arc<SyncNeuralSynthBuilder>>,
-
-    /// Loaded effect builders (keyed by model path for dedup)
-    effect_builders: dashmap::DashMap<NeuralModelId, Arc<SyncEffectBuilder>>,
-
-    /// Neural node registry (shared with audio graph for graph-aware batching)
-    neural_node_manager: Arc<NeuralNodeManager>,
-
-    /// Per-thread strategy senders — each inference thread gets its own channel.
-    /// `update_batching_strategy()` sends to ALL of them (broadcast semantics).
-    strategy_senders: std::sync::Mutex<Vec<crossbeam_channel::Sender<BatchingStrategy>>>,
-}
-
-impl NeuralSystem {
-    /// Create a builder for configuring the neural system.
-    pub fn builder() -> NeuralSystemBuilder {
-        NeuralSystemBuilder::default()
-    }
-
-    /// Load a neural synth model.
-    pub fn load_synth_model(&self, path: &str) -> Result<NeuralModel> {
-        let sample_rate = self.inner.sample_rate;
-        let buffer_size = self.inner.buffer_size;
-        let inference_config = self.inner.inference_config.clone();
-
-        // Create a dedicated channel for this inference thread's strategy updates.
-        // Each thread gets its own receiver so all threads receive every update.
-        let strategy_rx = if inference_config.use_graph_aware_batching {
-            let (tx, rx) = crossbeam_channel::bounded(4);
-            self.inner
-                .strategy_senders
-                .lock()
-                .expect("strategy_senders mutex poisoned (previous thread panicked)")
-                .push(tx);
-            Some(rx)
-        } else {
-            None
-        };
-
-        let builder = SyncNeuralSynthBuilder::new_with_strategy::<NdArray, _>(
-            move || {
-                let pool = BackendPool::new()?;
-                let device = pool.cpu_device().clone();
-                let engine =
-                    crate::gpu::NeuralInferenceEngine::<NdArray>::new(device, inference_config)?;
-                #[allow(clippy::arc_with_non_send_sync)] // NdArray is single-threaded by design
-                Ok(Arc::new(engine))
-            },
-            path,
-            sample_rate,
-            buffer_size,
-            strategy_rx,
-        )?;
-
-        let model = NeuralModel {
-            id: builder.model_id(),
-            name: builder.name().to_string(),
-            model_type: ModelType::NeuralSynth,
-        };
-
-        self.inner
-            .synth_builders
-            .insert(model.id, Arc::new(builder));
-
-        Ok(model)
-    }
-
-    /// Load a neural effect model.
-    pub fn load_effect_model(&self, path: &str) -> Result<NeuralModel> {
-        let buffer_size = self.inner.buffer_size;
-        let sample_rate = self.inner.sample_rate;
-        let inference_config = self.inner.inference_config.clone();
-
-        let builder = SyncEffectBuilder::new::<NdArray, _>(
-            move || {
-                let pool = BackendPool::new()?;
-                let device = pool.cpu_device().clone();
-                let engine =
-                    crate::gpu::NeuralInferenceEngine::<NdArray>::new(device, inference_config)?;
-                #[allow(clippy::arc_with_non_send_sync)] // NdArray is single-threaded by design
-                Ok(Arc::new(engine))
-            },
-            path,
-            buffer_size,
-            sample_rate,
-        )?;
-
-        let model = NeuralModel {
-            id: builder.model_id(),
-            name: builder.name().to_string(),
-            model_type: ModelType::Effect,
-        };
-
-        self.inner
-            .effect_builders
-            .insert(model.id, Arc::new(builder));
-
-        Ok(model)
-    }
-
-    // ==================== Sub-Handles ====================
-
-    /// Get the synth sub-handle for synthesis operations.
-    pub fn synth(&self) -> SynthHandle {
-        SynthHandle {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-
-    /// Get the effects sub-handle for effect operations.
-    pub fn effects(&self) -> EffectHandle {
-        EffectHandle {
-            inner: Arc::clone(&self.inner),
-        }
-    }
-
-    // ==================== System Info ====================
-
-    /// Check if GPU backend is available.
-    pub fn has_gpu(&self) -> bool {
-        self.inner.backend_pool.has_gpu()
-    }
-
-    /// Get GPU information (if available).
-    ///
-    /// Returns an owned [`GpuInfo`] snapshot.
-    pub fn gpu_info(&self) -> Option<GpuInfo> {
-        self.inner.backend_pool.gpu_info().map(|info| GpuInfo {
-            name: info.name.clone(),
-            backend: format!("{:?}", info.backend),
-            max_memory_mb: info.max_memory_mb,
-        })
-    }
-
-    /// Get the current sample rate.
-    pub fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate
-    }
-
-    /// Get the current buffer size.
-    pub fn buffer_size(&self) -> usize {
-        self.inner.buffer_size
-    }
-
-    /// Get the inference configuration.
-    pub fn inference_config(&self) -> &InferenceConfig {
-        &self.inner.inference_config
-    }
-
-    // ==================== Graph-Aware Batching ====================
-
-    /// Update the batching strategy for all inference threads.
-    ///
-    /// Call this when the audio graph changes (nodes added/removed/reconnected).
-    /// The strategy is computed by `tutti_core::neural::GraphAnalyzer` and pushed
-    /// to all inference threads so they can batch requests optimally.
-    ///
-    /// No-op if `use_graph_aware_batching` is `false` in config.
-    pub fn update_batching_strategy(&self, strategy: BatchingStrategy) {
-        if !self.inner.inference_config.use_graph_aware_batching {
-            return;
-        }
-
-        let mut senders = self
-            .inner
-            .strategy_senders
-            .lock()
-            .expect("strategy_senders mutex poisoned (previous thread panicked)");
-        // Remove disconnected senders (inference thread exited) while broadcasting
-        senders.retain(|tx| tx.try_send(strategy.clone()).is_ok());
-    }
-
-    /// Get the shared neural node manager.
-    ///
-    /// Used by the audio graph (TuttiNet) to register/unregister neural nodes.
-    /// The same manager is shared with `GraphAnalyzer` for strategy computation.
-    pub fn neural_node_manager(&self) -> &Arc<NeuralNodeManager> {
-        &self.inner.neural_node_manager
-    }
+/// Extract file stem, or fallback.
+fn stem_or(path: &str, fallback: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 // ============================================================================
 // NeuralSystemBuilder
 // ============================================================================
 
-/// Builder for configuring [`NeuralSystem`].
 pub struct NeuralSystemBuilder {
     inference_config: InferenceConfig,
     sample_rate: f32,
@@ -275,6 +173,7 @@ impl NeuralSystemBuilder {
 
     pub fn build(self) -> Result<NeuralSystem> {
         let backend_pool = BackendPool::new()?;
+        let engine = NeuralEngine::start(self.inference_config.clone())?;
 
         Ok(NeuralSystem {
             inner: Arc::new(NeuralSystemInner {
@@ -282,87 +181,77 @@ impl NeuralSystemBuilder {
                 inference_config: self.inference_config,
                 sample_rate: self.sample_rate,
                 buffer_size: self.buffer_size,
-                synth_builders: dashmap::DashMap::new(),
-                effect_builders: dashmap::DashMap::new(),
-                neural_node_manager: Arc::new(NeuralNodeManager::new()),
-                strategy_senders: std::sync::Mutex::new(Vec::new()),
+                engine,
             }),
         })
     }
 }
 
 // ============================================================================
-// Sub-Handles
+// Builder impls (tutti-core trait integration)
 // ============================================================================
 
-/// Handle for neural synthesis operations.
-///
-/// Obtained via [`NeuralSystem::synth()`]. Provides methods for building
-/// synth voices and sending features for inference.
-pub struct SynthHandle {
-    inner: Arc<NeuralSystemInner>,
+/// Implements `tutti_core::NeuralSynthBuilder` for a loaded synth model.
+struct SynthBuilder {
+    model_id: NeuralModelId,
+    name: String,
+    sample_rate: f32,
+    buffer_size: usize,
+    request_tx: Sender<TensorRequest>,
 }
 
-impl SynthHandle {
-    /// Build a new synth voice from a loaded model.
-    ///
-    /// Returns a `Box<dyn AudioUnit>` that can be added to the audio graph.
-    /// Each call creates a new independent voice instance.
-    pub fn build_voice(&self, model: &NeuralModel) -> Result<Box<dyn AudioUnit>> {
-        let builder = self.inner.synth_builders.get(&model.id).ok_or_else(|| {
-            Error::ModelNotFound(format!("Synth model '{}' not loaded", model.name))
-        })?;
-        builder.build_voice_sync()
+impl tutti_core::NeuralSynthBuilder for SynthBuilder {
+    fn build_voice(&self) -> tutti_core::Result<Box<dyn AudioUnit>> {
+        let node = NeuralSynthNode::new(
+            self.model_id,
+            self.sample_rate,
+            self.buffer_size,
+            self.request_tx.clone(),
+        );
+        Ok(Box::new(node))
     }
 
-    /// Send pre-computed features for neural inference (RT-safe).
-    ///
-    /// The caller maintains a `MidiState` per voice, applies MIDI events,
-    /// and calls `to_features()` to produce the feature vector.
-    ///
-    /// Non-blocking — drops the request if the queue is full.
-    ///
-    /// Returns `true` if queued successfully.
-    pub fn send_features(
-        &self,
-        model: &NeuralModel,
-        voice_id: VoiceId,
-        features: Vec<f32>,
-    ) -> bool {
-        if let Some(builder) = self.inner.synth_builders.get(&model.id) {
-            builder.send_features_rt(voice_id, features)
-        } else {
-            false
-        }
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn model_id(&self) -> NeuralModelId {
+        self.model_id
     }
 }
 
-/// Handle for neural effect operations.
-///
-/// Obtained via [`NeuralSystem::effects()`]. Provides methods for building
-/// effect instances and querying latency.
-pub struct EffectHandle {
-    inner: Arc<NeuralSystemInner>,
+/// Implements `tutti_core::NeuralEffectBuilder` for a loaded effect model.
+struct EffectBuilder {
+    model_id: NeuralModelId,
+    name: String,
+    sample_rate: f32,
+    buffer_size: usize,
+    request_tx: Sender<TensorRequest>,
 }
 
-impl EffectHandle {
-    /// Build a new effect instance from a loaded model.
-    ///
-    /// Returns a `Box<dyn AudioUnit>` that can be added to the audio graph.
-    /// Each call creates a new independent effect instance.
-    pub fn build_effect(&self, model: &NeuralModel) -> Result<Box<dyn AudioUnit>> {
-        let builder = self.inner.effect_builders.get(&model.id).ok_or_else(|| {
-            Error::ModelNotFound(format!("Effect model '{}' not loaded", model.name))
-        })?;
-        builder.build_effect_sync()
+impl tutti_core::NeuralEffectBuilder for EffectBuilder {
+    fn build_effect(&self) -> tutti_core::Result<Box<dyn AudioUnit>> {
+        let queue = shared_effect_queue(2, self.buffer_size);
+        let node = NeuralEffectNode::new(
+            self.model_id,
+            self.buffer_size,
+            queue,
+            self.request_tx.clone(),
+        )
+        .with_sample_rate(self.sample_rate);
+        Ok(Box::new(node))
     }
 
-    /// Get the processing latency in samples for a loaded model.
-    pub fn latency(&self, model: &NeuralModel) -> Option<usize> {
-        self.inner
-            .effect_builders
-            .get(&model.id)
-            .map(|b| b.latency())
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn model_id(&self) -> NeuralModelId {
+        self.model_id
+    }
+
+    fn latency(&self) -> usize {
+        self.buffer_size
     }
 }
 
@@ -373,6 +262,9 @@ impl EffectHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Traits in scope for calling build_voice(), build_effect(), etc. on Arc<dyn Trait>
+    #[allow(unused_imports)]
+    use tutti_core::{NeuralEffectBuilder, NeuralSynthBuilder};
 
     #[test]
     fn test_neural_system_creation() {
@@ -383,7 +275,6 @@ mod tests {
     #[test]
     fn test_builder_defaults() {
         let neural = NeuralSystem::builder().build().unwrap();
-
         assert_eq!(neural.sample_rate(), 44100.0);
         assert_eq!(neural.buffer_size(), 512);
     }
@@ -409,54 +300,68 @@ mod tests {
     fn test_clone() {
         let neural = NeuralSystem::builder().build().unwrap();
         let neural2 = neural.clone();
-
-        // Both share the same backend pool
         assert_eq!(neural.has_gpu(), neural2.has_gpu());
     }
 
     #[test]
-    fn test_sub_handles() {
+    fn test_load_synth_model() {
         let neural = NeuralSystem::builder().build().unwrap();
-
-        let _synth = neural.synth();
-        let _effects = neural.effects();
+        let builder = neural.load_synth_model("test_violin.mpk").unwrap();
+        assert_eq!(builder.name(), "test_violin");
     }
 
     #[test]
-    fn test_neural_model() {
-        let model = NeuralModel {
-            id: NeuralModelId::new(),
-            name: "test_model".to_string(),
-            model_type: ModelType::NeuralSynth,
-        };
-
-        assert_eq!(model.name(), "test_model");
-        assert_eq!(model.model_type(), ModelType::NeuralSynth);
+    fn test_load_effect_model() {
+        let neural = NeuralSystem::builder().build().unwrap();
+        let builder = neural.load_effect_model("amp_sim.mpk").unwrap();
+        assert_eq!(builder.name(), "amp_sim");
     }
 
     #[test]
-    fn test_synth_handle_missing_model() {
+    fn test_synth_builder_trait() {
         let neural = NeuralSystem::builder().build().unwrap();
-        let model = NeuralModel {
-            id: NeuralModelId::new(),
-            name: "nonexistent".to_string(),
-            model_type: ModelType::NeuralSynth,
-        };
+        let builder = neural.load_synth_model("test.mpk").unwrap();
 
-        let result = neural.synth().build_voice(&model);
-        assert!(result.is_err());
+        // Uses tutti_core::NeuralSynthBuilder trait
+        let voice = builder.build_voice();
+        assert!(voice.is_ok());
+
+        let voice = voice.unwrap();
+        assert_eq!(voice.inputs(), 0);
+        assert_eq!(voice.outputs(), 2);
     }
 
     #[test]
-    fn test_effect_handle_missing_model() {
+    fn test_effect_builder_trait() {
         let neural = NeuralSystem::builder().build().unwrap();
-        let model = NeuralModel {
-            id: NeuralModelId::new(),
-            name: "nonexistent".to_string(),
-            model_type: ModelType::Effect,
-        };
+        let builder = neural.load_effect_model("test.mpk").unwrap();
 
-        let result = neural.effects().build_effect(&model);
-        assert!(result.is_err());
+        // Uses tutti_core::NeuralEffectBuilder trait
+        let effect = builder.build_effect();
+        assert!(effect.is_ok());
+
+        let effect = effect.unwrap();
+        assert_eq!(effect.inputs(), 2);
+        assert_eq!(effect.outputs(), 2);
+    }
+
+    #[test]
+    fn test_synth_builder_model_id() {
+        let neural = NeuralSystem::builder().build().unwrap();
+        let b1 = neural.load_synth_model("a.mpk").unwrap();
+        let b2 = neural.load_synth_model("b.mpk").unwrap();
+
+        // Different models get different IDs
+        assert_ne!(b1.model_id().as_u64(), b2.model_id().as_u64());
+
+        // Same builder always returns the same model_id (for batching)
+        assert_eq!(b1.model_id(), b1.model_id());
+    }
+
+    #[test]
+    fn test_effect_builder_latency() {
+        let neural = NeuralSystem::builder().buffer_size(256).build().unwrap();
+        let builder = neural.load_effect_model("test.mpk").unwrap();
+        assert_eq!(builder.latency(), 256);
     }
 }
