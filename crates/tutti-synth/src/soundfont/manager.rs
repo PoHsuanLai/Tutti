@@ -10,8 +10,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Handle to a loaded SoundFont
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SoundFontHandle(pub usize);
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SoundFontHandle(usize);
+
+impl SoundFontHandle {
+    /// Get the internal ID (for debugging/logging only)
+    pub fn id(&self) -> usize {
+        self.0
+    }
+}
 
 /// SoundFont file manager with lock-free caching.
 pub struct SoundFontSystem {

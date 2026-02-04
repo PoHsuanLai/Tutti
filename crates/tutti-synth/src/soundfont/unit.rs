@@ -5,10 +5,8 @@
 
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use std::sync::Arc;
-use tutti_core::{AudioUnit, BufferMut, BufferRef, Setting, SignalFrame};
-
-#[cfg(feature = "midi")]
 use tutti_core::midi::{MidiAudioUnit, MidiEvent};
+use tutti_core::{AudioUnit, BufferMut, BufferRef, Setting, SignalFrame};
 
 /// SoundFont synthesizer audio unit
 ///
@@ -26,14 +24,8 @@ pub struct SoundFontUnit {
     left_buffer: Vec<f32>,
     right_buffer: Vec<f32>,
     buffer_pos: usize,
-
-    #[cfg(feature = "midi")]
     pending_midi: Vec<MidiEvent>,
-
-    #[cfg(feature = "midi")]
     midi_registry: Option<tutti_core::midi::MidiRegistry>,
-
-    #[cfg(feature = "midi")]
     midi_buffer: Vec<MidiEvent>,
 }
 
@@ -52,20 +44,13 @@ impl SoundFontUnit {
             left_buffer: vec![0.0; buffer_size],
             right_buffer: vec![0.0; buffer_size],
             buffer_pos: buffer_size,
-
-            #[cfg(feature = "midi")]
             pending_midi: Vec::with_capacity(128),
-
-            #[cfg(feature = "midi")]
             midi_registry: None,
-
-            #[cfg(feature = "midi")]
             midi_buffer: vec![MidiEvent::note_on_builder(0, 0).build(); 256],
         }
     }
 
     /// Create a SoundFont unit with MIDI registry support
-    #[cfg(feature = "midi")]
     pub fn with_midi(
         soundfont: Arc<SoundFont>,
         settings: &SynthesizerSettings,
@@ -110,8 +95,9 @@ impl SoundFontUnit {
     }
 
     /// Poll MIDI events from registry and trigger synthesizer
-    #[cfg(feature = "midi")]
     fn poll_midi_events(&mut self) {
+        use tutti_core::midi::ChannelVoiceMsg;
+
         // Poll MIDI events from registry if available
         if let Some(ref registry) = self.midi_registry {
             let unit_id = self.get_id();
@@ -124,35 +110,25 @@ impl SoundFontUnit {
 
         // Process pending MIDI events
         for event in self.pending_midi.drain(..) {
-            use tutti_midi_io::RawMidiEvent;
-            let raw: RawMidiEvent = event.into();
-            let status = raw.data[0];
-            let data1 = raw.data[1];
-            let data2 = raw.data[2];
+            let channel = event.channel_num() as i32;
 
-            // Note On (0x90)
-            if (0x90..0xA0).contains(&status) {
-                let channel = (status & 0x0F) as i32;
-                let note = data1 as i32;
-                let velocity = data2 as i32;
-                if velocity > 0 {
-                    self.synthesizer.note_on(channel, note, velocity);
-                } else {
-                    self.synthesizer.note_off(channel, note);
+            match event.msg {
+                ChannelVoiceMsg::NoteOn { note, velocity } => {
+                    if velocity > 0 {
+                        self.synthesizer
+                            .note_on(channel, note as i32, velocity as i32);
+                    } else {
+                        self.synthesizer.note_off(channel, note as i32);
+                    }
                 }
-            }
-            // Note Off (0x80)
-            else if (0x80..0x90).contains(&status) {
-                let channel = (status & 0x0F) as i32;
-                let note = data1 as i32;
-                self.synthesizer.note_off(channel, note);
-            }
-            // Program Change (0xC0)
-            else if (0xC0..0xD0).contains(&status) {
-                let channel = (status & 0x0F) as i32;
-                let program = data1 as i32;
-                self.synthesizer
-                    .process_midi_message(channel, 0xC0, program, 0);
+                ChannelVoiceMsg::NoteOff { note, .. } => {
+                    self.synthesizer.note_off(channel, note as i32);
+                }
+                ChannelVoiceMsg::ProgramChange { program } => {
+                    self.synthesizer
+                        .process_midi_message(channel, 0xC0, program as i32, 0);
+                }
+                _ => {} // Ignore other MIDI messages for now
             }
         }
     }
@@ -177,7 +153,6 @@ impl AudioUnit for SoundFontUnit {
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
         assert_eq!(output.len(), 2, "SoundFontUnit is stereo (2 outputs)");
 
-        #[cfg(feature = "midi")]
         self.poll_midi_events();
 
         // Refill buffers if needed
@@ -191,7 +166,6 @@ impl AudioUnit for SoundFontUnit {
     }
 
     fn process(&mut self, size: usize, _input: &BufferRef, output: &mut BufferMut) {
-        #[cfg(feature = "midi")]
         self.poll_midi_events();
 
         (0..size).for_each(|i| {
@@ -246,7 +220,6 @@ impl AudioUnit for SoundFontUnit {
     }
 }
 
-#[cfg(feature = "midi")]
 impl MidiAudioUnit for SoundFontUnit {
     fn queue_midi(&mut self, events: &[MidiEvent]) {
         self.pending_midi.extend_from_slice(events);
@@ -259,8 +232,6 @@ impl MidiAudioUnit for SoundFontUnit {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_rustysynth_unit_interface() {
         // This test verifies the AudioUnit interface is implemented correctly

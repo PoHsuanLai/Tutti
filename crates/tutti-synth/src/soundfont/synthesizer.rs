@@ -69,8 +69,6 @@ impl SoundFontSynth {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // Note: These tests would require actual SoundFont files
     // They should be added in integration tests with test fixtures
 
