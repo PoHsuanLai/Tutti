@@ -1,77 +1,41 @@
-//! Synth building blocks for Tutti.
+//! Synthesizer building blocks for Tutti.
 //!
-//! This crate provides synthesizer infrastructure that complements FunDSP:
-//! - Voice allocation and management
-//! - Modulation matrix
-//! - Unison engine
-//! - Portamento (pitch glide)
-//! - Microtuning
-//! - SoundFont synthesis (via RustySynth)
-//! - **SynthBuilder** - Fluent API for creating complete synthesizers
+//! Provides synth infrastructure that complements FunDSP's DSP primitives:
 //!
-//! FunDSP provides the DSP primitives (oscillators, filters, envelopes).
-//! This crate provides the synth-specific infrastructure to build complete instruments.
+//! - **[`SynthBuilder`]** - Fluent API for creating complete synthesizers
+//! - **[`VoiceAllocator`]** - Polyphonic voice management with stealing strategies
+//! - **[`ModulationMatrix`]** - Route modulation sources to destinations
+//! - **[`UnisonEngine`][UnisonConfig]** - Voice detuning and stereo spread
+//! - **[`Portamento`]** - Pitch glide between notes
+//! - **[`Tuning`]** - Microtuning and alternative temperaments
+//! - **SoundFontSynth** - SoundFont (.sf2) synthesis (feature: `soundfont`)
 //!
-//! For MIDI processing, use `tutti-midi-io` directly - it provides all the
-//! building blocks needed (MidiEvent, ChannelVoiceMsg, MpeProcessor, etc.).
-//!
-//! ## Feature Flags
-//!
-//! - `voice-alloc` - Voice allocator with stealing strategies
-//! - `modulation` - Modulation matrix (sources → destinations)
-//! - `unison` - Unison engine (detune + stereo spread)
-//! - `portamento` - Pitch glide
-//! - `tuning` - Microtuning support
-//! - `soundfont` - SoundFont (.sf2) synthesis
-//! - `synth-blocks` - All building blocks (voice-alloc, modulation, unison, portamento)
-//! - `builder` - SynthBuilder fluent API (requires synth-blocks + tuning)
-//! - `full` - Everything
-//!
-//! ## Example
+//! # Quick Start
 //!
 //! ```ignore
-//! use tutti_synth::{VoiceAllocator, VoiceAllocatorConfig, AllocationStrategy};
-//! use tutti_synth::{Portamento, PortamentoConfig};
-//! use tutti_synth::Tuning;
-//! use tutti_midi_io::{MidiEvent, ChannelVoiceMsg};
+//! use tutti_synth::{SynthBuilder, OscillatorType, FilterType};
 //!
-//! // Set up voice allocator
-//! let config = VoiceAllocatorConfig {
-//!     max_voices: 8,
-//!     strategy: AllocationStrategy::Oldest,
-//!     ..Default::default()
-//! };
-//! let mut allocator = VoiceAllocator::new(config);
-//!
-//! // Set up portamento
-//! let mut portamento = Portamento::new(PortamentoConfig::default(), 44100.0);
-//!
-//! // Set up tuning
-//! let tuning = Tuning::equal_temperament();
-//!
-//! // Process MIDI directly
-//! match event.msg {
-//!     ChannelVoiceMsg::NoteOn { note, velocity } => {
-//!         let vel_norm = velocity as f32 / 127.0;
-//!         let result = allocator.allocate(note, channel, vel_norm);
-//!         let freq = tuning.note_to_freq(note);
-//!         portamento.set_target(freq, result.is_legato);
-//!     }
-//!     ChannelVoiceMsg::NoteOff { note, .. } => {
-//!         allocator.release(note, channel);
-//!     }
-//!     ChannelVoiceMsg::ControlChange { control } => {
-//!         if let ControlChange::CC { control: 64, value } = control {
-//!             allocator.sustain_pedal(channel, value >= 64);
-//!         }
-//!     }
-//!     _ => {}
-//! }
-//!
-//! // In audio loop
-//! let current_freq = portamento.tick();
-//! // Use current_freq with FunDSP oscillator
+//! let mut synth = SynthBuilder::new(44100.0)
+//!     .poly(8)
+//!     .oscillator(OscillatorType::Saw)
+//!     .filter(FilterType::Moog { cutoff: 2000.0, resonance: 0.7 })
+//!     .envelope(0.01, 0.2, 0.6, 0.3)
+//!     .build()?;
 //! ```
+//!
+//! # Feature Flags
+//!
+//! | Feature | Description |
+//! |---------|-------------|
+//! | `voice-alloc` | Voice allocator with stealing strategies |
+//! | `modulation` | Modulation matrix |
+//! | `unison` | Unison engine (detune + stereo spread) |
+//! | `portamento` | Pitch glide |
+//! | `tuning` | Microtuning support |
+//! | `soundfont` | SoundFont synthesis |
+//! | `synth-blocks` | All building blocks |
+//! | `builder` | SynthBuilder API (includes synth-blocks + tuning) |
+//! | `full` | Everything |
 
 pub mod error;
 pub use error::{Error, Result};
@@ -88,7 +52,6 @@ pub use voice::{
     AllocationResult, AllocationStrategy, VoiceAllocator, VoiceAllocatorConfig, VoiceMode,
 };
 
-
 // =============================================================================
 // Modulation
 // =============================================================================
@@ -104,7 +67,6 @@ pub use modulation::{
 // Internal value struct used by builder
 #[cfg(feature = "modulation")]
 pub(crate) use modulation::ModSourceValues;
-
 
 // =============================================================================
 // Unison
@@ -142,7 +104,6 @@ mod tuning;
 #[cfg(feature = "tuning")]
 pub use tuning::{Tuning, A4_FREQ, A4_NOTE};
 
-
 // =============================================================================
 // SoundFont Synthesis
 // =============================================================================
@@ -161,9 +122,7 @@ pub use soundfont::{SoundFontHandle, SoundFontSynth, SoundFontSystem, SoundFontU
 mod builder;
 
 #[cfg(feature = "builder")]
-pub use builder::{
-    EnvelopeConfig, FilterType, OscillatorType, PolySynth, SynthBuilder,
-};
+pub use builder::{EnvelopeConfig, FilterType, OscillatorType, PolySynth, SynthBuilder};
 
 // Filter mode enums are public (needed for FilterType configuration)
 #[cfg(feature = "builder")]

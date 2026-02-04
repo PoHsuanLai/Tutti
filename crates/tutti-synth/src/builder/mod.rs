@@ -1,22 +1,7 @@
-//! Fluent builder API for constructing synthesizers.
+//! Fluent builder API for creating synthesizers.
 //!
-//! The SynthBuilder provides a convenient way to create complete polyphonic
-//! synthesizers by combining tutti-synth building blocks with FunDSP primitives.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_synth::builder::*;
-//! use tutti_synth::{AllocationStrategy, PortamentoConfig, UnisonConfig, Tuning};
-//!
-//! let synth = SynthBuilder::new(44100.0)
-//!     .poly(8)
-//!     .oscillator(OscillatorType::Saw)
-//!     .filter(FilterType::Moog { cutoff: 2000.0, resonance: 0.7 })
-//!     .envelope(0.01, 0.2, 0.6, 0.3)
-//!     .voice_stealing(AllocationStrategy::Oldest)
-//!     .build()?;
-//! ```
+//! Combines tutti-synth building blocks with FunDSP primitives into
+//! complete polyphonic synthesizers.
 
 mod polysynth;
 mod voice;
@@ -77,7 +62,11 @@ pub enum FilterType {
     /// State Variable Filter with selectable mode
     Svf { cutoff: f32, q: f32, mode: SvfMode },
     /// Biquad filter with selectable mode
-    Biquad { cutoff: f32, q: f32, mode: BiquadMode },
+    Biquad {
+        cutoff: f32,
+        q: f32,
+        mode: BiquadMode,
+    },
     /// No filter (bypass)
     None,
 }
@@ -185,17 +174,6 @@ impl Default for SynthConfig {
 }
 
 /// Fluent builder for creating synthesizers.
-///
-/// # Example
-///
-/// ```ignore
-/// let synth = SynthBuilder::new(44100.0)
-///     .poly(8)
-///     .oscillator(OscillatorType::Saw)
-///     .filter(FilterType::Moog { cutoff: 1000.0, resonance: 0.5 })
-///     .envelope(0.01, 0.1, 0.7, 0.2)
-///     .build()?;
-/// ```
 #[derive(Debug, Clone)]
 pub struct SynthBuilder {
     config: SynthConfig,

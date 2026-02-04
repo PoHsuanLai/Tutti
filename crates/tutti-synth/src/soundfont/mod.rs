@@ -1,9 +1,7 @@
-//! SoundFont synthesis using RustySynth
+//! SoundFont (.sf2) synthesis via RustySynth.
 //!
-//! This module provides SoundFont (.sf2) synthesis for pattern clip rendering.
-//! RustySynth is a high-quality SoundFont synthesizer that supports SF2 format.
-//!
-//! Note: This entire module is feature-gated by `soundfont` in lib.rs.
+//! Provides [`SoundFontSynth`] for MIDI-driven sample playback and
+//! [`SoundFontSystem`] for managing loaded SoundFonts.
 
 mod manager;
 mod synthesizer;

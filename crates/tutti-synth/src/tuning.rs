@@ -1,24 +1,9 @@
 //! Microtuning support for synthesizers.
 //!
-//! Provides alternative tuning systems beyond 12-TET.
-//! Pre-computes a frequency lookup table for RT-safe note-to-frequency conversion.
+//! Alternative tuning systems: 12-TET, just intonation, Pythagorean, meantone,
+//! or custom scales from cents/ratios.
 //!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_synth::tuning::Tuning;
-//!
-//! // Use 12-TET (default)
-//! let tuning = Tuning::equal_temperament();
-//! let freq = tuning.note_to_freq(69); // A4 = 440 Hz
-//!
-//! // Use just intonation
-//! let just = Tuning::just_intonation();
-//!
-//! // Custom scale (cents from unison)
-//! let custom = Tuning::from_cents(&[0.0, 100.0, 200.0, 300.0, 400.0, 500.0,
-//!                                   600.0, 700.0, 800.0, 900.0, 1000.0, 1100.0]);
-//! ```
+//! Pre-computes a 128-note frequency table for RT-safe lookup.
 
 /// Reference pitch for A4.
 pub const A4_FREQ: f32 = 440.0;
@@ -107,7 +92,8 @@ impl Tuning {
             15.0 / 8.0,  // Major seventh
         ];
 
-        let degrees: Vec<ScaleDegree> = ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
+        let degrees: Vec<ScaleDegree> =
+            ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
 
         let mut tuning = Self {
             name: "Just Intonation".to_string(),
@@ -140,7 +126,8 @@ impl Tuning {
             243.0 / 128.0, // B
         ];
 
-        let degrees: Vec<ScaleDegree> = ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
+        let degrees: Vec<ScaleDegree> =
+            ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
 
         let mut tuning = Self {
             name: "Pythagorean".to_string(),
@@ -163,15 +150,15 @@ impl Tuning {
         for i in 0..12 {
             let c = match i {
                 0 => 0.0,
-                1 => 76.0,  // Db
-                2 => 193.0, // D
-                3 => 310.0, // Eb
-                4 => 386.0, // E (pure major third)
-                5 => 503.0, // F
-                6 => 579.0, // F#
-                7 => 697.0, // G
-                8 => 773.0, // Ab
-                9 => 890.0, // A
+                1 => 76.0,    // Db
+                2 => 193.0,   // D
+                3 => 310.0,   // Eb
+                4 => 386.0,   // E (pure major third)
+                5 => 503.0,   // F
+                6 => 579.0,   // F#
+                7 => 697.0,   // G
+                8 => 773.0,   // Ab
+                9 => 890.0,   // A
                 10 => 1007.0, // Bb
                 11 => 1083.0, // B
                 _ => 0.0,
@@ -210,7 +197,8 @@ impl Tuning {
 
     /// Create a tuning from frequency ratios.
     pub fn from_ratios(ratios: &[f32]) -> Self {
-        let degrees: Vec<ScaleDegree> = ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
+        let degrees: Vec<ScaleDegree> =
+            ratios.iter().map(|r| ScaleDegree::from_ratio(*r)).collect();
 
         let mut tuning = Self {
             name: "Custom".to_string(),

@@ -1,4 +1,4 @@
-//! Polyphonic synthesizer AudioUnit implementation.
+//! Polyphonic synthesizer implementing [`AudioUnit`] and [`MidiAudioUnit`].
 
 use super::voice::SynthVoice;
 use super::SynthConfig;
@@ -12,10 +12,10 @@ use tutti_core::{AudioUnit, BufferMut, BufferRef, Shared, SignalFrame};
 extern crate alloc;
 use alloc::vec::Vec;
 
-/// Polyphonic synthesizer built from tutti-synth building blocks.
+/// Polyphonic synthesizer combining tutti-synth building blocks with FunDSP.
 ///
-/// Combines VoiceAllocator, Portamento, UnisonEngine, and ModulationMatrix
-/// with FunDSP-based voice DSP chains.
+/// Created via [`SynthBuilder`](super::SynthBuilder). Implements [`AudioUnit`]
+/// for audio processing and [`MidiAudioUnit`] for MIDI input.
 #[derive(Clone)]
 pub struct PolySynth {
     config: SynthConfig,
@@ -60,7 +60,11 @@ impl PolySynth {
         let unison = config.unison.as_ref().map(|u| UnisonEngine::new(u.clone()));
 
         // Determine unison count for voice construction
-        let unison_count = config.unison.as_ref().map(|u| u.voice_count as usize).unwrap_or(1);
+        let unison_count = config
+            .unison
+            .as_ref()
+            .map(|u| u.voice_count as usize)
+            .unwrap_or(1);
 
         // Create voices with sub-voices for unison
         let mut voices = Vec::with_capacity(config.max_voices);
@@ -445,10 +449,7 @@ mod tests {
 
     #[test]
     fn test_polysynth_volume() {
-        let mut synth = SynthBuilder::new(44100.0)
-            .poly(2)
-            .build()
-            .unwrap();
+        let mut synth = SynthBuilder::new(44100.0).poly(2).build().unwrap();
 
         synth.set_volume(0.5);
         assert!((synth.volume() - 0.5).abs() < 0.001);
@@ -518,8 +519,16 @@ mod tests {
 
         // With full stereo spread, we should get output on both channels
         // (the left/right sub-voices should be panned to opposite sides)
-        assert!(max_left > 0.0, "Expected non-zero left channel output, got {}", max_left);
-        assert!(max_right > 0.0, "Expected non-zero right channel output, got {}", max_right);
+        assert!(
+            max_left > 0.0,
+            "Expected non-zero left channel output, got {}",
+            max_left
+        );
+        assert!(
+            max_right > 0.0,
+            "Expected non-zero right channel output, got {}",
+            max_right
+        );
     }
 
     #[test]
@@ -556,9 +565,8 @@ mod tests {
         assert!(out[0] != 0.0, "Oscillator should produce output");
 
         // Test envelope with osc - using correct FunDSP pattern from live_adsr example
-        let mut chain: Box<dyn AudioUnit> = Box::new(
-            var(&pitch) >> saw() * (var(&gate) >> adsr_live(0.001, 0.1, 0.8, 0.1))
-        );
+        let mut chain: Box<dyn AudioUnit> =
+            Box::new(var(&pitch) >> saw() * (var(&gate) >> adsr_live(0.001, 0.1, 0.8, 0.1)));
         chain.set_sample_rate(44100.0);
 
         // Process one sample with gate=0 to initialize envelope
@@ -575,6 +583,10 @@ mod tests {
             chain.tick(&[], &mut out2);
             max_out = max_out.max(out2[0].abs());
         }
-        assert!(max_out > 0.0001, "Chain should produce output after triggering gate, max={}", max_out);
+        assert!(
+            max_out > 0.0001,
+            "Chain should produce output after triggering gate, max={}",
+            max_out
+        );
     }
 }

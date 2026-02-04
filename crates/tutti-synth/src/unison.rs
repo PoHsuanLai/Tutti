@@ -1,31 +1,7 @@
 //! Unison engine for synthesizers.
 //!
-//! Provides voice detuning and stereo spread for thicker sounds.
+//! Provides voice detuning and stereo spread for thicker "super saw" sounds.
 //! Pre-computes all voice parameters for RT-safe per-sample lookup.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_synth::unison::{UnisonEngine, UnisonConfig};
-//!
-//! let config = UnisonConfig {
-//!     voice_count: 7,
-//!     detune_cents: 15.0,
-//!     stereo_spread: 1.0,
-//!     ..Default::default()
-//! };
-//!
-//! let mut unison = UnisonEngine::new(config);
-//!
-//! // On note on, optionally randomize phases
-//! unison.randomize_phases();
-//!
-//! // Get parameters for each unison voice
-//! for i in 0..unison.voice_count() {
-//!     let params = unison.voice_params(i);
-//!     // Use params.freq_ratio, params.pan, params.amplitude for oscillator
-//! }
-//! ```
 
 /// Maximum unison voices supported.
 pub const MAX_UNISON_VOICES: usize = 16;

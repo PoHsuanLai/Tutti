@@ -1,37 +1,9 @@
 //! Modulation matrix for synthesizers.
 //!
-//! Connects modulation sources (LFOs, envelopes, MIDI CCs) to destinations
+//! Routes modulation sources (LFOs, envelopes, MIDI CCs) to destinations
 //! (pitch, filter, amplitude) with configurable amounts.
 //!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_synth::modulation::{
-//!     ModulationMatrix, ModulationMatrixConfig, ModRoute,
-//!     ModSource, ModDestination, ModSourceValues,
-//! };
-//!
-//! let config = ModulationMatrixConfig {
-//!     routes: vec![
-//!         ModRoute::new(ModSource::Lfo(0), ModDestination::Pitch, 0.5),
-//!         ModRoute::new(ModSource::Envelope(1), ModDestination::FilterCutoff, 0.8),
-//!         ModRoute::new(ModSource::ModWheel, ModDestination::Amplitude, 0.3).bipolar(),
-//!     ],
-//! };
-//!
-//! let mut matrix = ModulationMatrix::new(config);
-//!
-//! // In audio loop, update source values
-//! let mut sources = ModSourceValues::default();
-//! sources.lfo[0] = lfo_output;
-//! sources.envelope[1] = filter_env_output;
-//! sources.mod_wheel = midi_mod_wheel;
-//!
-//! // Compute destinations
-//! let destinations = matrix.compute(&sources);
-//! let pitch_mod = destinations.pitch;
-//! let filter_mod = destinations.filter_cutoff;
-//! ```
+//! All operations are RT-safe (no allocations in compute path).
 
 /// Maximum number of modulation routes.
 pub const MAX_MOD_ROUTES: usize = 32;
@@ -524,11 +496,7 @@ mod tests {
 
         assert_eq!(matrix.route_count(), 0);
 
-        matrix.add_route(ModRoute::new(
-            ModSource::Lfo(0),
-            ModDestination::Pitch,
-            1.0,
-        ));
+        matrix.add_route(ModRoute::new(ModSource::Lfo(0), ModDestination::Pitch, 1.0));
         assert_eq!(matrix.route_count(), 1);
 
         matrix.add_route(ModRoute::new(
@@ -549,12 +517,7 @@ mod tests {
     #[test]
     fn test_route_amount_update() {
         let config = ModulationMatrixConfig {
-            routes: vec![ModRoute::new(
-                ModSource::Lfo(0),
-                ModDestination::Pitch,
-                1.0,
-            )
-            .bipolar()],
+            routes: vec![ModRoute::new(ModSource::Lfo(0), ModDestination::Pitch, 1.0).bipolar()],
         };
 
         let mut matrix = ModulationMatrix::new(config);
@@ -600,18 +563,10 @@ mod tests {
         let mut matrix = ModulationMatrix::default();
 
         for _ in 0..MAX_MOD_ROUTES {
-            assert!(matrix.add_route(ModRoute::new(
-                ModSource::Lfo(0),
-                ModDestination::Pitch,
-                0.1,
-            )));
+            assert!(matrix.add_route(ModRoute::new(ModSource::Lfo(0), ModDestination::Pitch, 0.1,)));
         }
 
         // Should fail at max
-        assert!(!matrix.add_route(ModRoute::new(
-            ModSource::Lfo(0),
-            ModDestination::Pitch,
-            0.1,
-        )));
+        assert!(!matrix.add_route(ModRoute::new(ModSource::Lfo(0), ModDestination::Pitch, 0.1,)));
     }
 }

@@ -1,37 +1,11 @@
 //! Polyphonic voice allocator with multiple stealing strategies.
 //!
-//! Provides voice management for polyphonic synthesizers including:
-//! - Multiple voice stealing strategies (oldest, quietest, highest/lowest note)
+//! Manages voice allocation for polyphonic synthesizers:
+//! - Stealing strategies: oldest, quietest, highest/lowest note
 //! - Mono and legato modes
 //! - Sustain and sostenuto pedal handling
 //!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_synth::voice::{VoiceAllocator, VoiceAllocatorConfig, AllocationStrategy};
-//!
-//! let config = VoiceAllocatorConfig {
-//!     max_voices: 8,
-//!     strategy: AllocationStrategy::Oldest,
-//!     ..Default::default()
-//! };
-//!
-//! let mut allocator = VoiceAllocator::new(config);
-//!
-//! // Note on
-//! match allocator.allocate(60, 0, 0.8) {
-//!     AllocationResult::Allocated { voice_id, slot_index } => {
-//!         // Start voice at slot_index
-//!     }
-//!     AllocationResult::Stolen { voice_id, slot_index, stolen_voice_id } => {
-//!         // Crossfade from stolen_voice_id to new voice
-//!     }
-//!     _ => {}
-//! }
-//!
-//! // Note off
-//! allocator.release(60, 0);
-//! ```
+//! All methods are RT-safe (no allocations after construction).
 
 /// Unique identifier for a voice instance.
 pub type VoiceId = u64;

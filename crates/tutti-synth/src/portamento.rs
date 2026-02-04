@@ -1,30 +1,9 @@
 //! Portamento (pitch glide) for synthesizers.
 //!
-//! Provides smooth pitch transitions between notes with configurable
-//! glide time, curve shape, and legato-only mode.
+//! Smooth pitch transitions between notes with configurable glide time,
+//! curve shape (linear/exponential/logarithmic), and legato-only mode.
 //!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_synth::portamento::{Portamento, PortamentoConfig, PortamentoMode};
-//!
-//! let config = PortamentoConfig {
-//!     mode: PortamentoMode::Always,
-//!     time: 0.1, // 100ms glide
-//!     ..Default::default()
-//! };
-//!
-//! let mut porta = Portamento::new(config, 44100.0);
-//!
-//! // On note on
-//! porta.set_target(440.0, false); // A4
-//!
-//! // In audio loop
-//! for _ in 0..buffer_size {
-//!     let freq = porta.tick();
-//!     // Use freq for oscillator
-//! }
-//! ```
+//! All methods are RT-safe.
 
 /// Portamento/glide mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

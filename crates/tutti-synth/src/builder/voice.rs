@@ -83,7 +83,13 @@ impl SynthVoice {
     }
 
     /// Trigger a note on with optional unison.
-    pub fn note_on(&mut self, note: u8, velocity: f32, base_freq: f32, unison: Option<&mut UnisonEngine>) {
+    pub fn note_on(
+        &mut self,
+        note: u8,
+        velocity: f32,
+        base_freq: f32,
+        unison: Option<&mut UnisonEngine>,
+    ) {
         self.note = note;
         self.velocity = velocity;
         self.gate.set(1.0);
@@ -188,7 +194,6 @@ impl SynthVoice {
         (left, right)
     }
 
-
     /// Set sample rate for all sub-voices.
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
         for sub in &mut self.sub_voices {
@@ -242,9 +247,7 @@ fn build_sub_voice_dsp(
         (OscillatorType::Triangle, FilterType::None) => {
             Box::new((var(pitch) >> triangle()) * make_env(gate, env))
         }
-        (OscillatorType::Noise, FilterType::None) => {
-            Box::new(pink::<f32>() * make_env(gate, env))
-        }
+        (OscillatorType::Noise, FilterType::None) => Box::new(pink::<f32>() * make_env(gate, env)),
 
         // Moog filter with modulated cutoff (mono)
         (OscillatorType::Sine, FilterType::Moog { resonance, .. }) => Box::new(
