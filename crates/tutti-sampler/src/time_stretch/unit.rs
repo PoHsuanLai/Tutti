@@ -66,6 +66,9 @@ impl Clone for Processor {
     }
 }
 
+/// Maximum buffer size for pre-allocation (covers all common audio interfaces)
+const MAX_BUFFER_SIZE: usize = 8192;
+
 /// Real-time time-stretching and pitch-shifting unit.
 pub struct TimeStretchUnit {
     source: Box<dyn AudioUnit>,
@@ -107,10 +110,10 @@ impl TimeStretchUnit {
             algorithm: TimeStretchAlgorithm::PhaseVocoder,
             sample_rate,
             source_buffer: vec![0.0; 2],
-            scratch_left: Vec::new(),
-            scratch_right: Vec::new(),
-            scratch_out_left: Vec::new(),
-            scratch_out_right: Vec::new(),
+            scratch_left: Vec::with_capacity(MAX_BUFFER_SIZE),
+            scratch_right: Vec::with_capacity(MAX_BUFFER_SIZE),
+            scratch_out_left: Vec::with_capacity(MAX_BUFFER_SIZE),
+            scratch_out_right: Vec::with_capacity(MAX_BUFFER_SIZE),
         }
     }
 
@@ -132,10 +135,10 @@ impl TimeStretchUnit {
             algorithm: TimeStretchAlgorithm::Granular,
             sample_rate,
             source_buffer: vec![0.0; 2],
-            scratch_left: Vec::new(),
-            scratch_right: Vec::new(),
-            scratch_out_left: Vec::new(),
-            scratch_out_right: Vec::new(),
+            scratch_left: Vec::with_capacity(MAX_BUFFER_SIZE),
+            scratch_right: Vec::with_capacity(MAX_BUFFER_SIZE),
+            scratch_out_left: Vec::with_capacity(MAX_BUFFER_SIZE),
+            scratch_out_right: Vec::with_capacity(MAX_BUFFER_SIZE),
         }
     }
 

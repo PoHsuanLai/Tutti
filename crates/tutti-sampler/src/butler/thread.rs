@@ -591,6 +591,7 @@ fn handle_seek_stream(
 }
 
 /// Handle SetLoopRange command.
+#[allow(clippy::too_many_arguments)]
 fn handle_set_loop_range(
     channel_index: usize,
     start_samples: u64,

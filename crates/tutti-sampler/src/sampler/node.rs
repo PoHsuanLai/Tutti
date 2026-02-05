@@ -423,6 +423,10 @@ mod streaming {
         ((c3 * t + c2) * t + c1) * t + c0
     }
 
+    /// Maximum samples to pre-allocate for varispeed fetching.
+    /// Covers 8192 frames at 4x speed with interpolation padding.
+    const MAX_FETCH_SAMPLES: usize = 8192 * 4 + 8;
+
     /// Disk streaming sampler with varispeed and seeking support.
     pub struct StreamingSamplerUnit {
         consumer: Arc<Mutex<RegionBufferConsumer>>,
@@ -442,6 +446,9 @@ mod streaming {
 
         /// History buffer for cubic Hermite interpolation (last 4 samples).
         history: [(f32, f32); 4],
+
+        /// Pre-allocated scratch buffer for fetched samples (RT-safe).
+        fetch_scratch: Vec<(f32, f32)>,
     }
 
     impl Clone for StreamingSamplerUnit {
@@ -454,6 +461,7 @@ mod streaming {
                 shared_state: self.shared_state.clone(),
                 fractional_pos: self.fractional_pos,
                 history: self.history,
+                fetch_scratch: Vec::with_capacity(MAX_FETCH_SAMPLES),
             }
         }
     }
@@ -475,6 +483,7 @@ mod streaming {
                 shared_state: Some(shared_state),
                 fractional_pos: 0.0,
                 history: [(0.0, 0.0); 4],
+                fetch_scratch: Vec::with_capacity(MAX_FETCH_SAMPLES),
             }
         }
 
@@ -488,6 +497,7 @@ mod streaming {
                 shared_state: None,
                 fractional_pos: 0.0,
                 history: [(0.0, 0.0); 4],
+                fetch_scratch: Vec::with_capacity(MAX_FETCH_SAMPLES),
             }
         }
 
@@ -547,12 +557,15 @@ mod streaming {
                 * src_ratio;
 
             let samples_needed = (size as f64 * base_speed).ceil() as usize + 4;
-            let mut fetched_samples = Vec::with_capacity(samples_needed);
+
+            // RT-safe: clear and reuse pre-allocated scratch buffer
+            self.fetch_scratch.clear();
 
             if let Some(mut guard) = self.consumer.try_lock() {
                 for _ in 0..samples_needed {
                     if let Some((left, right)) = guard.read() {
-                        fetched_samples.push((left * self.gain, right * self.gain));
+                        self.fetch_scratch
+                            .push((left * self.gain, right * self.gain));
                     } else {
                         break;
                     }
@@ -576,8 +589,8 @@ mod streaming {
                     self.fractional_pos -= 1.0;
                     self.shift_history();
 
-                    if fetch_idx < fetched_samples.len() {
-                        self.history[3] = fetched_samples[fetch_idx];
+                    if fetch_idx < self.fetch_scratch.len() {
+                        self.history[3] = self.fetch_scratch[fetch_idx];
                         fetch_idx += 1;
                     } else {
                         if let Some(ref state) = self.shared_state {
