@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
-use crate::error::{BridgeError, LoadStage, Result};
-use crate::protocol::{
+use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
+use tutti_plugin::protocol::{
     AudioBuffer, AudioBuffer64, MidiEvent, MidiEventVec, NoteExpressionChanges, NoteExpressionType,
-    ParameterChanges, ParameterPoint, ParameterQueue, PluginMetadata, TransportInfo,
+    ParameterChanges, ParameterPoint, ParameterQueue, TransportInfo,
 };
 
 // Import tutti_midi_io types for conversion
@@ -78,8 +78,8 @@ impl Vst3Instance {
     }
 
     /// Set the sample format (f32 or f64).
-    pub fn set_sample_format(&mut self, format: crate::protocol::SampleFormat) -> Result<()> {
-        let use_f64 = matches!(format, crate::protocol::SampleFormat::Float64);
+    pub fn set_sample_format(&mut self, format: tutti_plugin::protocol::SampleFormat) -> Result<()> {
+        let use_f64 = matches!(format, tutti_plugin::protocol::SampleFormat::Float64);
         self.inner
             .set_use_f64(use_f64)
             .map_err(|e| BridgeError::LoadFailed {
@@ -329,13 +329,13 @@ impl Vst3Instance {
     /// Get list of all parameters with their metadata.
     ///
     /// For VST3, the param_id is the native ParamID which may be sparse.
-    pub fn get_parameter_list(&self) -> Vec<crate::protocol::ParameterInfo> {
+    pub fn get_parameter_list(&self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         let count = self.inner.get_parameter_count();
         let mut result = Vec::with_capacity(count as usize);
 
         for i in 0..count {
             if let Some(info) = self.inner.get_parameter_info(i) {
-                let flags = crate::protocol::ParameterFlags {
+                let flags = tutti_plugin::protocol::ParameterFlags {
                     automatable: info.can_automate(),
                     read_only: info.is_read_only(),
                     wrap: info.is_wrap(),
@@ -343,7 +343,7 @@ impl Vst3Instance {
                     hidden: info.is_hidden(),
                 };
 
-                result.push(crate::protocol::ParameterInfo {
+                result.push(tutti_plugin::protocol::ParameterInfo {
                     id: info.id,
                     name: info.title_string(),
                     unit: info.units_string(),
@@ -360,7 +360,7 @@ impl Vst3Instance {
     }
 
     /// Get info about a specific parameter by its native ParamID.
-    pub fn get_parameter_info(&self, param_id: u32) -> Option<crate::protocol::ParameterInfo> {
+    pub fn get_parameter_info(&self, param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
         // VST3 getParameterInfo takes an index, not an ID.
         // We need to iterate to find the matching ID.
         let count = self.inner.get_parameter_count();
@@ -368,7 +368,7 @@ impl Vst3Instance {
         for i in 0..count {
             if let Some(info) = self.inner.get_parameter_info(i) {
                 if info.id == param_id {
-                    let flags = crate::protocol::ParameterFlags {
+                    let flags = tutti_plugin::protocol::ParameterFlags {
                         automatable: info.can_automate(),
                         read_only: info.is_read_only(),
                         wrap: info.is_wrap(),
@@ -376,7 +376,7 @@ impl Vst3Instance {
                         hidden: info.is_hidden(),
                     };
 
-                    return Some(crate::protocol::ParameterInfo {
+                    return Some(tutti_plugin::protocol::ParameterInfo {
                         id: info.id,
                         name: info.title_string(),
                         unit: info.units_string(),
@@ -443,10 +443,6 @@ impl Vst3Instance {
         // VST3 editors don't have explicit idle
     }
 }
-
-// =============================================================================
-// MIDI Wrapper for tutti_midi_io::MidiEvent
-// =============================================================================
 
 /// Wrapper to implement vst3_host::Vst3MidiEvent for Tutti's MidiEvent.
 struct TuttiMidiWrapper<'a> {
@@ -585,10 +581,6 @@ impl vst3_host::Vst3MidiEvent for TuttiMidiWrapper<'_> {
     }
 }
 
-// =============================================================================
-// Conversion Helpers
-// =============================================================================
-
 fn convert_load_stage(stage: vst3_host::LoadStage) -> LoadStage {
     match stage {
         vst3_host::LoadStage::Scanning => LoadStage::Scanning,
@@ -627,10 +619,7 @@ fn convert_params_to_vst3(params: &ParameterChanges) -> vst3_host::ParameterChan
 fn convert_params_from_vst3(params: &vst3_host::ParameterChanges) -> ParameterChanges {
     let mut tutti_params = ParameterChanges::new();
     for queue in &params.queues {
-        let mut tutti_queue = ParameterQueue {
-            param_id: queue.param_id,
-            points: Vec::new(),
-        };
+        let mut tutti_queue = ParameterQueue::new(queue.param_id);
         for point in &queue.points {
             tutti_queue.points.push(ParameterPoint {
                 sample_offset: point.sample_offset,
@@ -818,11 +807,11 @@ impl crate::instance::PluginInstance for Vst3Instance {
         self.inner.set_parameter(id, value);
     }
 
-    fn get_parameter_list(&mut self) -> Vec<crate::protocol::ParameterInfo> {
+    fn get_parameter_list(&mut self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         Vst3Instance::get_parameter_list(self)
     }
 
-    fn get_parameter_info(&mut self, id: u32) -> Option<crate::protocol::ParameterInfo> {
+    fn get_parameter_info(&mut self, id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
         Vst3Instance::get_parameter_info(self, id)
     }
 
@@ -830,7 +819,10 @@ impl crate::instance::PluginInstance for Vst3Instance {
         self.inner.has_editor()
     }
 
-    unsafe fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> crate::error::Result<(u32, u32)> {
+    unsafe fn open_editor(
+        &mut self,
+        parent: *mut std::ffi::c_void,
+    ) -> crate::error::Result<(u32, u32)> {
         Vst3Instance::open_editor(self, parent)
     }
 

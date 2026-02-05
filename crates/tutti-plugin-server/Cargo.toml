@@ -1,0 +1,75 @@
+[package]
+name = "tutti-plugin-server"
+version = "0.0.1"
+edition = "2021"
+description = "Plugin server process for tutti-plugin - hosts VST2, VST3, CLAP plugins in isolation"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/Tutti"
+
+[[bin]]
+name = "plugin-server"
+path = "src/main.rs"
+
+[features]
+default = ["clap", "midi-io"]
+
+# VST2 support (requires VST SDK)
+vst2 = ["dep:vst"]
+
+# VST3 support
+vst3 = ["dep:vst3-host"]
+
+# CLAP support
+clap = ["dep:clap-host"]
+
+# Hardware MIDI I/O support
+midi-io = ["tutti-midi-io/midi-io"]
+
+# All plugin formats
+all = ["vst2", "vst3", "clap"]
+
+[dependencies]
+# Shared protocol types
+tutti-plugin = { path = "../tutti-plugin" }
+
+# Core types
+tutti-core = { path = "../tutti-core", features = ["midi"] }
+
+# MIDI support
+tutti-midi-io = { path = "../tutti-midi-io", features = ["midi-io"] }
+
+# Serialization for IPC
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+
+# Shared memory
+memmap2 = "0.9"
+
+# Lock-free channels and queues
+arc-swap = "1"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+
+# Stack-first vectors for MIDI events
+smallvec = { version = "1.13", features = ["serde"] }
+
+# Async runtime for IPC
+tokio = { version = "1", features = ["net", "io-util", "sync", "rt", "rt-multi-thread", "macros", "time"] }
+
+# Error handling
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# VST2 plugin loading (optional)
+vst = { version = "0.3", optional = true }
+
+# CLAP plugin hosting (optional)
+clap-host = { git = "https://github.com/PoHsuanLai/clap-host", optional = true }
+
+# VST3 plugin hosting (optional)
+vst3-host = { git = "https://github.com/PoHsuanLai/vst3-host", optional = true }
+
+libloading = "0.8"

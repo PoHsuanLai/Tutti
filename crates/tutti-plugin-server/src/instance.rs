@@ -2,11 +2,14 @@
 //!
 //! This module defines a unified interface for all plugin formats (VST2, VST3, CLAP).
 
-use crate::error::Result;
-use crate::protocol::{
+#![allow(dead_code)] // Used by server module and plugin loaders
+
+use tutti_plugin::Result;
+use tutti_plugin::protocol::{
     AudioBuffer, AudioBuffer64, MidiEvent, MidiEventVec, NoteExpressionChanges, ParameterChanges,
-    ParameterInfo, PluginMetadata, TransportInfo,
+    ParameterInfo, TransportInfo,
 };
+use tutti_plugin::PluginMetadata;
 
 /// Processing context passed to plugins.
 ///

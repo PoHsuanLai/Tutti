@@ -2,7 +2,8 @@
 //!
 //! This module handles loading and interfacing with VST2 plugins.
 
-use crate::error::LoadStage;
+use tutti_plugin::{BridgeError, LoadStage, Result, PluginMetadata};
+use tutti_plugin::protocol::{AudioBuffer, MidiEvent};
 use std::path::PathBuf;
 
 #[cfg(feature = "vst2")]
@@ -13,9 +14,6 @@ use vst::plugin::Plugin as VstPlugin;
 
 // Import MIDI types for event conversion
 use tutti_midi_io::{ChannelVoiceMsg, ControlChange};
-
-use crate::error::{BridgeError, Result};
-use crate::protocol::{AudioBuffer, MidiEvent, PluginMetadata};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -138,8 +136,8 @@ impl Vst2Instance {
         &mut self,
         buffer: &mut AudioBuffer,
         midi_events: &[MidiEvent],
-        transport: Option<&crate::protocol::TransportInfo>,
-    ) -> crate::protocol::MidiEventVec {
+        transport: Option<&tutti_plugin::protocol::TransportInfo>,
+    ) -> tutti_plugin::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
             // Update transport info if provided
@@ -164,10 +162,10 @@ impl Vst2Instance {
     /// so this converts f64 → f32, processes, then converts f32 → f64.
     pub fn process_f64(
         &mut self,
-        buffer: &mut crate::protocol::AudioBuffer64,
+        buffer: &mut tutti_plugin::protocol::AudioBuffer64,
         midi_events: &[MidiEvent],
-        transport: Option<&crate::protocol::TransportInfo>,
-    ) -> crate::protocol::MidiEventVec {
+        transport: Option<&tutti_plugin::protocol::TransportInfo>,
+    ) -> tutti_plugin::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
             // Update transport info if provided
@@ -192,7 +190,7 @@ impl Vst2Instance {
         &mut self,
         buffer: &mut AudioBuffer,
         midi_events: &[MidiEvent],
-    ) -> crate::protocol::MidiEventVec {
+    ) -> tutti_plugin::protocol::MidiEventVec {
         use vst::buffer::AudioBuffer as VstBuffer;
 
         let num_samples = buffer.num_samples;
@@ -257,9 +255,9 @@ impl Vst2Instance {
     #[cfg(feature = "vst2")]
     fn process_f64_internal(
         &mut self,
-        buffer: &mut crate::protocol::AudioBuffer64,
+        buffer: &mut tutti_plugin::protocol::AudioBuffer64,
         midi_events: &[MidiEvent],
-    ) -> crate::protocol::MidiEventVec {
+    ) -> tutti_plugin::protocol::MidiEventVec {
         use vst::buffer::AudioBuffer as VstBuffer;
 
         let num_samples = buffer.num_samples;
@@ -580,7 +578,7 @@ impl Vst2Instance {
     ///
     /// For VST2, the param_id is simply the index (0 to count-1).
     #[cfg(feature = "vst2")]
-    pub fn get_parameter_list(&mut self) -> Vec<crate::protocol::ParameterInfo> {
+    pub fn get_parameter_list(&mut self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         let count = self.instance.get_info().parameters;
         let params = self.instance.get_parameter_object();
 
@@ -589,7 +587,7 @@ impl Vst2Instance {
                 let name = params.get_parameter_name(i);
                 let value = params.get_parameter(i);
 
-                crate::protocol::ParameterInfo {
+                tutti_plugin::protocol::ParameterInfo {
                     id: i as u32,
                     name,
                     unit: String::new(), // VST2 doesn't have a standard way to get units
@@ -597,7 +595,7 @@ impl Vst2Instance {
                     max_value: 1.0,
                     default_value: value as f64, // Best we can do - current value as "default"
                     step_count: 0,
-                    flags: crate::protocol::ParameterFlags {
+                    flags: tutti_plugin::protocol::ParameterFlags {
                         automatable: true,
                         read_only: false,
                         wrap: false,
@@ -610,7 +608,7 @@ impl Vst2Instance {
     }
 
     #[cfg(not(feature = "vst2"))]
-    pub fn get_parameter_list(&mut self) -> Vec<crate::protocol::ParameterInfo> {
+    pub fn get_parameter_list(&mut self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         Vec::new()
     }
 
@@ -618,7 +616,7 @@ impl Vst2Instance {
     ///
     /// For VST2, param_id is the parameter index.
     #[cfg(feature = "vst2")]
-    pub fn get_parameter_info(&mut self, param_id: u32) -> Option<crate::protocol::ParameterInfo> {
+    pub fn get_parameter_info(&mut self, param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
         let count = self.instance.get_info().parameters;
         let index = param_id as i32;
 
@@ -630,7 +628,7 @@ impl Vst2Instance {
         let name = params.get_parameter_name(index);
         let value = params.get_parameter(index);
 
-        Some(crate::protocol::ParameterInfo {
+        Some(tutti_plugin::protocol::ParameterInfo {
             id: param_id,
             name,
             unit: String::new(),
@@ -638,7 +636,7 @@ impl Vst2Instance {
             max_value: 1.0,
             default_value: value as f64,
             step_count: 0,
-            flags: crate::protocol::ParameterFlags {
+            flags: tutti_plugin::protocol::ParameterFlags {
                 automatable: true,
                 read_only: false,
                 wrap: false,
@@ -649,7 +647,7 @@ impl Vst2Instance {
     }
 
     #[cfg(not(feature = "vst2"))]
-    pub fn get_parameter_info(&mut self, _param_id: u32) -> Option<crate::protocol::ParameterInfo> {
+    pub fn get_parameter_info(&mut self, _param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
         None
     }
 
@@ -741,7 +739,7 @@ impl Vst2Instance {
 /// Build VST2 TimeInfo from transport state.
 #[cfg(feature = "vst2")]
 fn build_vst2_time_info(
-    transport: &crate::protocol::TransportInfo,
+    transport: &tutti_plugin::protocol::TransportInfo,
     sample_rate: f64,
 ) -> vst::api::TimeInfo {
     let mut flags = 0i32;
@@ -847,21 +845,21 @@ impl crate::instance::PluginInstance for Vst2Instance {
         let midi_out = Vst2Instance::process(self, buffer, ctx.midi_events, ctx.transport);
         crate::instance::ProcessOutput {
             midi_events: midi_out,
-            param_changes: crate::protocol::ParameterChanges::new(),
-            note_expression: crate::protocol::NoteExpressionChanges::new(),
+            param_changes: tutti_plugin::protocol::ParameterChanges::new(),
+            note_expression: tutti_plugin::protocol::NoteExpressionChanges::new(),
         }
     }
 
     fn process_f64<'a>(
         &mut self,
-        buffer: &'a mut crate::protocol::AudioBuffer64<'a>,
+        buffer: &'a mut tutti_plugin::protocol::AudioBuffer64<'a>,
         ctx: &crate::instance::ProcessContext,
     ) -> crate::instance::ProcessOutput {
         let midi_out = Vst2Instance::process_f64(self, buffer, ctx.midi_events, ctx.transport);
         crate::instance::ProcessOutput {
             midi_events: midi_out,
-            param_changes: crate::protocol::ParameterChanges::new(),
-            note_expression: crate::protocol::NoteExpressionChanges::new(),
+            param_changes: tutti_plugin::protocol::ParameterChanges::new(),
+            note_expression: tutti_plugin::protocol::NoteExpressionChanges::new(),
         }
     }
 
@@ -885,11 +883,11 @@ impl crate::instance::PluginInstance for Vst2Instance {
         Vst2Instance::set_parameter(self, id as i32, value as f32);
     }
 
-    fn get_parameter_list(&mut self) -> Vec<crate::protocol::ParameterInfo> {
+    fn get_parameter_list(&mut self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         Vst2Instance::get_parameter_list(self)
     }
 
-    fn get_parameter_info(&mut self, id: u32) -> Option<crate::protocol::ParameterInfo> {
+    fn get_parameter_info(&mut self, id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
         Vst2Instance::get_parameter_info(self, id)
     }
 

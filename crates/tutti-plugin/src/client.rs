@@ -75,10 +75,6 @@ impl<T: Copy + Default> TickBuffer<T> {
     }
 }
 
-// =============================================================================
-// Plugin Client
-// =============================================================================
-
 /// Plugin client for multi-process plugin hosting.
 ///
 /// Communicates with plugin server via lock-free queues. Implements both
@@ -88,6 +84,7 @@ impl<T: Copy + Default> TickBuffer<T> {
 #[derive(Clone)]
 pub struct PluginClient {
     bridge: Option<LockFreeBridge>,
+    metadata: PluginMetadata,
     inputs: usize,
     outputs: usize,
     negotiated_format: SampleFormat,
@@ -136,7 +133,7 @@ impl PluginClient {
         let (bridge, bridge_thread) =
             Self::setup_bridge(&config, &metadata, negotiated_format, transport)?;
 
-        let client = Self::create_client(bridge, &metadata, &config, negotiated_format);
+        let client = Self::create_client(bridge, *metadata, &config, negotiated_format);
         let handle = PluginClientHandle {
             process: Some(process),
             bridge_thread: Some(bridge_thread),
@@ -148,15 +145,12 @@ impl PluginClient {
 
     /// Plugin latency in samples.
     pub fn latency_samples(&self) -> usize {
-        self.bridge
-            .as_ref()
-            .and_then(|b| b.metadata().map(|m| m.latency_samples))
-            .unwrap_or(0)
+        self.metadata.latency_samples
     }
 
     /// Plugin metadata (I/O channels, latency, format support).
-    pub fn metadata(&self) -> Option<PluginMetadata> {
-        self.bridge.as_ref().and_then(|b| b.metadata())
+    pub fn metadata(&self) -> &PluginMetadata {
+        &self.metadata
     }
 
     /// Set plugin parameter by native ID (RT-safe).
@@ -247,7 +241,7 @@ impl PluginClient {
 
     fn create_client(
         bridge: LockFreeBridge,
-        metadata: &PluginMetadata,
+        metadata: PluginMetadata,
         config: &BridgeConfig,
         format: SampleFormat,
     ) -> Self {
@@ -262,6 +256,7 @@ impl PluginClient {
 
         Self {
             bridge: Some(bridge),
+            metadata,
             inputs,
             outputs,
             negotiated_format: format,
@@ -354,7 +349,16 @@ impl PluginClient {
             return;
         }
 
-        if !bridge.process_rt_with_midi(size, &self.midi_drain_buffer) {
+        // Convert midi_drain_buffer slice to MidiEventVec
+        let midi_events: crate::protocol::MidiEventVec =
+            self.midi_drain_buffer.iter().copied().collect();
+        if !bridge.process(
+            size,
+            midi_events,
+            crate::protocol::ParameterChanges::new(),
+            crate::protocol::NoteExpressionChanges::new(),
+            crate::protocol::TransportInfo::default(),
+        ) {
             Self::fill_silence(size, self.outputs, set_output);
             return;
         }
@@ -452,12 +456,15 @@ impl PluginClient {
             return;
         }
 
-        if !self
-            .bridge
-            .as_ref()
-            .unwrap()
-            .process_rt_with_midi(size, &self.midi_drain_buffer)
-        {
+        let midi_events: crate::protocol::MidiEventVec =
+            self.midi_drain_buffer.iter().copied().collect();
+        if !self.bridge.as_ref().unwrap().process(
+            size,
+            midi_events,
+            crate::protocol::ParameterChanges::new(),
+            crate::protocol::NoteExpressionChanges::new(),
+            crate::protocol::TransportInfo::default(),
+        ) {
             self.tick_f32.fill_output_silence(size);
             return;
         }
@@ -563,12 +570,15 @@ impl PluginClient {
             return;
         }
 
-        if !self
-            .bridge
-            .as_ref()
-            .unwrap()
-            .process_rt_with_midi(size, &self.midi_drain_buffer)
-        {
+        let midi_events: crate::protocol::MidiEventVec =
+            self.midi_drain_buffer.iter().copied().collect();
+        if !self.bridge.as_ref().unwrap().process(
+            size,
+            midi_events,
+            crate::protocol::ParameterChanges::new(),
+            crate::protocol::NoteExpressionChanges::new(),
+            crate::protocol::TransportInfo::default(),
+        ) {
             self.tick_f64.fill_output_silence(size);
             return;
         }
@@ -769,11 +779,15 @@ impl AudioUnit<F64> for PluginClient {
     }
 }
 
-impl tutti_core::MidiAudioUnit for PluginClient {
-    fn queue_midi(&mut self, events: &[MidiEvent]) {
+impl PluginClient {
+    /// Queue MIDI events to be sent to the plugin server.
+    ///
+    /// Events are buffered and sent during the next audio processing call.
+    pub fn queue_midi(&mut self, events: &[MidiEvent]) {
         let prod = unsafe { &mut *self.midi_producer.get() };
         let cons = unsafe { &mut *self.midi_consumer.get() };
 
+        // Clear any stale events
         while cons.try_pop().is_some() {}
 
         for event in events {
@@ -781,11 +795,8 @@ impl tutti_core::MidiAudioUnit for PluginClient {
         }
     }
 
-    fn has_midi_output(&self) -> bool {
-        false
-    }
-
-    fn clear_midi(&mut self) {
+    /// Clear any pending MIDI events.
+    pub fn clear_midi(&mut self) {
         let cons = unsafe { &mut *self.midi_consumer.get() };
         while cons.try_pop().is_some() {}
     }

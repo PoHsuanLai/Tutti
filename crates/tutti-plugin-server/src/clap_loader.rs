@@ -3,12 +3,14 @@
 //! This module wraps `clap_host::ClapInstance` to implement the
 //! `PluginInstance` trait used by tutti-plugin's server.
 
-use crate::error::{BridgeError, LoadStage, Result};
-use crate::instance::{PluginInstance, ProcessContext, ProcessOutput};
-use crate::protocol::{
+#![allow(dead_code)] // Some functions used only by server module
+
+use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
+use tutti_plugin::protocol::{
     AudioBuffer, AudioBuffer64, NoteExpressionChanges, ParameterChanges, ParameterFlags,
-    ParameterInfo, PluginMetadata,
+    ParameterInfo,
 };
+use crate::instance::{PluginInstance, ProcessContext, ProcessOutput};
 use std::path::Path;
 
 #[cfg(feature = "clap")]
@@ -242,38 +244,34 @@ impl PluginInstance for ClapInstance {
     }
 }
 
-// =============================================================================
-// Type Conversion Helpers
-// =============================================================================
-
 #[cfg(feature = "clap")]
-fn convert_midi_event(event: &crate::protocol::MidiEvent) -> clap_host::MidiEvent {
+fn convert_midi_event(event: &tutti_plugin::protocol::MidiEvent) -> clap_host::MidiEvent {
     use tutti_midi_io::ChannelVoiceMsg;
 
     let sample_offset = event.frame_offset as u32;
     let channel = event.channel as u8;
 
-    let data = match &event.msg {
+    let data = match event.msg {
         ChannelVoiceMsg::NoteOn { note, velocity } => clap_host::MidiData::NoteOn {
-            key: *note,
-            velocity: *velocity as f64 / 127.0,
+            key: note,
+            velocity: velocity as f64 / 127.0,
         },
         ChannelVoiceMsg::NoteOff { note, velocity } => clap_host::MidiData::NoteOff {
-            key: *note,
-            velocity: *velocity as f64 / 127.0,
+            key: note,
+            velocity: velocity as f64 / 127.0,
         },
         ChannelVoiceMsg::ControlChange { control } => {
             use tutti_midi_io::ControlChange;
             match control {
                 ControlChange::CC { control, value } => clap_host::MidiData::ControlChange {
-                    controller: *control,
-                    value: *value,
+                    controller: control,
+                    value,
                 },
                 ControlChange::CCHighRes {
                     control1, value, ..
                 } => clap_host::MidiData::ControlChange {
-                    controller: *control1,
-                    value: (*value >> 7) as u8,
+                    controller: control1,
+                    value: (value >> 7) as u8,
                 },
                 _ => clap_host::MidiData::ControlChange {
                     controller: 0,
@@ -282,15 +280,15 @@ fn convert_midi_event(event: &crate::protocol::MidiEvent) -> clap_host::MidiEven
             }
         }
         ChannelVoiceMsg::ProgramChange { program } => {
-            clap_host::MidiData::ProgramChange { program: *program }
+            clap_host::MidiData::ProgramChange { program }
         }
         ChannelVoiceMsg::ChannelPressure { pressure } => clap_host::MidiData::ChannelPressure {
-            pressure: *pressure,
+            pressure,
         },
-        ChannelVoiceMsg::PitchBend { bend } => clap_host::MidiData::PitchBend { value: *bend },
+        ChannelVoiceMsg::PitchBend { bend } => clap_host::MidiData::PitchBend { value: bend },
         ChannelVoiceMsg::PolyPressure { note, pressure } => clap_host::MidiData::PolyPressure {
-            key: *note,
-            pressure: *pressure as f64 / 127.0,
+            key: note,
+            pressure: pressure as f64 / 127.0,
         },
         _ => clap_host::MidiData::NoteOff {
             key: 0,
@@ -332,17 +330,17 @@ fn convert_note_expressions(
             channel: -1,
             key: -1,
             expression_type: match expr.expression_type {
-                crate::protocol::NoteExpressionType::Volume => {
+                tutti_plugin::protocol::NoteExpressionType::Volume => {
                     clap_host::NoteExpressionType::Volume
                 }
-                crate::protocol::NoteExpressionType::Pan => clap_host::NoteExpressionType::Pan,
-                crate::protocol::NoteExpressionType::Tuning => {
+                tutti_plugin::protocol::NoteExpressionType::Pan => clap_host::NoteExpressionType::Pan,
+                tutti_plugin::protocol::NoteExpressionType::Tuning => {
                     clap_host::NoteExpressionType::Tuning
                 }
-                crate::protocol::NoteExpressionType::Vibrato => {
+                tutti_plugin::protocol::NoteExpressionType::Vibrato => {
                     clap_host::NoteExpressionType::Vibrato
                 }
-                crate::protocol::NoteExpressionType::Brightness => {
+                tutti_plugin::protocol::NoteExpressionType::Brightness => {
                     clap_host::NoteExpressionType::Brightness
                 }
             },
@@ -352,7 +350,7 @@ fn convert_note_expressions(
 }
 
 #[cfg(feature = "clap")]
-fn convert_transport(transport: &crate::protocol::TransportInfo) -> clap_host::TransportInfo {
+fn convert_transport(transport: &tutti_plugin::protocol::TransportInfo) -> clap_host::TransportInfo {
     clap_host::TransportInfo {
         playing: transport.playing,
         recording: transport.recording,
@@ -373,7 +371,7 @@ fn convert_transport(transport: &crate::protocol::TransportInfo) -> clap_host::T
 fn convert_process_output(output: clap_host::instance::ProcessOutput) -> ProcessOutput {
     use tutti_midi_io::{Channel, ChannelVoiceMsg, ControlChange};
 
-    let midi_events: crate::protocol::MidiEventVec = output
+    let midi_events: tutti_plugin::protocol::MidiEventVec = output
         .midi_events
         .iter()
         .map(|e| {
@@ -410,7 +408,7 @@ fn convert_process_output(output: clap_host::instance::ProcessOutput) -> Process
                     }
                 }
             };
-            crate::protocol::MidiEvent {
+            tutti_plugin::protocol::MidiEvent {
                 frame_offset: e.sample_offset as usize,
                 channel: Channel::from_u8(e.channel),
                 msg,
@@ -420,7 +418,7 @@ fn convert_process_output(output: clap_host::instance::ProcessOutput) -> Process
 
     let mut param_changes = ParameterChanges::new();
     for queue in output.param_changes.queues {
-        let mut tutti_queue = crate::protocol::ParameterQueue::new(queue.param_id);
+        let mut tutti_queue = tutti_plugin::protocol::ParameterQueue::new(queue.param_id);
         for point in queue.points {
             tutti_queue.add_point(point.sample_offset as i32, point.value);
         }
@@ -429,28 +427,28 @@ fn convert_process_output(output: clap_host::instance::ProcessOutput) -> Process
 
     let mut note_expression = NoteExpressionChanges::new();
     for expr in output.note_expressions {
-        note_expression.add_change(crate::protocol::NoteExpressionValue {
+        note_expression.add_change(tutti_plugin::protocol::NoteExpressionValue {
             sample_offset: expr.sample_offset as i32,
             note_id: expr.note_id,
             expression_type: match expr.expression_type {
                 clap_host::NoteExpressionType::Volume => {
-                    crate::protocol::NoteExpressionType::Volume
+                    tutti_plugin::protocol::NoteExpressionType::Volume
                 }
-                clap_host::NoteExpressionType::Pan => crate::protocol::NoteExpressionType::Pan,
+                clap_host::NoteExpressionType::Pan => tutti_plugin::protocol::NoteExpressionType::Pan,
                 clap_host::NoteExpressionType::Tuning => {
-                    crate::protocol::NoteExpressionType::Tuning
+                    tutti_plugin::protocol::NoteExpressionType::Tuning
                 }
                 clap_host::NoteExpressionType::Vibrato => {
-                    crate::protocol::NoteExpressionType::Vibrato
+                    tutti_plugin::protocol::NoteExpressionType::Vibrato
                 }
                 clap_host::NoteExpressionType::Brightness => {
-                    crate::protocol::NoteExpressionType::Brightness
+                    tutti_plugin::protocol::NoteExpressionType::Brightness
                 }
                 clap_host::NoteExpressionType::Pressure => {
-                    crate::protocol::NoteExpressionType::Volume
+                    tutti_plugin::protocol::NoteExpressionType::Volume
                 } // Map to volume
                 clap_host::NoteExpressionType::Expression => {
-                    crate::protocol::NoteExpressionType::Volume
+                    tutti_plugin::protocol::NoteExpressionType::Volume
                 } // Map to volume
             },
             value: expr.value,

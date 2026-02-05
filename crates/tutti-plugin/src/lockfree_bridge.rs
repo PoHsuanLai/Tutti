@@ -3,11 +3,10 @@
 //! Audio thread → lock-free queues → bridge thread → IPC → plugin server.
 
 use crate::error::Result;
-use crate::protocol::{BridgeMessage, HostMessage, IpcMidiEvent, MidiEvent, PluginMetadata};
+use crate::protocol::{BridgeMessage, HostMessage, IpcMidiEvent};
 use crate::shared_memory::SharedAudioBuffer;
 use crate::transport::MessageTransport;
 use crossbeam::queue::ArrayQueue;
-use smallvec::SmallVec;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -17,13 +16,8 @@ const COMMAND_QUEUE_SIZE: usize = 128;
 const RESPONSE_QUEUE_SIZE: usize = 128;
 
 #[derive(Debug)]
-pub enum BridgeCommand {
-    ProcessAudio {
-        buffer_id: u32,
-        num_samples: usize,
-        midi_events: crate::protocol::MidiEventVec,
-    },
-    ProcessAudioFull {
+enum BridgeCommand {
+    Process {
         buffer_id: u32,
         num_samples: usize,
         midi_events: crate::protocol::MidiEventVec,
@@ -35,10 +29,6 @@ pub enum BridgeCommand {
         param_id: u32,
         value: f32,
     },
-    GetParameter {
-        param_id: u32,
-        response_id: u32,
-    },
     SetSampleRate {
         rate: f64,
     },
@@ -47,24 +37,9 @@ pub enum BridgeCommand {
 }
 
 #[derive(Debug, Clone)]
-pub enum BridgeResponse {
-    AudioProcessed {
-        buffer_id: u32,
-        midi_output: crate::protocol::MidiEventVec,
-    },
-    AudioProcessedFull {
-        buffer_id: u32,
-        midi_output: crate::protocol::MidiEventVec,
-        param_output: crate::protocol::ParameterChanges,
-        note_expression_output: crate::protocol::NoteExpressionChanges,
-    },
-    ParameterValue {
-        response_id: u32,
-        value: Option<f32>,
-    },
-    Error {
-        message: String,
-    },
+enum BridgeResponse {
+    AudioProcessed,
+    Error,
 }
 
 /// Lock-free bridge for RT-safe plugin communication.
@@ -76,12 +51,7 @@ pub struct LockFreeBridge {
     response_queue: Arc<ArrayQueue<BridgeResponse>>,
     audio_buffer: Arc<SharedAudioBuffer>,
     buffer_id_counter: Arc<AtomicU32>,
-    #[allow(dead_code)]
-    response_id_counter: Arc<AtomicU32>,
     running: Arc<AtomicBool>,
-    metadata: Arc<parking_lot::Mutex<Option<PluginMetadata>>>,
-    num_channels: usize,
-    max_samples: usize,
 }
 
 /// Bridge thread handle. Drops gracefully when dropped.
@@ -100,24 +70,14 @@ impl LockFreeBridge {
         let response_queue = Arc::new(ArrayQueue::new(RESPONSE_QUEUE_SIZE));
         let running = Arc::new(AtomicBool::new(true));
 
-        // Cache buffer dimensions
-        let num_channels = audio_buffer.channels();
-        let max_samples = audio_buffer.samples();
-
-        // Create the bridge struct
         let bridge = Self {
             command_queue: Arc::clone(&command_queue),
             response_queue: Arc::clone(&response_queue),
             audio_buffer,
             buffer_id_counter: Arc::new(AtomicU32::new(0)),
-            response_id_counter: Arc::new(AtomicU32::new(0)),
             running: Arc::clone(&running),
-            metadata: Arc::new(parking_lot::Mutex::new(None)),
-            num_channels,
-            max_samples,
         };
 
-        // Spawn bridge thread
         let bridge_thread =
             Self::spawn_bridge_thread(command_queue, response_queue, running, transport);
 
@@ -167,13 +127,8 @@ impl LockFreeBridge {
     ) {
         while running.load(Ordering::Relaxed) {
             if let Some(command) = command_queue.pop() {
-                match Self::handle_command(command, transport, &response_queue).await {
-                    Ok(()) => {}
-                    Err(e) => {
-                        let _ = response_queue.push(BridgeResponse::Error {
-                            message: e.to_string(),
-                        });
-                    }
+                if Self::handle_command(command, transport, &response_queue).await.is_err() {
+                    let _ = response_queue.push(BridgeResponse::Error);
                 }
             } else {
                 tokio::time::sleep(Duration::from_micros(100)).await;
@@ -187,79 +142,7 @@ impl LockFreeBridge {
         response_queue: &Arc<ArrayQueue<BridgeResponse>>,
     ) -> Result<()> {
         match command {
-            BridgeCommand::ProcessAudio {
-                buffer_id,
-                num_samples,
-                midi_events,
-            } => {
-                let message = if midi_events.is_empty() {
-                    HostMessage::ProcessAudio {
-                        buffer_id,
-                        num_samples,
-                    }
-                } else {
-                    HostMessage::ProcessAudioMidi {
-                        buffer_id,
-                        num_samples,
-                        midi_events: midi_events.iter().map(IpcMidiEvent::from).collect(),
-                    }
-                };
-
-                transport.send_host_message(&message).await?;
-                let response = transport.recv_bridge_message().await?;
-
-                match response {
-                    BridgeMessage::AudioProcessed { .. } => {
-                        let _ = response_queue.push(BridgeResponse::AudioProcessed {
-                            buffer_id,
-                            midi_output: SmallVec::new(),
-                        });
-                    }
-                    BridgeMessage::AudioProcessedMidi { midi_output, .. } => {
-                        let _ = response_queue.push(BridgeResponse::AudioProcessed {
-                            buffer_id,
-                            midi_output: midi_output
-                                .iter()
-                                .filter_map(|e| e.to_midi_event())
-                                .collect(),
-                        });
-                    }
-                    BridgeMessage::Error { message } => {
-                        let _ = response_queue.push(BridgeResponse::Error { message });
-                    }
-                    _ => {}
-                }
-            }
-
-            BridgeCommand::SetParameter { param_id, value } => {
-                transport
-                    .send_host_message(&HostMessage::SetParameter { param_id, value })
-                    .await?;
-            }
-
-            BridgeCommand::GetParameter {
-                param_id,
-                response_id,
-            } => {
-                transport
-                    .send_host_message(&HostMessage::GetParameter { param_id })
-                    .await?;
-
-                let response = transport.recv_bridge_message().await?;
-
-                if let BridgeMessage::ParameterValue { value } = response {
-                    let _ =
-                        response_queue.push(BridgeResponse::ParameterValue { response_id, value });
-                }
-            }
-
-            BridgeCommand::SetSampleRate { rate } => {
-                transport
-                    .send_host_message(&HostMessage::SetSampleRate { rate })
-                    .await?;
-            }
-
-            BridgeCommand::ProcessAudioFull {
+            BridgeCommand::Process {
                 buffer_id,
                 num_samples,
                 midi_events,
@@ -280,42 +163,28 @@ impl LockFreeBridge {
                 let response = transport.recv_bridge_message().await?;
 
                 match response {
-                    BridgeMessage::AudioProcessedFull {
-                        midi_output,
-                        param_output,
-                        note_expression_output,
-                        ..
-                    } => {
-                        let _ = response_queue.push(BridgeResponse::AudioProcessedFull {
-                            buffer_id,
-                            midi_output: midi_output
-                                .iter()
-                                .filter_map(|e| e.to_midi_event())
-                                .collect(),
-                            param_output,
-                            note_expression_output,
-                        });
+                    BridgeMessage::AudioProcessedFull { .. }
+                    | BridgeMessage::AudioProcessedMidi { .. }
+                    | BridgeMessage::AudioProcessed { .. } => {
+                        let _ = response_queue.push(BridgeResponse::AudioProcessed);
                     }
-                    BridgeMessage::AudioProcessedMidi { midi_output, .. } => {
-                        let _ = response_queue.push(BridgeResponse::AudioProcessed {
-                            buffer_id,
-                            midi_output: midi_output
-                                .iter()
-                                .filter_map(|e| e.to_midi_event())
-                                .collect(),
-                        });
-                    }
-                    BridgeMessage::AudioProcessed { .. } => {
-                        let _ = response_queue.push(BridgeResponse::AudioProcessed {
-                            buffer_id,
-                            midi_output: SmallVec::new(),
-                        });
-                    }
-                    BridgeMessage::Error { message } => {
-                        let _ = response_queue.push(BridgeResponse::Error { message });
+                    BridgeMessage::Error { .. } => {
+                        let _ = response_queue.push(BridgeResponse::Error);
                     }
                     _ => {}
                 }
+            }
+
+            BridgeCommand::SetParameter { param_id, value } => {
+                transport
+                    .send_host_message(&HostMessage::SetParameter { param_id, value })
+                    .await?;
+            }
+
+            BridgeCommand::SetSampleRate { rate } => {
+                transport
+                    .send_host_message(&HostMessage::SetSampleRate { rate })
+                    .await?;
             }
 
             BridgeCommand::Reset => {
@@ -328,117 +197,6 @@ impl LockFreeBridge {
         }
 
         Ok(())
-    }
-
-    /// Process audio (RT-safe, lock-free). Never blocks or allocates.
-    pub fn process_audio_rt(
-        &self,
-        inputs: &[&[f32]],
-        outputs: &mut [&mut [f32]],
-        midi_events: crate::protocol::MidiEventVec,
-    ) -> bool {
-        if inputs.is_empty() || inputs[0].is_empty() {
-            return false;
-        }
-        let num_samples = inputs[0].len();
-
-        for (ch, input) in inputs.iter().enumerate() {
-            if self.audio_buffer.write_channel(ch, input).is_err() {
-                return false;
-            }
-        }
-
-        let buffer_id = self.buffer_id_counter.fetch_add(1, Ordering::Relaxed);
-
-        if self
-            .command_queue
-            .push(BridgeCommand::ProcessAudio {
-                buffer_id,
-                num_samples,
-                midi_events,
-            })
-            .is_err()
-        {
-            return false;
-        }
-
-        if let Some(response) = self.response_queue.pop() {
-            match response {
-                BridgeResponse::AudioProcessed {
-                    buffer_id: resp_id, ..
-                } => {
-                    if resp_id == buffer_id {
-                        for (ch, output) in outputs.iter_mut().enumerate() {
-                            if let Ok(data) = self.audio_buffer.read_channel(ch) {
-                                let copy_len = data.len().min(output.len());
-                                output[..copy_len].copy_from_slice(&data[..copy_len]);
-                            }
-                        }
-                        return true;
-                    }
-                }
-                BridgeResponse::Error { message: _ } => {
-                    return false;
-                }
-                _ => {}
-            }
-        }
-
-        false
-    }
-
-    /// Process audio with f64 buffers (RT-safe, lock-free).
-    pub fn process_audio_rt_f64(
-        &self,
-        inputs: &[&[f64]],
-        outputs: &mut [&mut [f64]],
-        midi_events: crate::protocol::MidiEventVec,
-    ) -> bool {
-        if inputs.is_empty() || inputs[0].is_empty() {
-            return false;
-        }
-        let num_samples = inputs[0].len();
-
-        for (ch, input) in inputs.iter().enumerate() {
-            if self.audio_buffer.write_channel_f64(ch, input).is_err() {
-                return false;
-            }
-        }
-
-        let buffer_id = self.buffer_id_counter.fetch_add(1, Ordering::Relaxed);
-
-        if self
-            .command_queue
-            .push(BridgeCommand::ProcessAudio {
-                buffer_id,
-                num_samples,
-                midi_events,
-            })
-            .is_err()
-        {
-            return false;
-        }
-
-        if let Some(response) = self.response_queue.pop() {
-            match response {
-                BridgeResponse::AudioProcessed {
-                    buffer_id: resp_id, ..
-                } => {
-                    if resp_id == buffer_id {
-                        for (ch, output) in outputs.iter_mut().enumerate() {
-                            if let Ok(data) = self.audio_buffer.read_channel_f64(ch) {
-                                let copy_len = data.len().min(output.len());
-                                output[..copy_len].copy_from_slice(&data[..copy_len]);
-                            }
-                        }
-                        return true;
-                    }
-                }
-                BridgeResponse::Error { message: _ } => return false,
-                _ => {}
-            }
-        }
-        false
     }
 
     pub fn set_parameter_rt(&self, param_id: u32, value: f32) -> bool {
@@ -461,24 +219,12 @@ impl LockFreeBridge {
         self.audio_buffer.write_channel(channel, data)
     }
 
-    pub fn read_output_channel(&self, channel: usize) -> Result<Vec<f32>> {
-        self.audio_buffer.read_channel(channel)
-    }
-
     pub fn read_output_channel_into(&self, channel: usize, output: &mut [f32]) -> Result<usize> {
         self.audio_buffer.read_channel_into(channel, output)
     }
 
-    pub fn sample_format(&self) -> crate::protocol::SampleFormat {
-        self.audio_buffer.sample_format()
-    }
-
     pub fn write_input_channel_f64(&self, channel: usize, data: &[f64]) -> Result<()> {
         self.audio_buffer.write_channel_f64(channel, data)
-    }
-
-    pub fn read_output_channel_f64(&self, channel: usize) -> Result<Vec<f64>> {
-        self.audio_buffer.read_channel_f64(channel)
     }
 
     pub fn read_output_channel_into_f64(
@@ -489,59 +235,28 @@ impl LockFreeBridge {
         self.audio_buffer.read_channel_into_f64(channel, output)
     }
 
-    pub fn channels(&self) -> usize {
-        self.num_channels
-    }
-
-    pub fn max_samples(&self) -> usize {
-        self.max_samples
-    }
-
-    pub fn process_rt(&self, num_samples: usize) -> bool {
-        self.process_rt_with_midi(num_samples, &[])
-    }
-
-    pub fn process_rt_with_midi(&self, num_samples: usize, midi_events: &[MidiEvent]) -> bool {
-        let buffer_id = self.buffer_id_counter.fetch_add(1, Ordering::Relaxed);
-
-        if self
-            .command_queue
-            .push(BridgeCommand::ProcessAudio {
-                buffer_id,
-                num_samples,
-                midi_events: midi_events.iter().copied().collect(),
-            })
-            .is_err()
-        {
-            return false;
-        }
-
-        if let Some(response) = self.response_queue.pop() {
-            matches!(response, BridgeResponse::AudioProcessed { .. })
-        } else {
-            false
-        }
-    }
-
-    pub fn process_rt_with_automation(
+    /// Process audio (RT-safe, lock-free).
+    ///
+    /// Call `write_input_channel` before this, and `read_output_channel_into` after.
+    pub fn process(
         &self,
         num_samples: usize,
-        midi_events: &[MidiEvent],
-        param_changes: &crate::protocol::ParameterChanges,
-        note_expression: &crate::protocol::NoteExpressionChanges,
-        transport: &crate::protocol::TransportInfo,
+        midi_events: crate::protocol::MidiEventVec,
+        param_changes: crate::protocol::ParameterChanges,
+        note_expression: crate::protocol::NoteExpressionChanges,
+        transport: crate::protocol::TransportInfo,
     ) -> bool {
         let buffer_id = self.buffer_id_counter.fetch_add(1, Ordering::Relaxed);
 
         if self
             .command_queue
-            .push(BridgeCommand::ProcessAudioFull {
+            .push(BridgeCommand::Process {
                 buffer_id,
                 num_samples,
-                midi_events: midi_events.iter().copied().collect(),
-                param_changes: param_changes.clone(),
-                note_expression: note_expression.clone(),
-                transport: *transport,
+                midi_events,
+                param_changes,
+                note_expression,
+                transport,
             })
             .is_err()
         {
@@ -549,21 +264,10 @@ impl LockFreeBridge {
         }
 
         if let Some(response) = self.response_queue.pop() {
-            matches!(
-                response,
-                BridgeResponse::AudioProcessed { .. } | BridgeResponse::AudioProcessedFull { .. }
-            )
+            matches!(response, BridgeResponse::AudioProcessed)
         } else {
             false
         }
-    }
-
-    pub fn metadata(&self) -> Option<PluginMetadata> {
-        self.metadata.lock().clone()
-    }
-
-    pub fn set_metadata(&self, metadata: PluginMetadata) {
-        *self.metadata.lock() = Some(metadata);
     }
 }
 
@@ -581,56 +285,5 @@ impl BridgeThreadHandle {
 impl Drop for BridgeThreadHandle {
     fn drop(&mut self) {
         self.shutdown();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_command_queue_capacity() {
-        let queue = ArrayQueue::<BridgeCommand>::new(COMMAND_QUEUE_SIZE);
-
-        // Should be able to push up to capacity
-        for i in 0..COMMAND_QUEUE_SIZE {
-            assert!(queue
-                .push(BridgeCommand::SetParameter {
-                    param_id: i as u32,
-                    value: 0.0
-                })
-                .is_ok());
-        }
-
-        // Next push should fail
-        assert!(queue
-            .push(BridgeCommand::SetParameter {
-                param_id: 0,
-                value: 0.0
-            })
-            .is_err());
-    }
-
-    #[test]
-    fn test_response_queue_capacity() {
-        let queue = ArrayQueue::<BridgeResponse>::new(RESPONSE_QUEUE_SIZE);
-
-        // Should be able to push up to capacity
-        for i in 0..RESPONSE_QUEUE_SIZE {
-            assert!(queue
-                .push(BridgeResponse::AudioProcessed {
-                    buffer_id: i as u32,
-                    midi_output: SmallVec::new(),
-                })
-                .is_ok());
-        }
-
-        // Next push should fail
-        assert!(queue
-            .push(BridgeResponse::AudioProcessed {
-                buffer_id: 0,
-                midi_output: SmallVec::new(),
-            })
-            .is_err());
     }
 }

@@ -3,7 +3,7 @@
 //! This binary is spawned by the main process to host plugins in isolation.
 
 use std::env;
-use tutti_plugin::{BridgeConfig, PluginServer, Result};
+use tutti_plugin_server::{BridgeConfig, PluginServer, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
 
     tracing::info!("Plugin bridge starting...");
 
-    // Parse config from args (TODO: better CLI parsing)
+    // Parse config from args
     let socket_path = env::args()
         .nth(1)
         .expect("Socket path required as first argument");

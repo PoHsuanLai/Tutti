@@ -2,36 +2,18 @@
 name = "tutti-plugin"
 version = "0.0.1"
 edition = "2021"
-description = "Multi-process plugin hosting for Tutti - VST2, VST3, CLAP with crash isolation"
+description = "Multi-process plugin hosting client for Tutti - loads VST2, VST3, CLAP plugins in isolated processes"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/PoHsuanLai/Tutti"
 
-# Bridge server binary (separate process)
-[[bin]]
-name = "plugin-server"
-path = "bin/plugin-bridge.rs"
-
 [features]
-# Default: Enable CLAP and hardware MIDI I/O
-default = ["clap", "midi-io"]
-
-# VST2 support (requires VST SDK)
-vst2 = ["dep:vst"]
-
-# VST3 support (uses vst3-host crate)
-vst3 = ["dep:vst3-host"]
-
-# CLAP support
-clap = ["dep:clap-host"]
+default = ["midi-io"]
 
 # Hardware MIDI I/O support
 midi-io = ["tutti-midi-io/midi-io"]
 
-# All plugin formats
-all = ["vst2", "vst3", "clap"]
-
 [dependencies]
-# Core types (for MidiAudioUnit trait)
+# Core types (for AudioUnit trait)
 tutti-core = { path = "../tutti-core", features = ["midi"] }
 
 # MIDI support
@@ -63,17 +45,6 @@ thiserror = "2"
 # Logging
 tracing = "0.1"
 
-# VST2 plugin loading (optional)
-vst = { version = "0.3", optional = true }
-
-# CLAP plugin hosting (optional)
-clap-host = { git = "https://github.com/PoHsuanLai/clap-host", optional = true }
-
-# VST3 plugin hosting (optional)
-vst3-host = { git = "https://github.com/PoHsuanLai/vst3-host", optional = true }
-
-libloading = "0.8"
-
 # Platform-specific (shared memory)
 [target.'cfg(unix)'.dependencies]
 
@@ -86,9 +57,4 @@ windows = { version = "0.52", features = [
 
 [dev-dependencies]
 tempfile = "3"
-criterion = { version = "0.5", features = ["html_reports"] }
 serde_json = "1"
-
-# Only needed for the binary
-[target.'cfg(not(target_env = "test"))'.dependencies]
-tracing-subscriber = "0.3"

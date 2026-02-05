@@ -1,15 +1,13 @@
 //! Plugin Registration for NodeRegistry
 //!
-//! Provides registration functions for VST2, VST3, and CLAP plugins
-//! to be used with tutti's NodeRegistry system.
+//! Provides registration functions for plugin paths to be used with tutti's NodeRegistry system.
 
 use crate::client::PluginClient;
 use crate::error::{BridgeError, LoadStage};
 use crate::protocol::BridgeConfig;
 use std::path::Path;
-#[cfg(any(feature = "vst2", feature = "vst3", feature = "clap"))]
 use std::path::PathBuf;
-use tutti_core::{get_param_or, NodeRegistry, NodeRegistryError};
+use tutti_core::{NodeRegistry, NodeRegistryError, Params};
 
 // Allow BridgeError to convert to NodeRegistryError
 impl From<BridgeError> for NodeRegistryError {
@@ -19,6 +17,9 @@ impl From<BridgeError> for NodeRegistryError {
 }
 
 /// Register a single plugin by path.
+///
+/// The plugin server process (`tutti-plugin-server`) must be available in PATH
+/// or the same directory as the executable.
 ///
 /// # Supported Parameters
 ///
@@ -35,8 +36,7 @@ impl From<BridgeError> for NodeRegistryError {
 /// // Create instance with custom parameters:
 /// let reverb = registry.create("reverb", &params! {
 ///     "sample_rate" => "48000.0",
-///     "param_0" => "0.75",  // Set first parameter to 0.75
-///     "param_1" => "0.5",   // Set second parameter to 0.5
+///     "param_0" => "0.75",
 /// })?;
 /// ```
 pub fn register_plugin<P: AsRef<Path>>(
@@ -50,8 +50,9 @@ pub fn register_plugin<P: AsRef<Path>>(
     let runtime = runtime.clone();
 
     registry.register(plugin_name, move |params| {
+        let p = Params::new(params);
         // Get sample rate from params (required for plugin loading)
-        let sample_rate: f64 = get_param_or(params, "sample_rate", 44100.0);
+        let sample_rate: f64 = p.get_or("sample_rate", 44100.0);
 
         // Load plugin using runtime.block_on
         let (client, _handle) = runtime.block_on(PluginClient::load(
@@ -72,26 +73,19 @@ pub fn register_plugin<P: AsRef<Path>>(
             }
         }
 
-        // Note: Preset/state loading requires async request-response which is not
-        // supported in the current lock-free bridge architecture. To support presets,
-        // we would need to either:
-        // 1. Add a separate MessageTransport handle for non-RT operations
-        // 2. Load state during the async `PluginClient::load()` before returning
-        // For now, use "param_<id>" => value to set individual parameters.
-
         Ok(Box::new(client))
     });
 
     Ok(())
 }
 
-/// Register all plugins in a directory
+/// Register all plugins in a directory.
 ///
 /// Scans the directory for .vst, .vst3, and .clap files and registers them.
 ///
 /// # Example
 /// ```ignore
-/// register_plugin_directory(&registry, "/Library/Audio/Plug-Ins/VST3")?;
+/// register_plugin_directory(&registry, runtime.handle(), "/Library/Audio/Plug-Ins/VST3")?;
 /// ```
 pub fn register_plugin_directory<P: AsRef<Path>>(
     registry: &NodeRegistry,
@@ -141,104 +135,27 @@ pub fn register_plugin_directory<P: AsRef<Path>>(
     Ok(registered)
 }
 
-/// Register VST2 plugins from standard system paths
+/// Register all system plugins (VST2, VST3, CLAP).
 ///
-/// Scans platform-specific VST2 plugin directories.
-#[cfg(feature = "vst2")]
-pub fn register_system_vst2_plugins(
-    registry: &NodeRegistry,
-    runtime: &tokio::runtime::Handle,
-) -> Result<Vec<String>, BridgeError> {
-    let mut registered = Vec::new();
-
-    for path in get_vst2_search_paths() {
-        if path.exists() {
-            match register_plugin_directory(registry, runtime, &path) {
-                Ok(mut plugins) => registered.append(&mut plugins),
-                Err(e) => tracing::warn!("Failed to scan {}: {}", path.display(), e),
-            }
-        }
-    }
-
-    Ok(registered)
-}
-
-/// Register VST3 plugins from standard system paths
-///
-/// Scans platform-specific VST3 plugin directories.
-#[cfg(feature = "vst3")]
-pub fn register_system_vst3_plugins(
-    registry: &NodeRegistry,
-    runtime: &tokio::runtime::Handle,
-) -> Result<Vec<String>, BridgeError> {
-    let mut registered = Vec::new();
-
-    for path in get_vst3_search_paths() {
-        if path.exists() {
-            match register_plugin_directory(registry, runtime, &path) {
-                Ok(mut plugins) => registered.append(&mut plugins),
-                Err(e) => tracing::warn!("Failed to scan {}: {}", path.display(), e),
-            }
-        }
-    }
-
-    Ok(registered)
-}
-
-/// Register CLAP plugins from standard system paths
-///
-/// Scans platform-specific CLAP plugin directories.
-#[cfg(feature = "clap")]
-pub fn register_system_clap_plugins(
-    registry: &NodeRegistry,
-    runtime: &tokio::runtime::Handle,
-) -> Result<Vec<String>, BridgeError> {
-    let mut registered = Vec::new();
-
-    for path in get_clap_search_paths() {
-        if path.exists() {
-            match register_plugin_directory(registry, runtime, &path) {
-                Ok(mut plugins) => registered.append(&mut plugins),
-                Err(e) => tracing::warn!("Failed to scan {}: {}", path.display(), e),
-            }
-        }
-    }
-
-    Ok(registered)
-}
-
-/// Register all system plugins (VST2, VST3, CLAP)
-///
-/// Convenience function that scans all standard plugin directories.
-#[allow(unused_variables, unused_mut)]
+/// Scans all standard plugin directories for the current platform.
 pub fn register_all_system_plugins(
     registry: &NodeRegistry,
     runtime: &tokio::runtime::Handle,
 ) -> Result<Vec<String>, BridgeError> {
     let mut registered = Vec::new();
 
-    #[cfg(feature = "vst2")]
-    {
-        registered.extend(register_system_vst2_plugins(registry, runtime)?);
-    }
-
-    #[cfg(feature = "vst3")]
-    {
-        registered.extend(register_system_vst3_plugins(registry, runtime)?);
-    }
-
-    #[cfg(feature = "clap")]
-    {
-        registered.extend(register_system_clap_plugins(registry, runtime)?);
+    for path in get_all_search_paths() {
+        if path.exists() {
+            match register_plugin_directory(registry, runtime, &path) {
+                Ok(mut plugins) => registered.append(&mut plugins),
+                Err(e) => tracing::warn!("Failed to scan {}: {}", path.display(), e),
+            }
+        }
     }
 
     tracing::info!("Registered {} plugins total", registered.len());
     Ok(registered)
 }
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
 
 /// Check if a path is a plugin file
 fn is_plugin_file(path: &Path) -> bool {
@@ -249,112 +166,65 @@ fn is_plugin_file(path: &Path) -> bool {
     }
 }
 
-// NOTE: Parameter setting removed - will be implemented when async registration is added
+/// Get all plugin search paths for the current platform
+fn get_all_search_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    let home = std::env::var("HOME").unwrap_or_default();
 
-/// Get VST2 search paths for the current platform
-#[cfg(feature = "vst2")]
-fn get_vst2_search_paths() -> Vec<PathBuf> {
     #[cfg(target_os = "macos")]
     {
-        vec![
-            PathBuf::from("/Library/Audio/Plug-Ins/VST"),
-            PathBuf::from(format!(
-                "{}/Library/Audio/Plug-Ins/VST",
-                std::env::var("HOME").unwrap_or_default()
-            )),
-        ]
+        // VST2
+        paths.push(PathBuf::from("/Library/Audio/Plug-Ins/VST"));
+        paths.push(PathBuf::from(format!("{}/Library/Audio/Plug-Ins/VST", home)));
+        // VST3
+        paths.push(PathBuf::from("/Library/Audio/Plug-Ins/VST3"));
+        paths.push(PathBuf::from(format!(
+            "{}/Library/Audio/Plug-Ins/VST3",
+            home
+        )));
+        // CLAP
+        paths.push(PathBuf::from("/Library/Audio/Plug-Ins/CLAP"));
+        paths.push(PathBuf::from(format!(
+            "{}/Library/Audio/Plug-Ins/CLAP",
+            home
+        )));
     }
 
     #[cfg(target_os = "windows")]
     {
-        vec![
-            PathBuf::from("C:\\Program Files\\VstPlugins"),
-            PathBuf::from("C:\\Program Files\\Common Files\\VST2"),
-            PathBuf::from("C:\\Program Files (x86)\\VstPlugins"),
-        ]
+        // VST2
+        paths.push(PathBuf::from("C:\\Program Files\\VstPlugins"));
+        paths.push(PathBuf::from("C:\\Program Files\\Common Files\\VST2"));
+        paths.push(PathBuf::from("C:\\Program Files (x86)\\VstPlugins"));
+        // VST3
+        paths.push(PathBuf::from("C:\\Program Files\\Common Files\\VST3"));
+        paths.push(PathBuf::from(
+            "C:\\Program Files (x86)\\Common Files\\VST3",
+        ));
+        // CLAP
+        paths.push(PathBuf::from("C:\\Program Files\\Common Files\\CLAP"));
+        paths.push(PathBuf::from(
+            "C:\\Program Files (x86)\\Common Files\\CLAP",
+        ));
     }
 
     #[cfg(target_os = "linux")]
     {
-        vec![
-            PathBuf::from("/usr/lib/vst"),
-            PathBuf::from("/usr/local/lib/vst"),
-            PathBuf::from(format!(
-                "{}/.vst",
-                std::env::var("HOME").unwrap_or_default()
-            )),
-        ]
-    }
-}
-
-/// Get VST3 search paths for the current platform
-#[cfg(feature = "vst3")]
-fn get_vst3_search_paths() -> Vec<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        vec![
-            PathBuf::from("/Library/Audio/Plug-Ins/VST3"),
-            PathBuf::from(format!(
-                "{}/Library/Audio/Plug-Ins/VST3",
-                std::env::var("HOME").unwrap_or_default()
-            )),
-        ]
+        // VST2
+        paths.push(PathBuf::from("/usr/lib/vst"));
+        paths.push(PathBuf::from("/usr/local/lib/vst"));
+        paths.push(PathBuf::from(format!("{}/.vst", home)));
+        // VST3
+        paths.push(PathBuf::from("/usr/lib/vst3"));
+        paths.push(PathBuf::from("/usr/local/lib/vst3"));
+        paths.push(PathBuf::from(format!("{}/.vst3", home)));
+        // CLAP
+        paths.push(PathBuf::from("/usr/lib/clap"));
+        paths.push(PathBuf::from("/usr/local/lib/clap"));
+        paths.push(PathBuf::from(format!("{}/.clap", home)));
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        vec![
-            PathBuf::from("C:\\Program Files\\Common Files\\VST3"),
-            PathBuf::from("C:\\Program Files (x86)\\Common Files\\VST3"),
-        ]
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        vec![
-            PathBuf::from("/usr/lib/vst3"),
-            PathBuf::from("/usr/local/lib/vst3"),
-            PathBuf::from(format!(
-                "{}/.vst3",
-                std::env::var("HOME").unwrap_or_default()
-            )),
-        ]
-    }
-}
-
-/// Get CLAP search paths for the current platform
-#[cfg(feature = "clap")]
-fn get_clap_search_paths() -> Vec<PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        vec![
-            PathBuf::from("/Library/Audio/Plug-Ins/CLAP"),
-            PathBuf::from(format!(
-                "{}/Library/Audio/Plug-Ins/CLAP",
-                std::env::var("HOME").unwrap_or_default()
-            )),
-        ]
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        vec![
-            PathBuf::from("C:\\Program Files\\Common Files\\CLAP"),
-            PathBuf::from("C:\\Program Files (x86)\\Common Files\\CLAP"),
-        ]
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        vec![
-            PathBuf::from("/usr/lib/clap"),
-            PathBuf::from("/usr/local/lib/clap"),
-            PathBuf::from(format!(
-                "{}/.clap",
-                std::env::var("HOME").unwrap_or_default()
-            )),
-        ]
-    }
+    paths
 }
 
 #[cfg(test)]

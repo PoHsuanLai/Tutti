@@ -1,6 +1,6 @@
-//! IPC transport layer
+//! IPC transport layer (client-side)
 //!
-//! Handles message passing between host and bridge processes via Unix sockets
+//! Handles message passing from host to bridge process via Unix sockets
 //! or Windows named pipes.
 
 use crate::error::Result;
@@ -9,109 +9,62 @@ use crate::protocol::{BridgeMessage, HostMessage};
 #[cfg(unix)]
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixListener, UnixStream},
+    net::UnixStream,
 };
 
 #[cfg(windows)]
-use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeServer, ServerOptions};
+use tokio::net::windows::named_pipe::ClientOptions;
 
-/// Message transport for IPC
-pub enum MessageTransport {
+/// Message transport for IPC (client-side only)
+pub struct MessageTransport {
     #[cfg(unix)]
-    Unix(UnixStream),
+    stream: UnixStream,
     #[cfg(windows)]
-    WindowsClient(tokio::net::windows::named_pipe::NamedPipeClient),
-    #[cfg(windows)]
-    WindowsServer(NamedPipeServer),
+    pipe: tokio::net::windows::named_pipe::NamedPipeClient,
 }
 
 impl MessageTransport {
-    /// Create transport from existing Unix stream
-    #[cfg(unix)]
-    pub fn new(stream: UnixStream) -> Self {
-        Self::Unix(stream)
-    }
-
-    /// Create transport from existing Windows client pipe
-    #[cfg(windows)]
-    pub fn from_client(pipe: tokio::net::windows::named_pipe::NamedPipeClient) -> Self {
-        Self::WindowsClient(pipe)
-    }
-
-    /// Create transport from existing Windows server pipe
-    #[cfg(windows)]
-    pub fn from_server(pipe: NamedPipeServer) -> Self {
-        Self::WindowsServer(pipe)
-    }
-
     /// Connect to socket path (Unix) or named pipe (Windows)
     #[cfg(unix)]
     pub async fn connect(socket_path: &std::path::Path) -> Result<Self> {
         let stream = UnixStream::connect(socket_path).await?;
-        Ok(Self::Unix(stream))
+        Ok(Self { stream })
     }
 
-    /// Connect to named pipe (Windows client)
     #[cfg(windows)]
     pub async fn connect(pipe_name: &std::path::Path) -> Result<Self> {
-        let client = ClientOptions::new().open(pipe_name)?;
-        Ok(Self::WindowsClient(client))
+        let pipe = ClientOptions::new().open(pipe_name)?;
+        Ok(Self { pipe })
     }
 
-    /// Get mutable reference to the underlying I/O stream (Unix only)
-    #[cfg(unix)]
-    fn stream_mut(&mut self) -> &mut UnixStream {
-        match self {
-            Self::Unix(s) => s,
-        }
-    }
-
-    /// Get mutable reference for reading (Unix only)
-    #[cfg(unix)]
-    fn read_stream_mut(&mut self) -> &mut UnixStream {
-        match self {
-            Self::Unix(s) => s,
-        }
-    }
-
-    /// Send a host message
+    /// Send a host message to the server
     pub async fn send_host_message(&mut self, msg: &HostMessage) -> Result<()> {
         let data = bincode::serialize(msg)?;
         let len = data.len() as u32;
 
         #[cfg(unix)]
         {
-            let stream = self.stream_mut();
-            stream.write_u32(len).await?;
-            stream.write_all(&data).await?;
+            self.stream.write_u32(len).await?;
+            self.stream.write_all(&data).await?;
         }
 
         #[cfg(windows)]
         {
             use tokio::io::AsyncWriteExt;
-            match self {
-                Self::WindowsClient(c) => {
-                    c.write_u32(len).await?;
-                    c.write_all(&data).await?;
-                }
-                Self::WindowsServer(s) => {
-                    s.write_u32(len).await?;
-                    s.write_all(&data).await?;
-                }
-            }
+            self.pipe.write_u32(len).await?;
+            self.pipe.write_all(&data).await?;
         }
 
         Ok(())
     }
 
-    /// Receive a bridge message
+    /// Receive a bridge message from the server
     pub async fn recv_bridge_message(&mut self) -> Result<BridgeMessage> {
         #[cfg(unix)]
         {
-            let stream = self.read_stream_mut();
-            let len = stream.read_u32().await? as usize;
+            let len = self.stream.read_u32().await? as usize;
             let mut data = vec![0u8; len];
-            stream.read_exact(&mut data).await?;
+            self.stream.read_exact(&mut data).await?;
             let msg = bincode::deserialize(&data)?;
             Ok(msg)
         }
@@ -119,143 +72,11 @@ impl MessageTransport {
         #[cfg(windows)]
         {
             use tokio::io::AsyncReadExt;
-            let data = match self {
-                Self::WindowsClient(c) => {
-                    let len = c.read_u32().await? as usize;
-                    let mut data = vec![0u8; len];
-                    c.read_exact(&mut data).await?;
-                    data
-                }
-                Self::WindowsServer(s) => {
-                    let len = s.read_u32().await? as usize;
-                    let mut data = vec![0u8; len];
-                    s.read_exact(&mut data).await?;
-                    data
-                }
-            };
-            let msg = bincode::deserialize(&data)?;
-            Ok(msg)
-        }
-    }
-
-    /// Send a bridge message
-    pub async fn send_bridge_message(&mut self, msg: &BridgeMessage) -> Result<()> {
-        let data = bincode::serialize(msg)?;
-        let len = data.len() as u32;
-
-        #[cfg(unix)]
-        {
-            let stream = self.stream_mut();
-            stream.write_u32(len).await?;
-            stream.write_all(&data).await?;
-        }
-
-        #[cfg(windows)]
-        {
-            use tokio::io::AsyncWriteExt;
-            match self {
-                Self::WindowsClient(c) => {
-                    c.write_u32(len).await?;
-                    c.write_all(&data).await?;
-                }
-                Self::WindowsServer(s) => {
-                    s.write_u32(len).await?;
-                    s.write_all(&data).await?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Receive a host message
-    pub async fn recv_host_message(&mut self) -> Result<HostMessage> {
-        #[cfg(unix)]
-        {
-            let stream = self.read_stream_mut();
-            let len = stream.read_u32().await? as usize;
+            let len = self.pipe.read_u32().await? as usize;
             let mut data = vec![0u8; len];
-            stream.read_exact(&mut data).await?;
+            self.pipe.read_exact(&mut data).await?;
             let msg = bincode::deserialize(&data)?;
             Ok(msg)
         }
-
-        #[cfg(windows)]
-        {
-            use tokio::io::AsyncReadExt;
-            let data = match self {
-                Self::WindowsClient(c) => {
-                    let len = c.read_u32().await? as usize;
-                    let mut data = vec![0u8; len];
-                    c.read_exact(&mut data).await?;
-                    data
-                }
-                Self::WindowsServer(s) => {
-                    let len = s.read_u32().await? as usize;
-                    let mut data = vec![0u8; len];
-                    s.read_exact(&mut data).await?;
-                    data
-                }
-            };
-            let msg = bincode::deserialize(&data)?;
-            Ok(msg)
-        }
-    }
-}
-
-/// Server-side transport listener
-pub struct TransportListener {
-    #[cfg(unix)]
-    listener: UnixListener,
-    #[cfg(windows)]
-    pipe_name: std::path::PathBuf,
-}
-
-impl TransportListener {
-    /// Bind to socket path (Unix) or prepare named pipe (Windows)
-    #[cfg(unix)]
-    pub async fn bind(socket_path: &std::path::Path) -> Result<Self> {
-        // Remove existing socket if it exists
-        let _ = std::fs::remove_file(socket_path);
-        let listener = UnixListener::bind(socket_path)?;
-        Ok(Self { listener })
-    }
-
-    /// Prepare named pipe path (Windows)
-    #[cfg(windows)]
-    pub async fn bind(pipe_name: &std::path::Path) -> Result<Self> {
-        Ok(Self {
-            pipe_name: pipe_name.to_path_buf(),
-        })
-    }
-
-    /// Accept a connection
-    #[cfg(unix)]
-    pub async fn accept(&self) -> Result<MessageTransport> {
-        let (stream, _) = self.listener.accept().await?;
-        Ok(MessageTransport::Unix(stream))
-    }
-
-    /// Accept a connection (Windows) - creates server pipe and waits for client
-    #[cfg(windows)]
-    pub async fn accept(&self) -> Result<MessageTransport> {
-        let server = ServerOptions::new()
-            .first_pipe_instance(true)
-            .create(&self.pipe_name)?;
-
-        // Wait for client to connect
-        server.connect().await?;
-
-        Ok(MessageTransport::WindowsServer(server))
-    }
-}
-
-/// Client-side transport connector
-pub struct TransportConnector;
-
-impl TransportConnector {
-    /// Connect to socket path (Unix) or named pipe (Windows)
-    pub async fn connect(path: &std::path::Path) -> Result<MessageTransport> {
-        MessageTransport::connect(path).await
     }
 }

@@ -1,10 +1,20 @@
 //! IPC protocol for the plugin bridge process.
+//!
+//! Public types: `SampleFormat`, `BridgeConfig`, `TransportInfo`, parameter/automation types.
+//! Internal types: `HostMessage`, `BridgeMessage`, `IpcMidiEvent`, `AudioBuffer`.
 
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::path::PathBuf;
 
 const MIDI_STACK_CAPACITY: usize = 256;
+
+/// Stack capacity for parameter queues (covers typical automation scenarios)
+const PARAM_QUEUE_STACK_CAPACITY: usize = 8;
+/// Stack capacity for automation points per parameter
+const PARAM_POINT_STACK_CAPACITY: usize = 4;
+/// Stack capacity for note expression changes
+const NOTE_EXPR_STACK_CAPACITY: usize = 8;
 
 fn default_block_size() -> usize {
     512
@@ -80,20 +90,27 @@ pub struct ParameterPoint {
     pub value: f64,
 }
 
+/// SmallVec type for automation points (RT-safe for typical counts)
+pub type ParameterPointVec = SmallVec<[ParameterPoint; PARAM_POINT_STACK_CAPACITY]>;
+
 /// Parameter automation queue.
 ///
 /// `param_id` is the format-native identifier (VST3 ParamID, CLAP clap_id, or VST2 index).
+///
+/// ## RT Safety
+///
+/// Uses `SmallVec` internally - no heap allocation for up to 4 points per parameter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterQueue {
     pub param_id: u32,
-    pub points: Vec<ParameterPoint>,
+    pub points: ParameterPointVec,
 }
 
 impl ParameterQueue {
     pub fn new(param_id: u32) -> Self {
         Self {
             param_id,
-            points: Vec::new(),
+            points: SmallVec::new(),
         }
     }
 
@@ -105,9 +122,18 @@ impl ParameterQueue {
     }
 }
 
+/// SmallVec type for parameter queues (RT-safe for typical counts)
+pub type ParameterQueueVec = SmallVec<[ParameterQueue; PARAM_QUEUE_STACK_CAPACITY]>;
+
+/// Collection of parameter automation changes.
+///
+/// ## RT Safety
+///
+/// Uses `SmallVec` internally - no heap allocation for up to 8 parameter queues.
+/// Clone is RT-safe when within stack capacity.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParameterChanges {
-    pub queues: Vec<ParameterQueue>,
+    pub queues: ParameterQueueVec,
 }
 
 impl ParameterChanges {
@@ -161,6 +187,45 @@ impl ParameterInfo {
             flags: ParameterFlags::default(),
         }
     }
+
+    /// Convert to ParameterRange for automation integration.
+    ///
+    /// Infers the scaling type from step_count and unit string:
+    /// - `step_count == 1`: Toggle (on/off)
+    /// - `step_count > 1`: Integer steps
+    /// - Unit contains "dB" or "Hz": Logarithmic
+    /// - Otherwise: Linear
+    pub fn to_range(&self) -> tutti_core::ParameterRange {
+        use tutti_core::{ParameterRange, ParameterScale};
+
+        let scale = if self.step_count == 1 {
+            // Binary toggle
+            ParameterScale::Toggle
+        } else if self.step_count > 1 {
+            // Discrete integer steps
+            ParameterScale::Integer
+        } else if self.unit.contains("dB") || self.unit.contains("Hz") || self.unit.contains("hz") {
+            // Frequency or decibel parameters work better with log scaling
+            ParameterScale::Logarithmic
+        } else {
+            ParameterScale::Linear
+        };
+
+        // Handle logarithmic with non-positive min
+        let scale = if matches!(scale, ParameterScale::Logarithmic) && self.min_value <= 0.0 {
+            // Fallback to linear if min is non-positive (log requires positive values)
+            ParameterScale::Linear
+        } else {
+            scale
+        };
+
+        ParameterRange::new(
+            self.min_value as f32,
+            self.max_value as f32,
+            self.default_value as f32,
+            scale,
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,9 +245,18 @@ pub struct NoteExpressionValue {
     pub value: f64,
 }
 
+/// SmallVec type for note expression changes (RT-safe for typical counts)
+pub type NoteExpressionVec = SmallVec<[NoteExpressionValue; NOTE_EXPR_STACK_CAPACITY]>;
+
+/// Collection of note expression changes.
+///
+/// ## RT Safety
+///
+/// Uses `SmallVec` internally - no heap allocation for up to 8 expression changes.
+/// Clone is RT-safe when within stack capacity.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NoteExpressionChanges {
-    pub changes: Vec<NoteExpressionValue>,
+    pub changes: NoteExpressionVec,
 }
 
 impl NoteExpressionChanges {

@@ -2,12 +2,14 @@
 //!
 //! The server loads and runs plugins in a sandboxed environment.
 
-use crate::error::{BridgeError, LoadStage, Result};
 use crate::instance::{PluginInstance, ProcessContext};
-use crate::protocol::{BridgeConfig, BridgeMessage, HostMessage, IpcMidiEvent, PluginMetadata};
-use crate::shared_memory::SharedAudioBuffer;
 use crate::transport::{MessageTransport, TransportListener};
 use std::path::PathBuf;
+
+// Import from tutti-plugin (shared types)
+use tutti_plugin::{BridgeConfig, BridgeError, LoadStage, PluginMetadata, Result, SampleFormat};
+use tutti_plugin::protocol::{BridgeMessage, HostMessage, IpcMidiEvent};
+use tutti_plugin::shared_memory::SharedAudioBuffer;
 
 #[cfg(feature = "vst2")]
 use crate::vst2_loader::Vst2Instance;
@@ -32,7 +34,7 @@ pub struct PluginServer {
     editor_open: bool,
 
     /// Negotiated sample format for processing
-    negotiated_format: crate::protocol::SampleFormat,
+    negotiated_format: SampleFormat,
 
     /// Current sample rate (f64 for precision, matches VST3/CLAP)
     sample_rate: f64,
@@ -52,7 +54,7 @@ pub struct PluginServer {
     current_buffer_size: usize,
 
     /// Pre-allocated MIDI output buffer (RT-safe: clear() reuses allocation)
-    midi_output_buffer: crate::protocol::MidiEventVec,
+    midi_output_buffer: tutti_plugin::protocol::MidiEventVec,
 }
 
 // Compile-time error if no plugin formats enabled
@@ -108,7 +110,7 @@ impl PluginServer {
             plugin: None,
             shared_buffer: None,
             editor_open: false,
-            negotiated_format: crate::protocol::SampleFormat::Float32,
+            negotiated_format: SampleFormat::Float32,
             sample_rate: 44100.0, // Default, updated when plugin is loaded
             // Initialize empty buffers (will resize on first process call)
             input_buffers_f32: Vec::new(),
@@ -225,7 +227,7 @@ impl PluginServer {
                 num_samples,
                 midi_events,
             } => {
-                let midi: crate::protocol::MidiEventVec = midi_events
+                let midi: tutti_plugin::protocol::MidiEventVec = midi_events
                     .iter()
                     .filter_map(|e| e.to_midi_event())
                     .collect();
@@ -242,7 +244,7 @@ impl PluginServer {
                 note_expression,
                 transport,
             } => {
-                let midi: crate::protocol::MidiEventVec = midi_events
+                let midi: tutti_plugin::protocol::MidiEventVec = midi_events
                     .iter()
                     .filter_map(|e| e.to_midi_event())
                     .collect();
@@ -394,7 +396,7 @@ impl PluginServer {
         &mut self,
         _buffer_id: u32,
         num_samples: usize,
-        midi_events: &[crate::protocol::MidiEvent],
+        midi_events: &[tutti_plugin::protocol::MidiEvent],
     ) -> Result<Option<BridgeMessage>> {
         if self.plugin.is_none() {
             return Ok(Some(BridgeMessage::Error {
@@ -425,7 +427,7 @@ impl PluginServer {
             let ctx = ProcessContext::new().midi(midi_events);
 
             match self.negotiated_format {
-                crate::protocol::SampleFormat::Float64 => {
+                SampleFormat::Float64 => {
                     // f64 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
                     // Copy input data into pre-allocated buffers
@@ -450,7 +452,7 @@ impl PluginServer {
 
                     let sample_rate = self.sample_rate;
 
-                    let mut audio_buffer = crate::protocol::AudioBuffer64 {
+                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer64 {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
                         num_samples,
@@ -470,7 +472,7 @@ impl PluginServer {
                         }
                     }
                 }
-                crate::protocol::SampleFormat::Float32 => {
+                SampleFormat::Float32 => {
                     // f32 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
                     // Copy input data into pre-allocated buffers
@@ -495,7 +497,7 @@ impl PluginServer {
 
                     let sample_rate = self.sample_rate;
 
-                    let mut audio_buffer = crate::protocol::AudioBuffer {
+                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
                         num_samples,
@@ -540,10 +542,10 @@ impl PluginServer {
         &mut self,
         _buffer_id: u32,
         num_samples: usize,
-        midi_events: &[crate::protocol::MidiEvent],
-        param_changes: &crate::protocol::ParameterChanges,
-        note_expression: &crate::protocol::NoteExpressionChanges,
-        transport: &crate::protocol::TransportInfo,
+        midi_events: &[tutti_plugin::protocol::MidiEvent],
+        param_changes: &tutti_plugin::protocol::ParameterChanges,
+        note_expression: &tutti_plugin::protocol::NoteExpressionChanges,
+        transport: &tutti_plugin::protocol::TransportInfo,
     ) -> Result<Option<BridgeMessage>> {
         if self.plugin.is_none() {
             return Ok(Some(BridgeMessage::Error {
@@ -555,8 +557,8 @@ impl PluginServer {
 
         // Reuse pre-allocated MIDI output buffer (RT-safe)
         self.midi_output_buffer.clear();
-        let mut param_output = crate::protocol::ParameterChanges::new();
-        let mut note_expression_output = crate::protocol::NoteExpressionChanges::new();
+        let mut param_output = tutti_plugin::protocol::ParameterChanges::new();
+        let mut note_expression_output = tutti_plugin::protocol::NoteExpressionChanges::new();
 
         // Process audio through plugin
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
@@ -573,7 +575,7 @@ impl PluginServer {
                 .transport(transport);
 
             match self.negotiated_format {
-                crate::protocol::SampleFormat::Float64 => {
+                SampleFormat::Float64 => {
                     // f64 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
                     // Copy input data into pre-allocated buffers
@@ -598,7 +600,7 @@ impl PluginServer {
 
                     let sample_rate = self.sample_rate;
 
-                    let mut audio_buffer = crate::protocol::AudioBuffer64 {
+                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer64 {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
                         num_samples,
@@ -620,7 +622,7 @@ impl PluginServer {
                         }
                     }
                 }
-                crate::protocol::SampleFormat::Float32 => {
+                SampleFormat::Float32 => {
                     // f32 path - RT-safe: reuse pre-allocated buffers (already sized above)
 
                     // Copy input data into pre-allocated buffers
@@ -645,7 +647,7 @@ impl PluginServer {
 
                     let sample_rate = self.sample_rate;
 
-                    let mut audio_buffer = crate::protocol::AudioBuffer {
+                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
                         num_samples,
@@ -709,7 +711,7 @@ impl PluginServer {
         path: PathBuf,
         sample_rate: f64,
         block_size: usize,
-        preferred_format: crate::protocol::SampleFormat,
+        preferred_format: SampleFormat,
     ) -> Result<PluginMetadata> {
         // Store sample rate for use during processing
         self.sample_rate = sample_rate;
@@ -734,10 +736,10 @@ impl PluginServer {
                 // Load as VST3
                 let mut vst = Vst3Instance::load(&path, sample_rate, block_size)?;
                 // Negotiate format: use f64 if preferred AND plugin supports it
-                if preferred_format == crate::protocol::SampleFormat::Float64
+                if preferred_format == SampleFormat::Float64
                     && vst.can_process_f64()
                 {
-                    let _ = vst.set_sample_format(crate::protocol::SampleFormat::Float64);
+                    let _ = vst.set_sample_format(SampleFormat::Float64);
                 }
                 let metadata = vst.metadata().clone();
                 (LoadedPlugin::Vst3(vst), metadata)
@@ -772,12 +774,12 @@ impl PluginServer {
         };
 
         // Negotiate format: use f64 only if preferred AND plugin supports it
-        let negotiated_format = if preferred_format == crate::protocol::SampleFormat::Float64
+        let negotiated_format = if preferred_format == SampleFormat::Float64
             && metadata.supports_f64
         {
-            crate::protocol::SampleFormat::Float64
+            SampleFormat::Float64
         } else {
-            crate::protocol::SampleFormat::Float32
+            SampleFormat::Float32
         };
         self.negotiated_format = negotiated_format;
 
