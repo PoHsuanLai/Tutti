@@ -4,3 +4,9 @@
 [submodule "crates/rustysynth-tutti"]
 	path = crates/rustysynth-tutti
 	url = https://github.com/PoHsuanLai/rustysynth.git
+[submodule "crates/vst3-host"]
+	path = crates/vst3-host
+	url = https://github.com/PoHsuanLai/vst3-host.git
+[submodule "crates/clap-host"]
+	path = crates/clap-host
+	url = https://github.com/PoHsuanLai/clap-host.git
