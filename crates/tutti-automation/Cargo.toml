@@ -1,0 +1,22 @@
+[package]
+name = "tutti-automation"
+version = "0.0.1"
+edition = "2021"
+description = "Automation lanes and envelopes for Tutti audio engine"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/Tutti"
+keywords = ["audio", "automation", "daw", "envelope"]
+categories = ["multimedia::audio"]
+
+[features]
+default = []
+
+[dependencies]
+# Core types (AudioUnit, TransportHandle)
+tutti-core = { path = "../tutti-core", default-features = false }
+
+# Envelope primitives
+audio-automation = { path = "../audio-automation" }
+
+[dev-dependencies]
+approx = "0.5"
