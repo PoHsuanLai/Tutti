@@ -8,38 +8,34 @@
 //! The engine has a pure tensor API — it doesn't know whether a request
 //! comes from a synth or an effect. It just runs `forward(model_id, tensor)`.
 //!
-//! ## Why factory closures?
+//! ## Backend abstraction
 //!
-//! Burn models are `Send` but not `Sync` (they hold `Arc<dyn Fn + Send>`).
-//! We can't send a `NeuralModel` across threads via a channel because
-//! `Arc<T>` requires `T: Send + Sync` to be `Send` itself.
-//!
-//! Instead, callers send a **factory closure** `Box<dyn FnOnce() -> NeuralModel + Send>`
-//! which gets executed on the engine thread. The model never leaves that thread.
+//! The engine uses a [`BackendFactory`] to create the inference backend on
+//! the engine thread. This allows plugging in Burn, ONNX Runtime, candle,
+//! etc. without any framework-specific types in the engine API.
 
-use crate::backend::BackendPool;
 use crate::error::{Error, Result};
 use crate::gpu::batch::BatchCollector;
-use crate::gpu::engine::{InferenceConfig, NeuralInferenceEngine, NeuralModelId};
-use crate::gpu::fusion::NeuralModel;
 use crate::gpu::{ControlParams, SharedEffectAudioQueue};
 
 use std::collections::HashMap;
-use tutti_core::BatchingStrategy;
+use std::sync::Arc;
+use tutti_core::{
+    BackendFactory, BatchingStrategy, InferenceBackend, InferenceConfig, NeuralModelId,
+};
 
-use burn::backend::NdArray;
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-
-// ============================================================================
-// Public types
-// ============================================================================
 
 /// A tensor submission to the inference engine.
+///
+/// Uses `Arc<[f32]>` for RT-safe submission: the audio thread can create
+/// the Arc from a pre-allocated buffer without heap allocation on the hot path.
 pub struct TensorRequest {
     pub model_id: NeuralModelId,
-    pub input: Vec<f32>,
+    /// Input tensor data. Use `Arc::from(slice)` or pre-allocated buffers.
+    /// Arc clone is just an atomic increment (RT-safe).
+    pub input: Arc<[f32]>,
     pub input_shape: [usize; 2], // [batch, features]
     pub response: ResponseChannel,
 }
@@ -57,15 +53,11 @@ pub enum ResponseChannel {
     OneShot(Sender<Vec<f32>>),
 }
 
-/// Factory that creates a NeuralModel on the engine thread.
+/// Factory that registers a model with the inference backend.
 ///
-/// The closure runs on the engine thread where the Burn device lives.
-/// This avoids sending non-Sync models across threads.
-type ModelFactory = Box<dyn FnOnce() -> NeuralModel<NdArray> + Send>;
-
-// ============================================================================
-// Internal types
-// ============================================================================
+/// The closure runs on the engine thread where the backend lives.
+/// It receives a mutable reference to the backend and returns the model ID.
+type ModelFactory = Box<dyn FnOnce(&mut dyn InferenceBackend) -> NeuralModelId + Send>;
 
 /// Commands sent to the engine thread.
 enum EngineCommand {
@@ -80,10 +72,6 @@ enum EngineCommand {
     Shutdown,
 }
 
-// ============================================================================
-// NeuralEngine
-// ============================================================================
-
 /// Unified neural engine handle.
 ///
 /// Owns a single inference thread. All AudioUnit instances (synths, effects)
@@ -96,14 +84,19 @@ pub struct NeuralEngine {
 }
 
 impl NeuralEngine {
-    /// Create and start the unified inference engine.
+    /// Create and start the unified inference engine with a custom backend.
+    ///
+    /// The `backend_factory` is sent to the engine thread and called there
+    /// to create the inference backend. This avoids sending non-Send backends
+    /// across threads.
     ///
     /// Spawns a single dedicated thread that:
-    /// 1. Processes commands (register model, shutdown)
-    /// 2. Drains tensor requests from the shared channel
-    /// 3. Groups by model_id → batched forward()
-    /// 4. Sends results back via each request's ResponseChannel
-    pub fn start(config: InferenceConfig) -> Result<Self> {
+    /// 1. Creates the backend via the factory
+    /// 2. Processes commands (register model, shutdown)
+    /// 3. Drains tensor requests from the shared channel
+    /// 4. Groups by model_id → batched forward()
+    /// 5. Sends results back via each request's ResponseChannel
+    pub fn start_with(config: InferenceConfig, backend_factory: BackendFactory) -> Result<Self> {
         let (cmd_tx, cmd_rx) = crossbeam_channel::bounded::<EngineCommand>(16);
         let (request_tx, request_rx) = crossbeam_channel::bounded::<TensorRequest>(256);
         let running = Arc::new(AtomicBool::new(true));
@@ -112,7 +105,9 @@ impl NeuralEngine {
         let thread = std::thread::Builder::new()
             .name("neural-engine".into())
             .spawn(move || {
-                if let Err(e) = inference_loop(config, cmd_rx, request_rx, &running_clone) {
+                if let Err(e) =
+                    inference_loop(config, backend_factory, cmd_rx, request_rx, &running_clone)
+                {
                     tracing::error!("Neural engine thread failed: {}", e);
                 }
                 running_clone.store(false, Ordering::Release);
@@ -129,11 +124,11 @@ impl NeuralEngine {
 
     /// Register a model with the engine via a factory closure.
     ///
-    /// The factory runs on the engine thread (where the Burn device lives).
+    /// The factory runs on the engine thread (where the backend lives).
     /// Blocks until the engine thread creates the model and returns the ID.
     pub fn register_model(
         &self,
-        factory: impl FnOnce() -> NeuralModel<NdArray> + Send + 'static,
+        factory: impl FnOnce(&mut dyn InferenceBackend) -> NeuralModelId + Send + 'static,
     ) -> Result<NeuralModelId> {
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.cmd_tx
@@ -180,21 +175,18 @@ impl Drop for NeuralEngine {
     }
 }
 
-// ============================================================================
-// Inference loop (runs on the dedicated engine thread)
-// ============================================================================
-
 fn inference_loop(
     config: InferenceConfig,
+    backend_factory: BackendFactory,
     cmd_rx: Receiver<EngineCommand>,
     request_rx: Receiver<TensorRequest>,
     running: &AtomicBool,
 ) -> Result<()> {
-    // Initialize the engine on this thread (Burn backends are not Sync)
-    let pool = BackendPool::new()?;
-    let device = (**pool.cpu_device()).clone();
-    let mut engine = NeuralInferenceEngine::<NdArray>::new(device, config)?;
-    let mut batch_collector = BatchCollector::new(engine.config().batch_size, 2);
+    // Initialize the backend on this thread
+    let mut backend = backend_factory(config.clone())
+        .map_err(|e| Error::Inference(format!("Backend init failed: {}", e)))?;
+
+    let mut batch_collector = BatchCollector::new(backend.config().batch_size, 2);
 
     // Scratch buffer for collecting requests
     let mut pending: Vec<TensorRequest> = Vec::with_capacity(64);
@@ -202,7 +194,10 @@ fn inference_loop(
     // Model priority from graph analysis (lower = process first)
     let mut model_priority: HashMap<NeuralModelId, usize> = HashMap::new();
 
-    tracing::info!("Neural engine thread started");
+    tracing::info!(
+        "Neural engine thread started (backend: {})",
+        backend.capabilities().name
+    );
 
     while running.load(Ordering::Acquire) {
         // 1. Process commands (non-blocking)
@@ -212,8 +207,7 @@ fn inference_loop(
                     factory,
                     response_tx,
                 } => {
-                    let model = factory();
-                    let id = engine.register_model(model);
+                    let id = factory(backend.as_mut());
                     let _ = response_tx.send(id);
                 }
                 EngineCommand::UpdateStrategy(strategy) => {
@@ -238,7 +232,7 @@ fn inference_loop(
 
         // 3. Process batch if ready
         if !pending.is_empty() && batch_collector.is_ready(pending.len()) {
-            process_batch(&mut engine, &mut pending, &model_priority);
+            process_batch(backend.as_mut(), &mut pending, &model_priority);
             batch_collector.reset();
         }
 
@@ -276,23 +270,25 @@ fn compute_model_priority(strategy: &BatchingStrategy) -> HashMap<NeuralModelId,
 /// If model priority is available (from graph analysis), sorts requests so that
 /// upstream models are processed first, reducing pipeline stalls for dependent nodes.
 fn process_batch(
-    engine: &mut NeuralInferenceEngine<NdArray>,
+    backend: &mut dyn InferenceBackend,
     pending: &mut Vec<TensorRequest>,
     model_priority: &HashMap<NeuralModelId, usize>,
 ) {
-    let mut requests: Vec<_> = pending.drain(..).collect();
+    let mut requests: Vec<_> = std::mem::take(pending);
 
     // Sort by model execution priority (lower = upstream, process first)
     if !model_priority.is_empty() {
         requests.sort_by_key(|r| *model_priority.get(&r.model_id).unwrap_or(&usize::MAX));
     }
 
+    // Convert Arc<[f32]> to Vec<f32> for the backend API.
+    // This happens on the inference thread, not the audio thread, so allocation is OK.
     let forward_requests: Vec<(NeuralModelId, Vec<f32>, usize)> = requests
         .iter()
-        .map(|r| (r.model_id, r.input.clone(), r.input_shape[1]))
+        .map(|r| (r.model_id, r.input.to_vec(), r.input_shape[1]))
         .collect();
 
-    match engine.forward_grouped(&forward_requests) {
+    match backend.forward_grouped(&forward_requests) {
         Ok(results) => {
             for (req, result) in requests.into_iter().zip(results.into_iter()) {
                 dispatch_result(req, result);
@@ -363,17 +359,81 @@ pub fn submit_request(tx: &Sender<TensorRequest>, request: TensorRequest) -> boo
     }
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Create a simple passthrough backend factory for testing.
+    fn test_backend_factory() -> BackendFactory {
+        Box::new(|config| Ok(Box::new(SimpleTestBackend::new(config)) as Box<dyn InferenceBackend>))
+    }
+
+    /// Minimal test backend that stores closures and calls them.
+    struct SimpleTestBackend {
+        config: InferenceConfig,
+        models: HashMap<NeuralModelId, Box<dyn Fn(&[f32], [usize; 2]) -> Vec<f32> + Send>>,
+    }
+
+    impl SimpleTestBackend {
+        fn new(config: InferenceConfig) -> Self {
+            Self {
+                config,
+                models: HashMap::new(),
+            }
+        }
+    }
+
+    impl InferenceBackend for SimpleTestBackend {
+        fn register_model(
+            &mut self,
+            f: Box<dyn Fn(&[f32], [usize; 2]) -> Vec<f32> + Send>,
+        ) -> NeuralModelId {
+            let id = NeuralModelId::new();
+            self.models.insert(id, f);
+            id
+        }
+
+        fn forward_grouped(
+            &mut self,
+            requests: &[(NeuralModelId, Vec<f32>, usize)],
+        ) -> core::result::Result<Vec<Vec<f32>>, tutti_core::InferenceError> {
+            let mut results = Vec::with_capacity(requests.len());
+            for (model_id, data, feat_dim) in requests {
+                if let Some(f) = self.models.get(model_id) {
+                    let batch = if *feat_dim > 0 {
+                        data.len() / feat_dim
+                    } else {
+                        1
+                    };
+                    results.push(f(data, [batch, *feat_dim]));
+                } else {
+                    results.push(data.clone());
+                }
+            }
+            Ok(results)
+        }
+
+        fn capabilities(&self) -> tutti_core::BackendCapabilities {
+            tutti_core::BackendCapabilities {
+                name: "Test".into(),
+                supports_batching: false,
+                has_gpu: false,
+            }
+        }
+
+        fn config(&self) -> &InferenceConfig {
+            &self.config
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+    }
+
     #[test]
     fn test_engine_start_shutdown() {
-        let mut engine = NeuralEngine::start(InferenceConfig::default()).unwrap();
+        let mut engine =
+            NeuralEngine::start_with(InferenceConfig::default(), test_backend_factory()).unwrap();
         assert!(engine.is_running());
         engine.shutdown();
         assert!(!engine.is_running());
@@ -381,10 +441,13 @@ mod tests {
 
     #[test]
     fn test_register_model_via_factory() {
-        let mut engine = NeuralEngine::start(InferenceConfig::default()).unwrap();
+        let mut engine =
+            NeuralEngine::start_with(InferenceConfig::default(), test_backend_factory()).unwrap();
 
         let id = engine
-            .register_model(|| NeuralModel::<NdArray>::from_forward(|input| input))
+            .register_model(|backend| {
+                backend.register_model(Box::new(|data, _shape| data.to_vec()))
+            })
             .unwrap();
 
         assert_ne!(id.as_u64(), 0);
@@ -393,16 +456,19 @@ mod tests {
 
     #[test]
     fn test_oneshot_inference() {
-        let mut engine = NeuralEngine::start(InferenceConfig::default()).unwrap();
+        let mut engine =
+            NeuralEngine::start_with(InferenceConfig::default(), test_backend_factory()).unwrap();
 
         let model_id = engine
-            .register_model(|| NeuralModel::<NdArray>::from_forward(|input| input))
+            .register_model(|backend| {
+                backend.register_model(Box::new(|data, _shape| data.to_vec()))
+            })
             .unwrap();
 
         let (tx, rx) = crossbeam_channel::bounded(1);
         let request = TensorRequest {
             model_id,
-            input: vec![1.0, 2.0, 3.0, 4.0],
+            input: Arc::from([1.0_f32, 2.0, 3.0, 4.0].as_slice()),
             input_shape: [1, 4],
             response: ResponseChannel::OneShot(tx),
         };
@@ -417,19 +483,21 @@ mod tests {
 
     #[test]
     fn test_param_response() {
-        let mut engine = NeuralEngine::start(InferenceConfig::default()).unwrap();
+        let mut engine =
+            NeuralEngine::start_with(InferenceConfig::default(), test_backend_factory()).unwrap();
 
         let model_id = engine
-            .register_model(|| NeuralModel::<NdArray>::from_forward(|input| input))
+            .register_model(|backend| {
+                backend.register_model(Box::new(|data, _shape| data.to_vec()))
+            })
             .unwrap();
 
-        // crossbeam channel for ControlParams delivery
         let (param_tx, param_rx) = crossbeam_channel::bounded::<ControlParams>(16);
 
         let buffer_size = 2;
         let request = TensorRequest {
             model_id,
-            input: vec![440.0, 440.0, 0.5, 0.5],
+            input: Arc::from([440.0_f32, 440.0, 0.5, 0.5].as_slice()),
             input_shape: [1, 4],
             response: ResponseChannel::Params {
                 sender: param_tx,
@@ -450,10 +518,15 @@ mod tests {
 
     #[test]
     fn test_effect_response() {
-        let mut engine = NeuralEngine::start(InferenceConfig::default()).unwrap();
+        let mut engine =
+            NeuralEngine::start_with(InferenceConfig::default(), test_backend_factory()).unwrap();
 
         let model_id = engine
-            .register_model(|| NeuralModel::<NdArray>::from_forward(|input| input.mul_scalar(2.0)))
+            .register_model(|backend| {
+                backend.register_model(Box::new(|data, _shape| {
+                    data.iter().map(|x| x * 2.0).collect()
+                }))
+            })
             .unwrap();
 
         let queue = crate::gpu::shared_effect_queue(2, 2);
@@ -463,12 +536,12 @@ mod tests {
         queue.write_input(0, 0.3);
         queue.write_input(1, 0.4);
 
-        let input_data = queue.take_input().unwrap().to_vec();
+        let input_data = queue.take_input().unwrap();
         let features = input_data.len();
 
         let request = TensorRequest {
             model_id,
-            input: input_data,
+            input: Arc::from(input_data),
             input_shape: [1, features],
             response: ResponseChannel::Audio(queue.clone()),
         };
@@ -501,7 +574,7 @@ mod tests {
         let (tx, _rx) = crossbeam_channel::bounded(1);
         let request = TensorRequest {
             model_id: NeuralModelId::new(),
-            input: vec![1.0],
+            input: Arc::from([1.0_f32].as_slice()),
             input_shape: [1, 1],
             response: ResponseChannel::OneShot(crossbeam_channel::bounded(1).0),
         };

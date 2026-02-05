@@ -1,20 +1,82 @@
 //! Neural effect AudioUnit — audio → tensor → engine → audio.
 //!
 //! Stereo input, stereo output. Latency = buffer_size samples (reported for PDC).
+//!
+//! ## RT Safety
+//!
+//! Uses pre-allocated Arc buffers to avoid heap allocation in the audio callback.
+//! The `ArcBufferPool` maintains a small pool of reusable Arc<[f32]> buffers.
 
 use crate::engine::{submit_request, ResponseChannel, TensorRequest};
 use crate::gpu::effect_queue::SharedEffectAudioQueue;
 use crate::gpu::NeuralModelId;
 use crossbeam_channel::Sender;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
+
+/// Pool of pre-allocated Arc<[f32]> buffers for RT-safe tensor submission.
+///
+/// The pool uses a simple ring buffer. When a buffer is needed:
+/// 1. Check if the current slot's Arc has refcount == 1 (only pool owns it)
+/// 2. If yes, reuse it via Arc::make_mut (no allocation)
+/// 3. If no (inference thread still using it), move to next slot
+///
+/// Pool size of 4 handles typical inference latency (2-3 buffers in flight).
+const POOL_SIZE: usize = 4;
+
+struct ArcBufferPool {
+    buffers: [Option<Arc<[f32]>>; POOL_SIZE],
+    next_slot: usize,
+}
+
+impl ArcBufferPool {
+    fn new(buffer_size: usize) -> Self {
+        // Pre-allocate all buffers at construction time
+        let buffers = std::array::from_fn(|_| Some(Arc::from(vec![0.0f32; buffer_size])));
+        Self {
+            buffers,
+            next_slot: 0,
+        }
+    }
+
+    /// Get a buffer and fill it with the given data. RT-safe (no allocation).
+    ///
+    /// Returns None if all buffers are in use (inference thread is backed up).
+    #[inline]
+    fn get_and_fill(&mut self, data: &[f32]) -> Option<Arc<[f32]>> {
+        // Try each slot in the pool
+        for _ in 0..POOL_SIZE {
+            let slot = self.next_slot;
+            self.next_slot = (self.next_slot + 1) % POOL_SIZE;
+
+            if let Some(arc) = self.buffers[slot].take() {
+                // Check if we're the only owner (refcount == 1)
+                if Arc::strong_count(&arc) == 1 {
+                    // We can reuse this buffer - Arc::make_mut won't allocate
+                    let mut arc = arc;
+                    let buf = Arc::make_mut(&mut arc);
+                    let copy_len = data.len().min(buf.len());
+                    buf[..copy_len].copy_from_slice(&data[..copy_len]);
+
+                    // Put it back and return a clone
+                    let result = Arc::clone(&arc);
+                    self.buffers[slot] = Some(arc);
+                    return Some(result);
+                } else {
+                    // Inference thread still has a reference, put it back
+                    self.buffers[slot] = Some(arc);
+                }
+            }
+        }
+
+        // All buffers in use - drop this request (RT-safe behavior)
+        None
+    }
+}
 
 /// Counter for generating unique instance IDs.
 static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
-
-// ============================================================================
-// Struct
-// ============================================================================
 
 /// Neural effect AudioUnit.
 ///
@@ -25,6 +87,11 @@ static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 /// 4. Audio thread reads processed samples from the queue
 ///
 /// Latency = buffer_size samples, reported via `latency()` for PDC.
+///
+/// ## RT Safety
+///
+/// Uses `ArcBufferPool` to avoid heap allocation when submitting requests.
+/// The pool pre-allocates Arc buffers at construction time and reuses them.
 pub struct NeuralEffectNode {
     instance_id: u64,
     model_id: NeuralModelId,
@@ -33,11 +100,9 @@ pub struct NeuralEffectNode {
     channels: usize,
     audio_queue: SharedEffectAudioQueue,
     request_tx: Sender<TensorRequest>,
+    /// Pre-allocated buffer pool for RT-safe tensor submission
+    buffer_pool: ArcBufferPool,
 }
-
-// ============================================================================
-// Construction
-// ============================================================================
 
 impl NeuralEffectNode {
     pub fn new(
@@ -46,14 +111,18 @@ impl NeuralEffectNode {
         audio_queue: SharedEffectAudioQueue,
         request_tx: Sender<TensorRequest>,
     ) -> Self {
+        let channels = 2;
+        // Pre-allocate buffer pool with total_samples = channels * buffer_size
+        let total_samples = channels * buffer_size;
         Self {
             instance_id: INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed),
             model_id,
             buffer_size,
             sample_rate: 44100.0,
-            channels: 2,
+            channels,
             audio_queue,
             request_tx,
+            buffer_pool: ArcBufferPool::new(total_samples),
         }
     }
 
@@ -63,25 +132,28 @@ impl NeuralEffectNode {
     }
 
     /// When the input buffer is full, take the data and submit to the engine.
+    ///
+    /// RT-safe: Uses pre-allocated buffer pool, no heap allocation.
     #[inline]
-    fn maybe_submit(&self) {
+    fn maybe_submit(&mut self) {
         if let Some(input_data) = self.audio_queue.take_input() {
-            let _ = submit_request(
-                &self.request_tx,
-                TensorRequest {
-                    model_id: self.model_id,
-                    input: input_data.to_vec(),
-                    input_shape: [1, input_data.len()],
-                    response: ResponseChannel::Audio(self.audio_queue.clone()),
-                },
-            );
+            // Get a pre-allocated buffer from the pool (RT-safe)
+            if let Some(arc_buffer) = self.buffer_pool.get_and_fill(input_data) {
+                let input_len = input_data.len();
+                let _ = submit_request(
+                    &self.request_tx,
+                    TensorRequest {
+                        model_id: self.model_id,
+                        input: arc_buffer,
+                        input_shape: [1, input_len],
+                        response: ResponseChannel::Audio(self.audio_queue.clone()),
+                    },
+                );
+            }
+            // If pool exhausted, drop this request (RT-safe behavior)
         }
     }
 }
-
-// ============================================================================
-// AudioUnit
-// ============================================================================
 
 impl AudioUnit for NeuralEffectNode {
     fn inputs(&self) -> usize {
@@ -163,12 +235,9 @@ impl AudioUnit for NeuralEffectNode {
     }
 }
 
-// ============================================================================
-// Clone
-// ============================================================================
-
 impl Clone for NeuralEffectNode {
     fn clone(&self) -> Self {
+        let total_samples = self.channels * self.buffer_size;
         Self {
             instance_id: INSTANCE_COUNTER.fetch_add(1, Ordering::Relaxed),
             model_id: self.model_id,
@@ -177,13 +246,11 @@ impl Clone for NeuralEffectNode {
             channels: self.channels,
             audio_queue: self.audio_queue.clone(),
             request_tx: self.request_tx.clone(),
+            // Each clone gets its own buffer pool (pre-allocated at clone time, not RT)
+            buffer_pool: ArcBufferPool::new(total_samples),
         }
     }
 }
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -215,7 +282,7 @@ mod tests {
         let (tx, rx) = crossbeam_channel::unbounded();
         let queue = shared_effect_queue(2, 4); // 4 samples per channel
         let model_id = NeuralModelId::new();
-        let node = NeuralEffectNode::new(model_id, 4, queue, tx);
+        let mut node = NeuralEffectNode::new(model_id, 4, queue, tx);
 
         // Write 4 stereo sample-frames to fill the buffer
         for _ in 0..4 {

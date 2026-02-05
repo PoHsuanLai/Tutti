@@ -1,0 +1,22 @@
+[package]
+name = "tutti-burn"
+version = "0.0.1"
+edition = "2021"
+description = "Burn ML backend for Tutti neural audio - GPU-accelerated inference"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/Tutti"
+keywords = ["audio", "neural", "burn", "gpu", "inference"]
+categories = ["multimedia::audio"]
+
+[dependencies]
+# Tutti core (neural traits and infrastructure)
+tutti-core = { path = "../tutti-core", default-features = false, features = ["neural"] }
+
+# ML/GPU framework
+burn = { version = "0.20", default-features = false, features = ["wgpu", "ndarray", "fusion", "autodiff", "std"] }
+wgpu = "26"
+
+# Utilities
+tracing = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+pollster = "0.3"

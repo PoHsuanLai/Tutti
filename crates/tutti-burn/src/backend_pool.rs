@@ -1,10 +1,10 @@
-//! GPU backend pool for managing Burn backends across different devices
+//! GPU backend pool for managing Burn backends across different devices.
 
-use crate::error::{GpuError, Result};
 use burn::backend::wgpu::{init_device, RuntimeOptions, WgpuDevice, WgpuSetup};
 use burn::backend::{Autodiff, NdArray};
 use std::marker::PhantomData;
 use std::sync::Arc;
+use tutti_core::neural::inference::InferenceError;
 use wgpu::{Backends, DeviceDescriptor, Features, Limits, PowerPreference};
 
 /// GPU backend type using Wgpu (Burn's Wgpu backend with fusion + autodiff)
@@ -46,8 +46,8 @@ pub enum GpuBackendType {
 }
 
 impl BackendPool {
-    /// Create a new backend pool with automatic GPU detection
-    pub fn new() -> Result<Self> {
+    /// Create a new backend pool with automatic GPU detection.
+    pub fn new() -> Result<Self, InferenceError> {
         let cpu_device = Arc::new(CpuDevice::default());
 
         let (gpu_device, gpu_info) = match Self::init_gpu() {
@@ -64,7 +64,7 @@ impl BackendPool {
         })
     }
 
-    fn init_gpu() -> Result<(WgpuDevice, GpuInfo)> {
+    fn init_gpu() -> Result<(WgpuDevice, GpuInfo), InferenceError> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: Self::preferred_backends(),
             ..Default::default()
@@ -79,7 +79,7 @@ impl BackendPool {
                 })
                 .await
         })
-        .map_err(|_| GpuError::NoGpuAvailable)?;
+        .map_err(|_| InferenceError::BackendInit("No GPU adapter available".into()))?;
 
         let adapter_info = adapter.get_info();
         let backend_type = Self::backend_type_from_wgpu(&adapter_info.backend);
@@ -98,7 +98,7 @@ impl BackendPool {
                 })
                 .await
         })
-        .map_err(|e| GpuError::BackendInitFailed(e.to_string()))?;
+        .map_err(|e| InferenceError::BackendInit(e.to_string()))?;
 
         let setup = WgpuSetup {
             instance,
@@ -153,6 +153,10 @@ impl BackendPool {
 
     pub fn has_gpu(&self) -> bool {
         self.gpu_device.is_some()
+    }
+
+    pub fn gpu_device(&self) -> Option<&Arc<WgpuDevice>> {
+        self.gpu_device.as_ref()
     }
 
     pub fn cpu_device(&self) -> &Arc<CpuDevice> {

@@ -2,7 +2,9 @@
 
 use crate::{Error, NeuralSystem, Result};
 use std::sync::Arc;
-use tutti_core::{ArcNeuralEffectBuilder, ArcNeuralSynthBuilder};
+use tutti_core::ArcNeuralEffectBuilder;
+#[cfg(feature = "midi")]
+use tutti_core::ArcNeuralSynthBuilder;
 
 /// Fluent handle for neural audio operations.
 ///
@@ -27,6 +29,7 @@ impl NeuralHandle {
     }
 
     /// Load a neural synth model.
+    #[cfg(feature = "midi")]
     pub fn load_synth(&self, path: &str) -> Result<ArcNeuralSynthBuilder> {
         self.require()?.load_synth_model(path)
     }

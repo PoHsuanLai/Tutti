@@ -74,8 +74,9 @@ impl MidiState {
     /// Returns `true` if the event should trigger new inference
     /// (note on/off). Returns `false` for continuous controllers
     /// (CC, pitch bend, pressure) which only update state.
-    pub fn apply(&mut self, event: &tutti_midi_io::MidiEvent) -> bool {
-        use midi_msg::ChannelVoiceMsg;
+    #[cfg(feature = "midi")]
+    pub fn apply(&mut self, event: &tutti_core::midi::MidiEvent) -> bool {
+        use tutti_core::midi::ChannelVoiceMsg;
 
         match event.msg {
             ChannelVoiceMsg::NoteOn { note, velocity } if velocity > 0 => {
@@ -110,8 +111,9 @@ impl MidiState {
         }
     }
 
-    fn apply_cc(&mut self, control: midi_msg::ControlChange) {
-        use midi_msg::ControlChange;
+    #[cfg(feature = "midi")]
+    fn apply_cc(&mut self, control: tutti_core::midi::ControlChange) {
+        use tutti_core::midi::ControlChange;
         if let ControlChange::CC { control: cc, value } = control {
             let norm = value as f32 / 127.0;
             match cc {
@@ -155,9 +157,10 @@ impl MidiState {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "midi"))]
 mod tests {
     use super::*;
+    use tutti_core::midi::MidiEvent;
 
     #[test]
     fn test_default_state() {
@@ -171,7 +174,7 @@ mod tests {
     #[test]
     fn test_note_on() {
         let mut state = MidiState::default();
-        let event = tutti_midi_io::MidiEvent::note_on_builder(69, 100)
+        let event = MidiEvent::note_on_builder(69, 100)
             .channel(0)
             .offset(0)
             .build(); // A4
@@ -189,17 +192,12 @@ mod tests {
     fn test_note_off() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi_io::MidiEvent::note_on_builder(60, 80)
+            &MidiEvent::note_on_builder(60, 80)
                 .channel(0)
                 .offset(0)
                 .build(),
         );
-        let triggered = state.apply(
-            &tutti_midi_io::MidiEvent::note_off_builder(60)
-                .channel(0)
-                .offset(0)
-                .build(),
-        );
+        let triggered = state.apply(&MidiEvent::note_off_builder(60).channel(0).offset(0).build());
 
         assert!(triggered);
         assert_eq!(state.velocity, 0);
@@ -212,17 +210,14 @@ mod tests {
     fn test_pitch_bend() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi_io::MidiEvent::note_on_builder(69, 100)
+            &MidiEvent::note_on_builder(69, 100)
                 .channel(0)
                 .offset(0)
                 .build(),
         ); // A4
 
         // Bend fully up: bend=16383 → normalized=1.0 → +2 semitones (default range)
-        let bend_event = tutti_midi_io::MidiEvent::bend_builder(16383)
-            .channel(0)
-            .offset(0)
-            .build();
+        let bend_event = MidiEvent::bend_builder(16383).channel(0).offset(0).build();
         let triggered = state.apply(&bend_event);
         assert!(!triggered); // pitch bend doesn't trigger inference
 
@@ -231,12 +226,7 @@ mod tests {
         assert!((state.pitch_hz() - 493.88).abs() < 1.0);
 
         // Bend center: bend=8192 → normalized=0.0
-        state.apply(
-            &tutti_midi_io::MidiEvent::bend_builder(8192)
-                .channel(0)
-                .offset(0)
-                .build(),
-        );
+        state.apply(&MidiEvent::bend_builder(8192).channel(0).offset(0).build());
         assert!(state.pitch_bend.abs() < 0.01);
         assert!((state.pitch_hz() - 440.0).abs() < 0.1);
     }
@@ -244,10 +234,7 @@ mod tests {
     #[test]
     fn test_cc_mod_wheel() {
         let mut state = MidiState::default();
-        let event = tutti_midi_io::MidiEvent::cc_builder(1, 64)
-            .channel(0)
-            .offset(0)
-            .build();
+        let event = MidiEvent::cc_builder(1, 64).channel(0).offset(0).build();
         let triggered = state.apply(&event);
 
         assert!(!triggered);
@@ -258,19 +245,14 @@ mod tests {
     fn test_cc_expression() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi_io::MidiEvent::note_on_builder(60, 100)
+            &MidiEvent::note_on_builder(60, 100)
                 .channel(0)
                 .offset(0)
                 .build(),
         );
 
         // Expression at 50%
-        state.apply(
-            &tutti_midi_io::MidiEvent::cc_builder(11, 64)
-                .channel(0)
-                .offset(0)
-                .build(),
-        );
+        state.apply(&MidiEvent::cc_builder(11, 64).channel(0).offset(0).build());
         let expected = (100.0 / 127.0) * (64.0 / 127.0);
         assert!((state.loudness() - expected).abs() < 0.01);
     }
@@ -280,28 +262,18 @@ mod tests {
         let mut state = MidiState::default();
 
         // Sustain on (CC64 >= 64)
-        state.apply(
-            &tutti_midi_io::MidiEvent::cc_builder(64, 127)
-                .channel(0)
-                .offset(0)
-                .build(),
-        );
+        state.apply(&MidiEvent::cc_builder(64, 127).channel(0).offset(0).build());
         assert!(state.sustain);
 
         // Sustain off (CC64 < 64)
-        state.apply(
-            &tutti_midi_io::MidiEvent::cc_builder(64, 0)
-                .channel(0)
-                .offset(0)
-                .build(),
-        );
+        state.apply(&MidiEvent::cc_builder(64, 0).channel(0).offset(0).build());
         assert!(!state.sustain);
     }
 
     #[test]
     fn test_channel_pressure() {
         let mut state = MidiState::default();
-        let event = tutti_midi_io::MidiEvent::aftertouch_builder(100)
+        let event = MidiEvent::aftertouch_builder(100)
             .channel(0)
             .offset(0)
             .build();
@@ -314,7 +286,7 @@ mod tests {
     fn test_to_features_layout() {
         let mut state = MidiState::default();
         state.apply(
-            &tutti_midi_io::MidiEvent::note_on_builder(60, 100)
+            &MidiEvent::note_on_builder(60, 100)
                 .channel(0)
                 .offset(0)
                 .build(),

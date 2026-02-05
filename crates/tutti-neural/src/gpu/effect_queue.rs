@@ -98,10 +98,6 @@ impl EffectAudioQueue {
         self.channels
     }
 
-    // ========================================================================
-    // Audio thread methods (write input, read output)
-    // ========================================================================
-
     /// Write a sample to the input buffer (audio thread only).
     ///
     /// Returns true if a complete buffer is ready for inference.
@@ -192,10 +188,6 @@ impl EffectAudioQueue {
     pub fn has_output(&self) -> bool {
         self.output_ready.load(Ordering::Acquire)
     }
-
-    // ========================================================================
-    // Inference thread methods (read input, write output)
-    // ========================================================================
 
     /// Check if input is ready for inference.
     #[inline]

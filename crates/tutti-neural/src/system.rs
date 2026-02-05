@@ -1,21 +1,16 @@
 //! Neural audio system — unified engine for synthesis and effects.
 
-use crate::backend::BackendPool;
 use crate::effect_node::NeuralEffectNode;
 use crate::engine::{NeuralEngine, TensorRequest};
 use crate::error::Result;
 use crate::gpu::{shared_effect_queue, NeuralModelId};
+#[cfg(feature = "midi")]
 use crate::synth_node::NeuralSynthNode;
 
-pub use crate::gpu::InferenceConfig;
-use burn::backend::NdArray;
 use crossbeam_channel::Sender;
 use std::sync::Arc;
-use tutti_core::AudioUnit;
-
-// ============================================================================
-// NeuralSystem
-// ============================================================================
+pub use tutti_core::InferenceConfig;
+use tutti_core::{AudioUnit, BackendFactory, InferenceBackend};
 
 /// Main neural audio system.
 ///
@@ -27,7 +22,7 @@ pub struct NeuralSystem {
 }
 
 struct NeuralSystemInner {
-    backend_pool: BackendPool,
+    has_gpu: bool,
     inference_config: InferenceConfig,
     sample_rate: f32,
     buffer_size: usize,
@@ -35,6 +30,7 @@ struct NeuralSystemInner {
 }
 
 impl NeuralSystem {
+    /// Creates a new builder for configuring a NeuralSystem.
     pub fn builder() -> NeuralSystemBuilder {
         NeuralSystemBuilder::default()
     }
@@ -43,12 +39,13 @@ impl NeuralSystem {
     ///
     /// Returns an `Arc<dyn NeuralSynthBuilder>` that can build voices
     /// and integrates with tutti-core's graph-aware batching.
+    #[cfg(feature = "midi")]
     pub fn load_synth_model(&self, name: &str) -> Result<Arc<dyn tutti_core::NeuralSynthBuilder>> {
         let model_name = stem_or(name, "Unknown");
 
         // TODO: Load actual model weights from file.
-        let id = self.inner.engine.register_model(|| {
-            crate::gpu::fusion::NeuralModel::<NdArray>::from_forward(|input| input)
+        let id = self.inner.engine.register_model(|backend| {
+            backend.register_model(Box::new(|data, _shape| data.to_vec()))
         })?;
 
         Ok(Arc::new(SynthBuilder {
@@ -57,6 +54,7 @@ impl NeuralSystem {
             sample_rate: self.inner.sample_rate,
             buffer_size: self.inner.buffer_size,
             request_tx: self.inner.engine.request_sender(),
+            midi_registry: None,
         }))
     }
 
@@ -71,8 +69,8 @@ impl NeuralSystem {
         let model_name = stem_or(name, "Unknown");
 
         // TODO: Load actual model weights from file.
-        let id = self.inner.engine.register_model(|| {
-            crate::gpu::fusion::NeuralModel::<NdArray>::from_forward(|input| input)
+        let id = self.inner.engine.register_model(|backend| {
+            backend.register_model(Box::new(|data, _shape| data.to_vec()))
         })?;
 
         Ok(Arc::new(EffectBuilder {
@@ -84,28 +82,78 @@ impl NeuralSystem {
         }))
     }
 
-    // ==================== System Info ====================
+    /// Register a neural synth from a closure.
+    ///
+    /// The closure receives `&[f32]` (MIDI feature vector) and returns
+    /// `Vec<f32>` (control params). The optional MIDI registry enables
+    /// pull-based MIDI delivery during audio processing.
+    #[cfg(feature = "midi")]
+    pub fn register_synth(
+        &self,
+        name: impl Into<String>,
+        f: impl Fn(&[f32]) -> Vec<f32> + Send + 'static,
+        midi_registry: Option<tutti_core::midi::MidiRegistry>,
+    ) -> Result<Arc<dyn tutti_core::NeuralSynthBuilder>> {
+        let name = name.into();
+        let id = self
+            .inner
+            .engine
+            .register_model(move |backend: &mut dyn InferenceBackend| {
+                backend.register_model(Box::new(move |data, _shape| f(data)))
+            })?;
 
+        Ok(Arc::new(SynthBuilder {
+            model_id: id,
+            name,
+            sample_rate: self.inner.sample_rate,
+            buffer_size: self.inner.buffer_size,
+            request_tx: self.inner.engine.request_sender(),
+            midi_registry,
+        }))
+    }
+
+    /// Register a neural effect from a closure.
+    ///
+    /// The closure receives `&[f32]` (audio samples) and returns
+    /// `Vec<f32>` (processed audio).
+    pub fn register_effect(
+        &self,
+        name: impl Into<String>,
+        f: impl Fn(&[f32]) -> Vec<f32> + Send + 'static,
+    ) -> Result<Arc<dyn tutti_core::NeuralEffectBuilder>> {
+        let name = name.into();
+        let id = self
+            .inner
+            .engine
+            .register_model(move |backend: &mut dyn InferenceBackend| {
+                backend.register_model(Box::new(move |data, _shape| f(data)))
+            })?;
+
+        Ok(Arc::new(EffectBuilder {
+            model_id: id,
+            name,
+            sample_rate: self.inner.sample_rate,
+            buffer_size: self.inner.buffer_size,
+            request_tx: self.inner.engine.request_sender(),
+        }))
+    }
+
+    /// Returns whether GPU is available.
     pub fn has_gpu(&self) -> bool {
-        self.inner.backend_pool.has_gpu()
+        self.inner.has_gpu
     }
 
-    pub fn gpu_info(&self) -> Option<GpuInfo> {
-        self.inner.backend_pool.gpu_info().map(|info| GpuInfo {
-            name: info.name.clone(),
-            backend: format!("{:?}", info.backend),
-            max_memory_mb: info.max_memory_mb,
-        })
-    }
-
+    /// Returns the audio sample rate in Hz.
     pub fn sample_rate(&self) -> f32 {
         self.inner.sample_rate
     }
 
+    /// Returns the audio buffer size in samples.
     pub fn buffer_size(&self) -> usize {
         self.inner.buffer_size
     }
 
+    /// Returns the inference configuration.
     pub fn inference_config(&self) -> &InferenceConfig {
         &self.inner.inference_config
     }
@@ -135,14 +183,12 @@ fn stem_or(path: &str, fallback: &str) -> String {
         .to_string()
 }
 
-// ============================================================================
-// NeuralSystemBuilder
-// ============================================================================
-
+/// Builder for [`NeuralSystem`].
 pub struct NeuralSystemBuilder {
     inference_config: InferenceConfig,
     sample_rate: f32,
     buffer_size: usize,
+    backend_factory: Option<BackendFactory>,
 }
 
 impl Default for NeuralSystemBuilder {
@@ -151,33 +197,55 @@ impl Default for NeuralSystemBuilder {
             inference_config: InferenceConfig::default(),
             sample_rate: 44100.0,
             buffer_size: 512,
+            backend_factory: None,
         }
     }
 }
 
 impl NeuralSystemBuilder {
+    /// Sets the inference configuration for batching and threading.
     pub fn inference_config(mut self, config: InferenceConfig) -> Self {
         self.inference_config = config;
         self
     }
 
+    /// Sets the audio sample rate in Hz.
     pub fn sample_rate(mut self, sample_rate: f32) -> Self {
         self.sample_rate = sample_rate;
         self
     }
 
+    /// Sets the audio buffer size in samples.
     pub fn buffer_size(mut self, buffer_size: usize) -> Self {
         self.buffer_size = buffer_size;
         self
     }
 
+    /// Set the inference backend factory.
+    ///
+    /// If not set, the engine will fail to start (a backend is required).
+    pub fn backend(mut self, factory: BackendFactory) -> Self {
+        self.backend_factory = Some(factory);
+        self
+    }
+
+    /// Builds the NeuralSystem with the configured settings.
     pub fn build(self) -> Result<NeuralSystem> {
-        let backend_pool = BackendPool::new()?;
-        let engine = NeuralEngine::start(self.inference_config.clone())?;
+        let backend_factory = self.backend_factory.ok_or_else(|| {
+            crate::error::Error::InvalidConfig(
+                "No inference backend configured. Use .backend() to set one.".to_string(),
+            )
+        })?;
+
+        let engine = NeuralEngine::start_with(self.inference_config.clone(), backend_factory)?;
+
+        // Query GPU capability from the backend via a simple probe
+        // (We don't have direct access to the backend here since it's on the engine thread)
+        let has_gpu = false; // Conservative default; actual GPU detection is in the backend
 
         Ok(NeuralSystem {
             inner: Arc::new(NeuralSystemInner {
-                backend_pool,
+                has_gpu,
                 inference_config: self.inference_config,
                 sample_rate: self.sample_rate,
                 buffer_size: self.buffer_size,
@@ -187,27 +255,29 @@ impl NeuralSystemBuilder {
     }
 }
 
-// ============================================================================
-// Builder impls (tutti-core trait integration)
-// ============================================================================
-
 /// Implements `tutti_core::NeuralSynthBuilder` for a loaded synth model.
+#[cfg(feature = "midi")]
 struct SynthBuilder {
     model_id: NeuralModelId,
     name: String,
     sample_rate: f32,
     buffer_size: usize,
     request_tx: Sender<TensorRequest>,
+    midi_registry: Option<tutti_core::midi::MidiRegistry>,
 }
 
+#[cfg(feature = "midi")]
 impl tutti_core::NeuralSynthBuilder for SynthBuilder {
     fn build_voice(&self) -> tutti_core::Result<Box<dyn AudioUnit>> {
-        let node = NeuralSynthNode::new(
+        let mut node = NeuralSynthNode::new(
             self.model_id,
             self.sample_rate,
             self.buffer_size,
             self.request_tx.clone(),
         );
+        if let Some(ref registry) = self.midi_registry {
+            node = node.with_midi_registry(registry.clone());
+        }
         Ok(Box::new(node))
     }
 
@@ -255,10 +325,6 @@ impl tutti_core::NeuralEffectBuilder for EffectBuilder {
     }
 }
 
-// ============================================================================
-// Tests
-// ============================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -266,15 +332,85 @@ mod tests {
     #[allow(unused_imports)]
     use tutti_core::{NeuralEffectBuilder, NeuralSynthBuilder};
 
+    /// Simple passthrough backend for testing (no Burn dependency).
+    fn test_backend_factory() -> BackendFactory {
+        Box::new(|config| {
+            Ok(Box::new(TestBackend {
+                config,
+                models: std::collections::HashMap::new(),
+            }) as Box<dyn InferenceBackend>)
+        })
+    }
+
+    struct TestBackend {
+        config: InferenceConfig,
+        models: std::collections::HashMap<
+            NeuralModelId,
+            Box<dyn Fn(&[f32], [usize; 2]) -> Vec<f32> + Send>,
+        >,
+    }
+
+    impl InferenceBackend for TestBackend {
+        fn register_model(
+            &mut self,
+            f: Box<dyn Fn(&[f32], [usize; 2]) -> Vec<f32> + Send>,
+        ) -> NeuralModelId {
+            let id = NeuralModelId::new();
+            self.models.insert(id, f);
+            id
+        }
+
+        fn forward_grouped(
+            &mut self,
+            requests: &[(NeuralModelId, Vec<f32>, usize)],
+        ) -> core::result::Result<Vec<Vec<f32>>, tutti_core::InferenceError> {
+            let mut results = Vec::with_capacity(requests.len());
+            for (model_id, data, feat_dim) in requests {
+                if let Some(f) = self.models.get(model_id) {
+                    let batch = if *feat_dim > 0 {
+                        data.len() / feat_dim
+                    } else {
+                        1
+                    };
+                    results.push(f(data, [batch, *feat_dim]));
+                } else {
+                    results.push(data.clone());
+                }
+            }
+            Ok(results)
+        }
+
+        fn capabilities(&self) -> tutti_core::BackendCapabilities {
+            tutti_core::BackendCapabilities {
+                name: "Test".into(),
+                supports_batching: false,
+                has_gpu: false,
+            }
+        }
+
+        fn config(&self) -> &InferenceConfig {
+            &self.config
+        }
+
+        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+            self
+        }
+    }
+
     #[test]
     fn test_neural_system_creation() {
-        let neural = NeuralSystem::builder().build();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build();
         assert!(neural.is_ok());
     }
 
     #[test]
     fn test_builder_defaults() {
-        let neural = NeuralSystem::builder().build().unwrap();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         assert_eq!(neural.sample_rate(), 44100.0);
         assert_eq!(neural.buffer_size(), 512);
     }
@@ -288,6 +424,7 @@ mod tests {
                 batch_size: 4,
                 ..InferenceConfig::default()
             })
+            .backend(test_backend_factory())
             .build()
             .unwrap();
 
@@ -298,31 +435,44 @@ mod tests {
 
     #[test]
     fn test_clone() {
-        let neural = NeuralSystem::builder().build().unwrap();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         let neural2 = neural.clone();
         assert_eq!(neural.has_gpu(), neural2.has_gpu());
     }
 
+    #[cfg(feature = "midi")]
     #[test]
     fn test_load_synth_model() {
-        let neural = NeuralSystem::builder().build().unwrap();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         let builder = neural.load_synth_model("test_violin.mpk").unwrap();
         assert_eq!(builder.name(), "test_violin");
     }
 
     #[test]
     fn test_load_effect_model() {
-        let neural = NeuralSystem::builder().build().unwrap();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         let builder = neural.load_effect_model("amp_sim.mpk").unwrap();
         assert_eq!(builder.name(), "amp_sim");
     }
 
+    #[cfg(feature = "midi")]
     #[test]
     fn test_synth_builder_trait() {
-        let neural = NeuralSystem::builder().build().unwrap();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         let builder = neural.load_synth_model("test.mpk").unwrap();
 
-        // Uses tutti_core::NeuralSynthBuilder trait
         let voice = builder.build_voice();
         assert!(voice.is_ok());
 
@@ -333,10 +483,12 @@ mod tests {
 
     #[test]
     fn test_effect_builder_trait() {
-        let neural = NeuralSystem::builder().build().unwrap();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         let builder = neural.load_effect_model("test.mpk").unwrap();
 
-        // Uses tutti_core::NeuralEffectBuilder trait
         let effect = builder.build_effect();
         assert!(effect.is_ok());
 
@@ -345,23 +497,34 @@ mod tests {
         assert_eq!(effect.outputs(), 2);
     }
 
+    #[cfg(feature = "midi")]
     #[test]
     fn test_synth_builder_model_id() {
-        let neural = NeuralSystem::builder().build().unwrap();
+        let neural = NeuralSystem::builder()
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         let b1 = neural.load_synth_model("a.mpk").unwrap();
         let b2 = neural.load_synth_model("b.mpk").unwrap();
 
-        // Different models get different IDs
         assert_ne!(b1.model_id().as_u64(), b2.model_id().as_u64());
-
-        // Same builder always returns the same model_id (for batching)
         assert_eq!(b1.model_id(), b1.model_id());
     }
 
     #[test]
     fn test_effect_builder_latency() {
-        let neural = NeuralSystem::builder().buffer_size(256).build().unwrap();
+        let neural = NeuralSystem::builder()
+            .buffer_size(256)
+            .backend(test_backend_factory())
+            .build()
+            .unwrap();
         let builder = neural.load_effect_model("test.mpk").unwrap();
         assert_eq!(builder.latency(), 256);
+    }
+
+    #[test]
+    fn test_no_backend_fails() {
+        let result = NeuralSystem::builder().build();
+        assert!(result.is_err());
     }
 }

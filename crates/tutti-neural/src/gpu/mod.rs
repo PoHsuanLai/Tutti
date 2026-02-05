@@ -5,12 +5,14 @@
 
 pub(crate) mod batch;
 pub(crate) mod effect_queue;
-pub(crate) mod engine;
-pub(crate) mod fusion;
+#[cfg(feature = "midi")]
 mod midi_state;
 pub(crate) mod queue;
 
 pub use effect_queue::{shared_effect_queue, SharedEffectAudioQueue};
-pub use engine::{InferenceConfig, NeuralModelId};
-pub use midi_state::MidiState;
+#[cfg(feature = "midi")]
+pub use midi_state::{MidiState, MIDI_FEATURE_COUNT};
 pub use queue::ControlParams;
+
+// Re-export from tutti-core (canonical definitions)
+pub use tutti_core::NeuralModelId;

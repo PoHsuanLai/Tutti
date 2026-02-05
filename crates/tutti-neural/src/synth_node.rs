@@ -1,21 +1,77 @@
 //! Neural synth AudioUnit — MIDI → tensor → ControlParams → audio.
 //!
 //! Zero inputs, stereo output. No processing latency (params arrive async).
+//!
+//! ## RT Safety
+//!
+//! Uses pre-allocated Arc buffers to avoid heap allocation in the audio callback.
+//! The feature vector is small (12 floats), so we use a simple buffer pool.
 
 use crate::engine::{submit_request, ResponseChannel, TensorRequest};
-use crate::gpu::{ControlParams, MidiState, NeuralModelId};
+use crate::gpu::{ControlParams, MidiState, NeuralModelId, MIDI_FEATURE_COUNT};
 use crossbeam_channel::{Receiver, Sender};
+use std::sync::Arc;
+use tutti_core::midi::{MidiEvent, MidiRegistry};
 use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
 
-// ============================================================================
-// Struct
-// ============================================================================
+/// Pool of pre-allocated Arc<[f32]> buffers for RT-safe tensor submission.
+///
+/// For synth nodes, the feature vector is small (MIDI_FEATURE_COUNT = 12 floats).
+/// We use a small pool since MIDI events are sparse compared to audio buffers.
+const SYNTH_POOL_SIZE: usize = 4;
+
+struct SynthBufferPool {
+    buffers: [Option<Arc<[f32]>>; SYNTH_POOL_SIZE],
+    next_slot: usize,
+}
+
+impl SynthBufferPool {
+    fn new() -> Self {
+        // Pre-allocate buffers for MIDI feature vectors
+        let buffers = std::array::from_fn(|_| Some(Arc::from(vec![0.0f32; MIDI_FEATURE_COUNT])));
+        Self {
+            buffers,
+            next_slot: 0,
+        }
+    }
+
+    /// Get a buffer and fill it with the given data. RT-safe (no allocation).
+    #[inline]
+    fn get_and_fill(&mut self, data: &[f32; MIDI_FEATURE_COUNT]) -> Option<Arc<[f32]>> {
+        for _ in 0..SYNTH_POOL_SIZE {
+            let slot = self.next_slot;
+            self.next_slot = (self.next_slot + 1) % SYNTH_POOL_SIZE;
+
+            if let Some(arc) = self.buffers[slot].take() {
+                if Arc::strong_count(&arc) == 1 {
+                    let mut arc = arc;
+                    let buf = Arc::make_mut(&mut arc);
+                    buf.copy_from_slice(data);
+
+                    let result = Arc::clone(&arc);
+                    self.buffers[slot] = Some(arc);
+                    return Some(result);
+                } else {
+                    self.buffers[slot] = Some(arc);
+                }
+            }
+        }
+        None
+    }
+}
 
 /// Neural synthesizer AudioUnit.
 ///
 /// Receives ControlParams from the inference engine via crossbeam_channel.
 /// Each MIDI event that triggers inference submits a TensorRequest with
 /// a cloned Sender so the engine can push results back.
+///
+/// MIDI events are polled from the [`MidiRegistry`] during audio processing
+/// (pull-based, same pattern as `SoundFontUnit`).
+///
+/// ## RT Safety
+///
+/// Uses `SynthBufferPool` to avoid heap allocation when submitting requests.
 pub struct NeuralSynthNode {
     model_id: NeuralModelId,
     param_tx: Sender<ControlParams>,
@@ -26,11 +82,11 @@ pub struct NeuralSynthNode {
     phase: f32,
     midi_state: MidiState,
     request_tx: Sender<TensorRequest>,
+    midi_registry: Option<MidiRegistry>,
+    midi_buffer: Vec<MidiEvent>,
+    /// Pre-allocated buffer pool for RT-safe tensor submission
+    buffer_pool: SynthBufferPool,
 }
-
-// ============================================================================
-// Construction
-// ============================================================================
 
 impl NeuralSynthNode {
     pub fn new(
@@ -54,7 +110,60 @@ impl NeuralSynthNode {
             phase: 0.0,
             midi_state: MidiState::default(),
             request_tx,
+            midi_registry: None,
+            midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
+            buffer_pool: SynthBufferPool::new(),
         }
+    }
+
+    /// Set the MIDI registry for pull-based MIDI event delivery.
+    pub fn with_midi_registry(mut self, registry: MidiRegistry) -> Self {
+        self.midi_registry = Some(registry);
+        self
+    }
+
+    /// Poll MIDI events from the registry and process them.
+    ///
+    /// Called at the start of `tick()` and `process()` to receive MIDI events
+    /// that were queued via `engine.queue_midi()`.
+    fn poll_midi_events(&mut self) {
+        let registry = match &self.midi_registry {
+            Some(r) => r,
+            None => return,
+        };
+
+        let unit_id = self.model_id.as_u64();
+        let count = registry.poll_into(unit_id, &mut self.midi_buffer);
+
+        for i in 0..count {
+            let event = &self.midi_buffer[i];
+            if self.midi_state.apply(event) {
+                self.submit_inference_request();
+            }
+        }
+    }
+
+    /// Submit an inference request with current MIDI state.
+    ///
+    /// RT-safe: Uses pre-allocated buffer pool, no heap allocation.
+    fn submit_inference_request(&mut self) {
+        let features = self.midi_state.to_features();
+        // Get a pre-allocated buffer from the pool (RT-safe)
+        if let Some(arc_buffer) = self.buffer_pool.get_and_fill(&features) {
+            let _ = submit_request(
+                &self.request_tx,
+                TensorRequest {
+                    model_id: self.model_id,
+                    input: arc_buffer,
+                    input_shape: [1, MIDI_FEATURE_COUNT],
+                    response: ResponseChannel::Params {
+                        sender: self.param_tx.clone(),
+                        buffer_size: self.buffer_size,
+                    },
+                },
+            );
+        }
+        // If pool exhausted, drop this request (RT-safe behavior)
     }
 
     /// Drain the param channel, keeping only the latest.
@@ -64,10 +173,6 @@ impl NeuralSynthNode {
         }
     }
 }
-
-// ============================================================================
-// AudioUnit
-// ============================================================================
 
 impl AudioUnit for NeuralSynthNode {
     fn inputs(&self) -> usize {
@@ -79,6 +184,7 @@ impl AudioUnit for NeuralSynthNode {
     }
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
+        self.poll_midi_events();
         self.update_params();
 
         let params = &self.current_params;
@@ -104,6 +210,7 @@ impl AudioUnit for NeuralSynthNode {
     }
 
     fn process(&mut self, size: usize, _input: &BufferRef, output: &mut BufferMut) {
+        self.poll_midi_events();
         self.update_params();
 
         let params = &self.current_params;
@@ -169,10 +276,6 @@ impl AudioUnit for NeuralSynthNode {
     }
 }
 
-// ============================================================================
-// Clone
-// ============================================================================
-
 impl Clone for NeuralSynthNode {
     fn clone(&self) -> Self {
         Self {
@@ -185,47 +288,13 @@ impl Clone for NeuralSynthNode {
             phase: self.phase,
             midi_state: self.midi_state.clone(),
             request_tx: self.request_tx.clone(),
+            midi_registry: self.midi_registry.clone(),
+            midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
+            // Each clone gets its own buffer pool (pre-allocated at clone time, not RT)
+            buffer_pool: SynthBufferPool::new(),
         }
     }
 }
-
-// ============================================================================
-// MidiAudioUnit
-// ============================================================================
-
-impl tutti_core::MidiAudioUnit for NeuralSynthNode {
-    fn queue_midi(&mut self, events: &[tutti_core::MidiEvent]) {
-        for event in events {
-            if self.midi_state.apply(event) {
-                let features = self.midi_state.to_features();
-                let _ = submit_request(
-                    &self.request_tx,
-                    TensorRequest {
-                        model_id: self.model_id,
-                        input: features.to_vec(),
-                        input_shape: [1, features.len()],
-                        response: ResponseChannel::Params {
-                            sender: self.param_tx.clone(),
-                            buffer_size: self.buffer_size,
-                        },
-                    },
-                );
-            }
-        }
-    }
-
-    fn has_midi_output(&self) -> bool {
-        false
-    }
-
-    fn clear_midi(&mut self) {
-        self.midi_state = MidiState::default();
-    }
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
 
 #[cfg(test)]
 mod tests {

@@ -10,33 +10,20 @@ categories = ["multimedia::audio"]
 
 [dependencies]
 # Tutti core (neural traits and infrastructure)
-tutti-core = { path = "../tutti-core", default-features = false, features = ["neural", "midi"] }
+tutti-core = { path = "../tutti-core", default-features = false, features = ["neural"] }
 
-# MIDI support (Phase 2)
-tutti-midi-io = { path = "../tutti-midi-io" }
-midi-msg = { version = "0.8", default-features = false }
+# MIDI support (optional)
+midi-msg = { version = "0.8", default-features = false, optional = true }
 
-# ML/GPU framework (using stable crates.io version)
-burn = { version = "0.20", default-features = false, features = ["wgpu", "ndarray", "fusion", "autodiff", "std"] }
-# burn-import removed: 0.20 has safetensors compilation errors
-# TODO: Re-add when burn-import 0.21+ is available with working safetensors support
-wgpu = "26"  # Match burn 0.20's wgpu version (26.0.1)
-
-# Lock-free data structures
+# Lock-free channels
 crossbeam-channel = "0.5.15"
-dashmap = "6.1"
 
 # Utilities
 tracing = "0.1"
 thiserror = "2"
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.8"
-parking_lot = "0.12"
-pollster = "0.3"
-uuid = { version = "1.0", features = ["v4"] }
 
 [features]
 default = []
-# safetensors disabled due to burn-import 0.20 compilation errors
-# TODO: Re-enable when burn-import 0.21+ is available
-# safetensors = ["dep:burn-import"]
+
+# MIDI support for neural synths
+midi = ["tutti-core/midi", "dep:midi-msg"]
