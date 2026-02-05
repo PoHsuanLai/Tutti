@@ -897,7 +897,7 @@ impl crate::instance::PluginInstance for Vst2Instance {
         Vst2Instance::has_editor(self)
     }
 
-    fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
+    unsafe fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
         Vst2Instance::open_editor(self, parent)
     }
 

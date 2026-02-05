@@ -9,7 +9,7 @@ use crate::shared_memory::SharedAudioBuffer;
 use crate::transport::MessageTransport;
 use ringbuf::traits::{Consumer, Producer, Split};
 use std::cell::UnsafeCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Arc;
 use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, F64};
@@ -191,12 +191,12 @@ impl PluginClient {
     async fn load_plugin_on_server(
         transport: &mut MessageTransport,
         config: &BridgeConfig,
-        plugin_path: &PathBuf,
+        plugin_path: &Path,
         sample_rate: f64,
     ) -> Result<Box<PluginMetadata>> {
         transport
             .send_host_message(&HostMessage::LoadPlugin {
-                path: plugin_path.clone(),
+                path: plugin_path.to_path_buf(),
                 sample_rate,
                 block_size: config.max_buffer_size,
                 preferred_format: config.preferred_format,
@@ -206,7 +206,7 @@ impl PluginClient {
         match transport.recv_bridge_message().await? {
             BridgeMessage::PluginLoaded { metadata } => Ok(metadata),
             BridgeMessage::Error { message } => Err(BridgeError::LoadFailed {
-                path: plugin_path.clone(),
+                path: plugin_path.to_path_buf(),
                 stage: LoadStage::Opening,
                 reason: message,
             }),

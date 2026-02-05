@@ -104,7 +104,7 @@ impl Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let transport = vst3_host::TransportState::new();
@@ -135,7 +135,7 @@ impl Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let vst3_transport = convert_transport_to_vst3(transport);
@@ -166,7 +166,7 @@ impl Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let vst3_transport = convert_transport_to_vst3(transport);
@@ -203,7 +203,7 @@ impl Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let transport = vst3_host::TransportState::new();
@@ -231,7 +231,7 @@ impl Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let vst3_transport = convert_transport_to_vst3(transport);
@@ -261,7 +261,7 @@ impl Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let vst3_transport = convert_transport_to_vst3(transport);
@@ -291,7 +291,7 @@ impl Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let transport = vst3_host::TransportState::new();
@@ -720,13 +720,13 @@ impl crate::instance::PluginInstance for Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let vst3_transport = ctx
             .transport
             .map(convert_transport_to_vst3)
-            .unwrap_or_else(vst3_host::TransportState::new);
+            .unwrap_or_default();
 
         let vst3_params = ctx.param_changes.map(convert_params_to_vst3);
         let vst3_note_expr = ctx
@@ -767,13 +767,13 @@ impl crate::instance::PluginInstance for Vst3Instance {
             buffer.inputs,
             buffer.outputs,
             buffer.num_samples,
-            buffer.sample_rate as f64,
+            buffer.sample_rate,
         );
 
         let vst3_transport = ctx
             .transport
             .map(convert_transport_to_vst3)
-            .unwrap_or_else(vst3_host::TransportState::new);
+            .unwrap_or_default();
 
         let vst3_params = ctx.param_changes.map(convert_params_to_vst3);
         let vst3_note_expr = ctx
@@ -830,8 +830,8 @@ impl crate::instance::PluginInstance for Vst3Instance {
         self.inner.has_editor()
     }
 
-    fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> crate::error::Result<(u32, u32)> {
-        unsafe { Vst3Instance::open_editor(self, parent) }
+    unsafe fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> crate::error::Result<(u32, u32)> {
+        Vst3Instance::open_editor(self, parent)
     }
 
     fn close_editor(&mut self) {

@@ -203,7 +203,7 @@ impl PluginInstance for ClapInstance {
         self.inner.has_gui()
     }
 
-    fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
+    unsafe fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
         self.inner
             .open_gui(parent)
             .map_err(|e| BridgeError::LoadFailed {
@@ -376,7 +376,7 @@ fn convert_process_output(output: clap_host::instance::ProcessOutput) -> Process
     let midi_events: crate::protocol::MidiEventVec = output
         .midi_events
         .iter()
-        .filter_map(|e| {
+        .map(|e| {
             let msg = match e.data {
                 clap_host::MidiData::NoteOn { key, velocity } => ChannelVoiceMsg::NoteOn {
                     note: key,
@@ -410,11 +410,11 @@ fn convert_process_output(output: clap_host::instance::ProcessOutput) -> Process
                     }
                 }
             };
-            Some(crate::protocol::MidiEvent {
+            crate::protocol::MidiEvent {
                 frame_offset: e.sample_offset as usize,
                 channel: Channel::from_u8(e.channel),
                 msg,
-            })
+            }
         })
         .collect();
 

@@ -6,7 +6,9 @@
 use crate::client::PluginClient;
 use crate::error::{BridgeError, LoadStage};
 use crate::protocol::BridgeConfig;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(any(feature = "vst2", feature = "vst3", feature = "clap"))]
+use std::path::PathBuf;
 use tutti_core::{get_param_or, NodeRegistry, NodeRegistryError};
 
 // Allow BridgeError to convert to NodeRegistryError
@@ -208,6 +210,7 @@ pub fn register_system_clap_plugins(
 /// Register all system plugins (VST2, VST3, CLAP)
 ///
 /// Convenience function that scans all standard plugin directories.
+#[allow(unused_variables, unused_mut)]
 pub fn register_all_system_plugins(
     registry: &NodeRegistry,
     runtime: &tokio::runtime::Handle,

@@ -270,12 +270,10 @@ impl PluginServer {
             }
 
             HostMessage::GetParameter { param_id } => {
-                let value = if let Some(ref mut plugin) = self.plugin {
-                    // Use unified trait method
-                    Some(plugin.as_instance_mut().get_parameter(param_id) as f32)
-                } else {
-                    None
-                };
+                let value = self
+                    .plugin
+                    .as_mut()
+                    .map(|plugin| plugin.as_instance_mut().get_parameter(param_id) as f32);
 
                 Ok(Some(BridgeMessage::ParameterValue { value }))
             }
@@ -304,7 +302,8 @@ impl PluginServer {
                 if let Some(ref mut plugin) = self.plugin {
                     // Convert parent_handle u64 to raw pointer
                     let parent_ptr = parent_handle as *mut std::ffi::c_void;
-                    let result = plugin.as_instance_mut().open_editor(parent_ptr);
+                    // Safety: parent_handle was provided by the host and is expected to be a valid window handle
+                    let result = unsafe { plugin.as_instance_mut().open_editor(parent_ptr) };
 
                     match result {
                         Ok((width, height)) => {

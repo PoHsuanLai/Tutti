@@ -116,7 +116,7 @@ pub trait PluginInstance: Send {
     ///
     /// # Safety
     /// The parent pointer must be a valid window handle for the platform.
-    fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)>;
+    unsafe fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)>;
 
     /// Close the plugin editor.
     fn close_editor(&mut self);
