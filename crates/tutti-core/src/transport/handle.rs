@@ -1,6 +1,7 @@
 //! Fluent API handles for transport and metronome control
 
-use super::{Metronome, MetronomeMode, MotionState, TransportManager};
+use super::click::{ClickState, MetronomeMode};
+use super::{MotionState, TransportManager};
 use crate::compat::Arc;
 
 /// Fluent API handle for metronome control.
@@ -13,71 +14,71 @@ use crate::compat::Arc;
 ///     .metronome()
 ///     .volume(0.7)
 ///     .accent_every(4)
-///     .mode(MetronomeMode::Always);
+///     .always();
 /// ```
 pub struct MetronomeHandle {
-    metronome: Arc<Metronome>,
+    state: Arc<ClickState>,
 }
 
 impl MetronomeHandle {
-    pub(crate) fn new(metronome: Arc<Metronome>) -> Self {
-        Self { metronome }
+    pub(crate) fn new(state: Arc<ClickState>) -> Self {
+        Self { state }
     }
 
     /// Set metronome volume (0.0 to 1.0).
     pub fn volume(self, volume: f32) -> Self {
-        self.metronome.set_volume(volume);
+        self.state.set_volume(volume);
         self
     }
 
     /// Get metronome volume.
     pub fn get_volume(&self) -> f32 {
-        self.metronome.volume()
+        self.state.volume()
     }
 
     /// Set accent pattern (accent every N beats).
     pub fn accent_every(self, beats: u32) -> Self {
-        self.metronome.set_accent_every(beats);
+        self.state.set_accent_every(beats);
         self
     }
 
     /// Get accent pattern.
     pub fn get_accent_every(&self) -> u32 {
-        self.metronome.accent_every()
+        self.state.accent_every()
     }
 
     /// Set metronome mode.
     pub fn mode(self, mode: MetronomeMode) -> Self {
-        self.metronome.set_mode(mode);
+        self.state.set_mode(mode);
         self
     }
 
     /// Get metronome mode.
     pub fn get_mode(&self) -> MetronomeMode {
-        self.metronome.mode()
+        self.state.mode()
     }
 
     /// Turn metronome off.
     pub fn off(self) -> Self {
-        self.metronome.set_mode(MetronomeMode::Off);
+        self.state.set_mode(MetronomeMode::Off);
         self
     }
 
     /// Enable metronome always.
     pub fn always(self) -> Self {
-        self.metronome.set_mode(MetronomeMode::Always);
+        self.state.set_mode(MetronomeMode::Always);
         self
     }
 
     /// Enable metronome for recording only.
     pub fn recording_only(self) -> Self {
-        self.metronome.set_mode(MetronomeMode::RecordingOnly);
+        self.state.set_mode(MetronomeMode::RecordingOnly);
         self
     }
 
     /// Enable metronome for preroll only.
     pub fn preroll_only(self) -> Self {
-        self.metronome.set_mode(MetronomeMode::PrerollOnly);
+        self.state.set_mode(MetronomeMode::PrerollOnly);
         self
     }
 }
@@ -98,16 +99,17 @@ impl MetronomeHandle {
 ///         .always()
 ///     .play();
 /// ```
+#[derive(Clone)]
 pub struct TransportHandle {
     transport: Arc<TransportManager>,
-    metronome: Arc<Metronome>,
+    click_state: Arc<ClickState>,
 }
 
 impl TransportHandle {
-    pub(crate) fn new(transport: Arc<TransportManager>, metronome: Arc<Metronome>) -> Self {
+    pub(crate) fn new(transport: Arc<TransportManager>, click_state: Arc<ClickState>) -> Self {
         Self {
             transport,
-            metronome,
+            click_state,
         }
     }
 
@@ -140,20 +142,20 @@ impl TransportHandle {
         self
     }
 
-    /// Locate to position in beats.
-    pub fn locate(self, beats: f64) -> Self {
+    /// Seek to position in beats.
+    pub fn seek(self, beats: f64) -> Self {
         self.transport.locate(beats);
         self
     }
 
-    /// Locate to position and start playing.
-    pub fn locate_and_play(self, beats: f64) -> Self {
+    /// Seek to position and start playing.
+    pub fn seek_and_play(self, beats: f64) -> Self {
         self.transport.locate_and_play(beats);
         self
     }
 
-    /// Locate with smooth declick.
-    pub fn locate_with_declick(self, beats: f64) -> Self {
+    /// Seek with smooth declick.
+    pub fn seek_with_declick(self, beats: f64) -> Self {
         self.transport.locate_with_declick(beats);
         self
     }
@@ -243,7 +245,7 @@ impl TransportHandle {
         matches!(self.transport.motion_state(), MotionState::Stopped)
     }
 
-    /// Check if transport is seeking/locating.
+    /// Check if transport is seeking.
     pub fn is_seeking(&self) -> bool {
         matches!(self.transport.motion_state(), MotionState::DeclickToLocate)
     }
@@ -268,6 +270,40 @@ impl TransportHandle {
         self.transport.motion_state()
     }
 
+    /// Check if recording is active.
+    pub fn is_recording(&self) -> bool {
+        self.transport.is_recording()
+    }
+
+    /// Start recording.
+    pub fn record(self) -> Self {
+        self.transport.set_recording(true);
+        self
+    }
+
+    /// Stop recording.
+    pub fn stop_recording(self) -> Self {
+        self.transport.set_recording(false);
+        self
+    }
+
+    /// Check if in preroll count-in.
+    pub fn is_in_preroll(&self) -> bool {
+        self.transport.is_in_preroll()
+    }
+
+    /// Start preroll count-in.
+    pub fn start_preroll(self) -> Self {
+        self.transport.set_in_preroll(true);
+        self
+    }
+
+    /// End preroll count-in.
+    pub fn end_preroll(self) -> Self {
+        self.transport.set_in_preroll(false);
+        self
+    }
+
     /// Get metronome handle for fluent configuration.
     ///
     /// # Example
@@ -278,11 +314,16 @@ impl TransportHandle {
     ///     .always();
     /// ```
     pub fn metronome(&self) -> MetronomeHandle {
-        MetronomeHandle::new(self.metronome.clone())
+        MetronomeHandle::new(self.click_state.clone())
     }
 
     /// Get reference to underlying TransportManager for direct access.
     pub fn manager(&self) -> &Arc<TransportManager> {
         &self.transport
+    }
+
+    /// Get reference to the click state for creating ClickNode.
+    pub fn click_state(&self) -> &Arc<ClickState> {
+        &self.click_state
     }
 }

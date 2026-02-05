@@ -5,11 +5,11 @@
 //! only occur during `register_unit()` which runs at setup time, never on
 //! the audio thread.
 
-use crate::compat::{Arc, Vec};
+use crate::compat::Arc;
 use crossbeam_channel::{Receiver, Sender};
 use dashmap::DashMap;
 
-use super::MidiEvent;
+use tutti_midi::MidiEvent;
 
 /// Maximum number of MIDI events buffered per unit per audio cycle.
 ///
@@ -37,7 +37,7 @@ impl MidiEventSlot {
 ///
 /// # RT Safety
 ///
-/// - `poll()` / `poll_into()`: Called on the audio thread. Uses `DashMap::get()`
+/// - `poll_into()`: Called on the audio thread. Uses `DashMap::get()`
 ///   (read shard lock — no contention with other readers) + `try_recv()` (lock-free).
 ///   No heap allocations. No blocking.
 /// - `queue()`: Called from the UI/frontend thread. Uses `DashMap::get()` +
@@ -125,23 +125,6 @@ impl MidiRegistry {
         count
     }
 
-    /// Poll for MIDI events (convenience wrapper, allocates).
-    ///
-    /// Returns a `Vec` of all pending events. This allocates on every call —
-    /// prefer `poll_into()` on the audio thread with a pre-allocated buffer.
-    pub fn poll(&self, unit_id: u64) -> Vec<MidiEvent> {
-        let slot = match self.slots.get(&unit_id) {
-            Some(s) => s,
-            None => return Vec::new(),
-        };
-
-        let mut events = Vec::new();
-        while let Ok(event) = slot.rx.try_recv() {
-            events.push(event);
-        }
-        events
-    }
-
     /// Check if an audio unit has pending MIDI events.
     pub fn has_events(&self, unit_id: u64) -> bool {
         self.slots
@@ -174,6 +157,7 @@ impl Default for MidiRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compat::Vec;
 
     fn note_on(note: u8, vel: u8) -> MidiEvent {
         MidiEvent::note_on_builder(note, vel).build()
@@ -183,12 +167,8 @@ mod tests {
         MidiEvent::note_off_builder(note).build()
     }
 
-    fn note_on_at(note: u8, vel: u8, offset: usize) -> MidiEvent {
-        MidiEvent::note_on_builder(note, vel).offset(offset).build()
-    }
-
     #[test]
-    fn test_queue_and_poll() {
+    fn test_queue_and_poll_into() {
         let registry = MidiRegistry::new();
         let unit_id = 12345u64;
 
@@ -197,8 +177,9 @@ mod tests {
         registry.queue(unit_id, &events);
         assert!(registry.has_events(unit_id));
 
-        let polled = registry.poll(unit_id);
-        assert_eq!(polled.len(), 2);
+        let mut buffer = [note_on(0, 0); 16];
+        let count = registry.poll_into(unit_id, &mut buffer);
+        assert_eq!(count, 2);
         assert!(!registry.has_events(unit_id));
     }
 
@@ -213,12 +194,13 @@ mod tests {
 
         assert_eq!(registry.pending_count(), 2);
 
-        let events1 = registry.poll(unit1);
-        assert_eq!(events1.len(), 1);
+        let mut buffer = [note_on(0, 0); 16];
+        let count1 = registry.poll_into(unit1, &mut buffer);
+        assert_eq!(count1, 1);
         assert_eq!(registry.pending_count(), 1);
 
-        let events2 = registry.poll(unit2);
-        assert_eq!(events2.len(), 1);
+        let count2 = registry.poll_into(unit2, &mut buffer);
+        assert_eq!(count2, 1);
         assert_eq!(registry.pending_count(), 0);
     }
 
@@ -250,9 +232,10 @@ mod tests {
         assert!(registry.has_events(unit_id));
 
         registry.unregister_unit(unit_id);
-        // After unregister, poll returns empty
-        let events = registry.poll(unit_id);
-        assert!(events.is_empty());
+        // After unregister, poll_into returns 0
+        let mut buffer = [note_on(0, 0); 16];
+        let count = registry.poll_into(unit_id, &mut buffer);
+        assert_eq!(count, 0);
     }
 
     #[test]
@@ -266,8 +249,9 @@ mod tests {
         registry.queue(unit_id, &events);
 
         // Should get at most EVENTS_PER_UNIT events
-        let polled = registry.poll(unit_id);
-        assert!(polled.len() <= super::EVENTS_PER_UNIT);
-        assert!(!polled.is_empty());
+        let mut buffer = [note_on(0, 0); 512];
+        let count = registry.poll_into(unit_id, &mut buffer);
+        assert!(count <= super::EVENTS_PER_UNIT);
+        assert!(count > 0);
     }
 }

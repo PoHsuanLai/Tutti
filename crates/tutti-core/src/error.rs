@@ -60,6 +60,9 @@ pub enum Error {
 
     #[error("LUFS measurement not available (already in use or not initialized)")]
     LufsNotReady,
+
+    #[error("Synth error: {0}")]
+    Synth(String),
 }
 
 /// Result type alias.

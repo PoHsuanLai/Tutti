@@ -4,6 +4,56 @@ use crate::compat::{Arc, Box, HashMap, RwLock, String, ToString, Vec};
 use crate::error::NodeRegistryError;
 use fundsp::prelude::AudioUnit;
 
+/// Ergonomic wrapper for node parameters.
+///
+/// Provides clean getter methods instead of external helper functions.
+///
+/// # Example
+/// ```ignore
+/// engine.register("filter", |p| {
+///     lowpass_hz::<f32>(p.get_or("cutoff", 1000.0))
+/// });
+/// ```
+pub struct Params<'a> {
+    inner: &'a NodeParams,
+}
+
+impl<'a> Params<'a> {
+    /// Create a new Params wrapper.
+    pub fn new(params: &'a NodeParams) -> Self {
+        Self { inner: params }
+    }
+
+    /// Get a required parameter. Panics if missing or wrong type.
+    ///
+    /// # Panics
+    /// Panics if parameter is missing or cannot be converted to type T.
+    pub fn get<T: ParamConvert>(&self, name: &str) -> T {
+        self.inner
+            .get(name)
+            .and_then(|v| T::from_param(v))
+            .unwrap_or_else(|| panic!("Missing or invalid parameter: {}", name))
+    }
+
+    /// Get a parameter with a default value.
+    pub fn get_or<T: ParamConvert>(&self, name: &str, default: T) -> T {
+        self.inner
+            .get(name)
+            .and_then(|v| T::from_param(v))
+            .unwrap_or(default)
+    }
+
+    /// Try to get a parameter, returning None if missing.
+    pub fn try_get<T: ParamConvert>(&self, name: &str) -> Option<T> {
+        self.inner.get(name).and_then(|v| T::from_param(v))
+    }
+
+    /// Check if a parameter exists.
+    pub fn has(&self, name: &str) -> bool {
+        self.inner.contains_key(name)
+    }
+}
+
 /// Create a `NodeParams` HashMap with key-value pairs.
 ///
 /// # Example
@@ -180,15 +230,9 @@ impl NodeRegistry {
         }
     }
 
-    /// Register a node constructor
+    /// Register a node constructor (legacy verbose API).
     ///
-    /// # Example
-    /// ```ignore
-    /// registry.register("sine", |params| {
-    ///     let freq: f32 = get_param_or(params, "frequency", 440.0);
-    ///     Ok(Box::new(sine_hz(freq)))
-    /// });
-    /// ```
+    /// Prefer `register_simple` for cleaner syntax.
     pub fn register<F>(&self, name: impl Into<String>, constructor: F)
     where
         F: Fn(&NodeParams) -> Result<Box<dyn AudioUnit>, NodeRegistryError> + Send + Sync + 'static,
@@ -197,6 +241,63 @@ impl NodeRegistry {
         self.constructors
             .write()
             .insert(name, Arc::new(constructor));
+    }
+
+    /// Register a parameterized node with clean API.
+    ///
+    /// The closure receives a `Params` wrapper with ergonomic getters and returns
+    /// any `AudioUnit` directly (auto-boxed, infallible).
+    ///
+    /// # Example
+    /// ```ignore
+    /// registry.register_simple("filter", |p| {
+    ///     lowpass_hz::<f32>(p.get_or("cutoff", 1000.0))
+    /// });
+    ///
+    /// registry.register_simple("osc", |p| {
+    ///     let freq: f32 = p.get_or("freq", 440.0);
+    ///     let shape: &str = p.try_get::<String>("shape")
+    ///         .map(|s| s.as_str())
+    ///         .unwrap_or("sine");
+    ///     match shape {
+    ///         "saw" => saw_hz(freq),
+    ///         _ => sine_hz(freq),
+    ///     }
+    /// });
+    /// ```
+    pub fn register_simple<F, U>(&self, name: impl Into<String>, constructor: F)
+    where
+        F: Fn(Params<'_>) -> U + Send + Sync + 'static,
+        U: AudioUnit + 'static,
+    {
+        let name = name.into();
+        self.constructors.write().insert(
+            name,
+            Arc::new(move |params| {
+                let p = Params::new(params);
+                Ok(Box::new(constructor(p)))
+            }),
+        );
+    }
+
+    /// Register a static node (no parameters needed).
+    ///
+    /// The closure receives nothing and returns any `AudioUnit`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// registry.register_static("white_noise", || white());
+    /// registry.register_static("a440", || sine_hz::<f32>(440.0));
+    /// ```
+    pub fn register_static<F, U>(&self, name: impl Into<String>, constructor: F)
+    where
+        F: Fn() -> U + Send + Sync + 'static,
+        U: AudioUnit + 'static,
+    {
+        let name = name.into();
+        self.constructors
+            .write()
+            .insert(name, Arc::new(move |_params| Ok(Box::new(constructor()))));
     }
 
     /// Create a node instance from registered type

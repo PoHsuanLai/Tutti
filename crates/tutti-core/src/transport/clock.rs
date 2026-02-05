@@ -367,25 +367,6 @@ impl AutomationReaderInput {
         }
     }
 
-    pub fn from_envelope<T>(envelope: audio_automation::AutomationEnvelope<T>) -> Self
-    where
-        T: Clone + Send + Sync + 'static,
-    {
-        let envelope_arc = Arc::new(envelope);
-        let envelope_fn: AutomationEnvelopeFn =
-            Arc::new(move |beat: f64| envelope_arc.get_value_at(beat).unwrap_or(0.0));
-        Self::new(envelope_fn)
-    }
-
-    pub fn from_envelope_arc<T>(envelope: Arc<audio_automation::AutomationEnvelope<T>>) -> Self
-    where
-        T: Clone + Send + Sync + 'static,
-    {
-        let envelope_fn: AutomationEnvelopeFn =
-            Arc::new(move |beat: f64| envelope.get_value_at(beat).unwrap_or(0.0));
-        Self::new(envelope_fn)
-    }
-
     pub fn from_points(points: Vec<(f64, f32)>) -> Self {
         let envelope: AutomationEnvelopeFn = Arc::new(move |beat: f64| {
             if points.is_empty() {
@@ -424,49 +405,6 @@ impl AutomationReaderInput {
 
             let t = ((beat - b1) / (b2 - b1)) as f32;
             v1 + (v2 - v1) * t
-        });
-
-        Self::new(envelope)
-    }
-
-    pub fn from_points_with_curves(points: Vec<(f64, f32, audio_automation::CurveType)>) -> Self {
-        let envelope: AutomationEnvelopeFn = Arc::new(move |beat: f64| {
-            if points.is_empty() {
-                return 0.0;
-            }
-
-            // Find surrounding points
-            let mut prev_idx = 0;
-            let mut next_idx = 0;
-
-            for (i, (b, _, _)) in points.iter().enumerate() {
-                if *b <= beat {
-                    prev_idx = i;
-                }
-                if *b >= beat && next_idx == 0 {
-                    next_idx = i;
-                    break;
-                }
-            }
-
-            // Clamp to ends
-            if beat <= points[0].0 {
-                return points[0].1;
-            }
-            if beat >= points[points.len() - 1].0 || next_idx == 0 {
-                return points[points.len() - 1].1;
-            }
-
-            // Interpolate using curve type
-            let (b1, v1, _) = points[prev_idx];
-            let (b2, v2, curve) = points[next_idx];
-
-            if (b2 - b1).abs() < 1e-10 {
-                return v1;
-            }
-
-            let t = ((beat - b1) / (b2 - b1)) as f32;
-            curve.interpolate(v1, v2, t)
         });
 
         Self::new(envelope)

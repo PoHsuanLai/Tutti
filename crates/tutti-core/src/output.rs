@@ -5,8 +5,10 @@ extern crate std;
 
 use crate::callback::AudioCallbackState;
 use crate::compat::{String, Vec};
+use crate::metering::MeteringContext;
 use crate::{Error, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::time::Instant;
 
 /// Wrapper to hold `cpal::Stream` in a `Send` context.
 ///
@@ -121,20 +123,29 @@ where
 {
     let channels = config.channels as usize;
 
-    // Pre-allocated buffers (grow on first callback, then stable)
-    let mut output_f32 = Vec::<f32>::new();
-    let mut lufs_left = Vec::<f32>::new();
-    let mut lufs_right = Vec::<f32>::new();
+    // Pre-allocated buffers for RT-safety (no allocation in audio callback)
+    // 8192 frames * 2 channels = 16384 samples covers all common buffer sizes
+    const MAX_FRAMES: usize = 8192;
+    let mut output_f32 = Vec::<f32>::with_capacity(MAX_FRAMES * 2);
+    let mut metering_ctx = MeteringContext::new();
 
     let stream = device.build_output_stream(
         config,
         move |data: &mut [T], _: &cpal::OutputCallbackInfo| {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let frames = data.len() / channels;
+                let start = Instant::now();
 
+                // Process DSP graph
                 process_dsp(&state, frames, &mut output_f32);
-                state.metering.push_analysis_tap(&output_f32, frames);
-                update_lufs_metering(&state, frames, &output_f32, &mut lufs_left, &mut lufs_right);
+
+                // Update all meters (amplitude, stereo, LUFS, CPU)
+                let elapsed = start.elapsed();
+                state
+                    .metering
+                    .update_rt(&output_f32, frames, elapsed, &mut metering_ctx);
+
+                // Write to output device
                 write_output(data, channels, &output_f32);
             }));
 
@@ -153,40 +164,10 @@ where
 #[inline]
 fn process_dsp(state: &AudioCallbackState, frames: usize, output: &mut Vec<f32>) {
     let needed = frames * 2;
-    if output.len() < needed {
-        output.resize(needed, 0.0);
-    } else {
-        output[..needed].fill(0.0);
-    }
+    // RT-safe: Vec was pre-allocated with capacity for MAX_FRAMES * 2
+    // resize() within capacity is just a length adjustment + fill, no allocation
+    output.resize(needed, 0.0);
     crate::callback::process_audio(state, &mut output[..needed]);
-}
-
-/// Update LUFS metering (non-blocking, skips if locked).
-#[inline]
-fn update_lufs_metering(
-    state: &AudioCallbackState,
-    frames: usize,
-    output: &[f32],
-    lufs_left: &mut Vec<f32>,
-    lufs_right: &mut Vec<f32>,
-) {
-    if !state.metering.is_lufs_enabled() {
-        return;
-    }
-
-    if lufs_left.len() < frames {
-        lufs_left.resize(frames, 0.0);
-        lufs_right.resize(frames, 0.0);
-    }
-
-    for i in 0..frames {
-        lufs_left[i] = output[i * 2];
-        lufs_right[i] = output[i * 2 + 1];
-    }
-
-    if let Some(mut ebur128) = state.metering.ebur128().try_lock() {
-        let _ = ebur128.add_frames_planar_f32(&[&lufs_left[..frames], &lufs_right[..frames]]);
-    }
 }
 
 /// Convert stereo f32 to output format and write to device buffer.

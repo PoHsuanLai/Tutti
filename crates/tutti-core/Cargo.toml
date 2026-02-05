@@ -14,25 +14,32 @@ default = ["std"]
 
 # std feature: Only needed for CPAL audio I/O
 # Everything else works with no_std + alloc
-std = ["fundsp/std", "fundsp/files", "dep:cpal"]
+std = ["fundsp/std", "dep:cpal"]
+
+# Individual audio format support (each pulls only its codec)
+wav = ["std", "fundsp/wav"]
+flac = ["std", "fundsp/flac"]
+mp3 = ["std", "fundsp/mp3"]
+ogg = ["std", "fundsp/ogg"]
+
+# All file formats
+files = ["wav", "flac", "mp3", "ogg"]
 
 # Optional subsystems
 neural = []
-midi = ["dep:midi-msg"]
+midi = ["dep:tutti-midi"]
 
 [dependencies]
 thiserror = "2"
 dyn-clone = "1.0"
-tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
 
 # Audio
 cpal = { version = "0.15", optional = true }
 fundsp = { package = "fundsp-tutti", version = "0.23.0", path = "../fundsp-tutti", default-features = false }
-audio-automation = "0.1"
 
-# MIDI types (for MidiEvent definition)
-midi-msg = { version = "0.8", default-features = false, optional = true }
+# MIDI types (pure types from tutti-midi)
+tutti-midi = { version = "0.0.1", path = "../tutti-midi", default-features = false, optional = true }
 
 # Lock-free (no_std compatible)
 ringbuf = "0.4"
@@ -47,7 +54,6 @@ parking_lot = { version = "0.12", default-features = false }
 ebur128 = "0.1"
 
 [dev-dependencies]
-tracing-subscriber = "0.3"
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1.9.0"
 insta = { version = "1.41", features = ["yaml"] }

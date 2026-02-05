@@ -11,8 +11,8 @@ use super::tempo_map::{TempoMap, TempoMapSnapshot, TimeSignature, BBT};
 use crate::compat::Ordering;
 use crate::{AtomicDouble, AtomicFlag, AtomicFloat, AtomicU8};
 
-// Re-export MotionState from FSM
-pub use super::fsm::MotionState;
+// Re-export from FSM
+pub use super::fsm::{Direction, MotionState};
 
 impl MotionState {
     fn to_u8(self) -> u8 {
@@ -50,6 +50,9 @@ pub struct TransportManager {
     // Atomic mirrors for RT reads (updated by FSM processor)
     tempo: Arc<AtomicFloat>,
     paused: Arc<AtomicFlag>,
+    reverse: Arc<AtomicFlag>,
+    recording: Arc<AtomicFlag>,
+    in_preroll: Arc<AtomicFlag>,
     current_beat: Arc<AtomicDouble>,
     loop_enabled: Arc<AtomicFlag>,
     loop_start_beat: Arc<AtomicDouble>,
@@ -87,6 +90,9 @@ impl TransportManager {
             fsm,
             tempo: Arc::new(AtomicFloat::new(120.0)),
             paused: Arc::new(AtomicFlag::new(true)),
+            reverse: Arc::new(AtomicFlag::new(false)),
+            recording: Arc::new(AtomicFlag::new(false)),
+            in_preroll: Arc::new(AtomicFlag::new(false)),
             current_beat: Arc::new(AtomicDouble::new(0.0)),
             loop_enabled: Arc::new(AtomicFlag::new(false)),
             loop_start_beat: Arc::new(AtomicDouble::new(0.0)),
@@ -106,8 +112,9 @@ impl TransportManager {
     pub fn process_commands(&self) {
         while let Ok(event) = self.command_rx.try_recv() {
             let fsm = unsafe { &mut *self.fsm.get() };
-            let result = fsm.transition(event);
-            self.apply_fsm_result(result);
+            if let Some(result) = fsm.transition(event) {
+                self.apply_fsm_result(result);
+            }
         }
     }
 
@@ -124,6 +131,21 @@ impl TransportManager {
         &self.current_beat
     }
 
+    /// Get the paused flag Arc for sharing with ClickState.
+    pub fn paused(&self) -> &Arc<AtomicFlag> {
+        &self.paused
+    }
+
+    /// Get the recording flag Arc for sharing with ClickState.
+    pub fn recording(&self) -> &Arc<AtomicFlag> {
+        &self.recording
+    }
+
+    /// Get the preroll flag Arc for sharing with ClickState.
+    pub fn in_preroll(&self) -> &Arc<AtomicFlag> {
+        &self.in_preroll
+    }
+
     pub fn tempo_map_shared(&self) -> &Arc<ArcSwap<TempoMapSnapshot>> {
         &self.tempo_map_shared
     }
@@ -134,6 +156,30 @@ impl TransportManager {
 
     pub fn is_paused(&self) -> bool {
         self.paused.get()
+    }
+
+    /// Check if recording is active.
+    pub fn is_recording(&self) -> bool {
+        self.recording.get()
+    }
+
+    /// Check if in preroll count-in.
+    pub fn is_in_preroll(&self) -> bool {
+        self.in_preroll.get()
+    }
+
+    /// Check if playback is in reverse direction.
+    pub fn is_reverse(&self) -> bool {
+        self.reverse.get()
+    }
+
+    /// Get current playback direction.
+    pub fn direction(&self) -> Direction {
+        if self.reverse.get() {
+            Direction::Backwards
+        } else {
+            Direction::Forwards
+        }
     }
 
     pub fn get_current_beat(&self) -> f64 {
@@ -164,22 +210,52 @@ impl TransportManager {
         self.current_beat.set(beat);
     }
 
+    /// Set recording state.
+    pub fn set_recording(&self, recording: bool) {
+        self.recording.set(recording);
+    }
+
+    /// Set preroll state.
+    pub fn set_in_preroll(&self, in_preroll: bool) {
+        self.in_preroll.set(in_preroll);
+    }
+
     /// Advance position (called from audio callback - RT-safe).
     /// Returns true if loop boundary was hit.
     pub fn advance_position_rt(&self, beat_increment: f64) -> bool {
         let current = self.current_beat.get();
-        let new_position = current + beat_increment;
+        let reverse = self.reverse.get();
+
+        let new_position = if reverse {
+            current - beat_increment
+        } else {
+            current + beat_increment
+        };
 
         // Check for loop wrap
         if self.loop_enabled.get() {
             let start = self.loop_start_beat.get();
             let end = self.loop_end_beat.get();
-            if new_position >= end {
-                // Wrap to loop start
-                let wrapped = start + (new_position - end);
-                self.current_beat.set(wrapped);
-                return true;
+
+            if reverse {
+                // Reverse: wrap at loop start
+                if new_position < start {
+                    let wrapped = end - (start - new_position);
+                    self.current_beat.set(wrapped);
+                    return true;
+                }
+            } else {
+                // Forward: wrap at loop end
+                if new_position >= end {
+                    let wrapped = start + (new_position - end);
+                    self.current_beat.set(wrapped);
+                    return true;
+                }
             }
+        } else if reverse && new_position < 0.0 {
+            // Clamp at 0 when not looping in reverse
+            self.current_beat.set(0.0);
+            return false;
         }
 
         self.current_beat.set(new_position);
@@ -273,13 +349,21 @@ impl TransportManager {
                 let paused = matches!(motion, MotionState::Stopped | MotionState::DeclickToStop);
                 self.paused.set(paused);
             }
+            TransitionResult::DeclickStarted => {
+                // When declick starts (for stop or locate), set paused to stop audio immediately
+                self.motion_state
+                    .store(MotionState::DeclickToStop.to_u8(), Ordering::Release);
+                self.paused.set(true);
+            }
             TransitionResult::Locating(pos) => {
                 self.current_beat.set(pos.beats);
             }
             TransitionResult::LoopModeChanged(enabled) => {
                 self.loop_enabled.set(enabled);
             }
-            _ => {}
+            TransitionResult::DirectionChanged(direction) => {
+                self.reverse.set(matches!(direction, Direction::Backwards));
+            }
         }
     }
 

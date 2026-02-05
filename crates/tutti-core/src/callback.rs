@@ -2,7 +2,8 @@
 
 use crate::compat::{Arc, AtomicU64, Ordering, UnsafeCell};
 use crate::metering::MeteringManager;
-use crate::transport::TransportManager;
+use crate::transport::{ClickNode, ClickState, TransportManager};
+use fundsp::audionode::AudioNode;
 use fundsp::audiounit::AudioUnit;
 use fundsp::realnet::NetBackend;
 
@@ -19,6 +20,9 @@ pub(crate) struct AudioCallbackState {
     pub(crate) metering: Arc<MeteringManager>,
     pub(crate) sample_position: AtomicU64,
     pub(crate) sample_rate: f64,
+
+    /// Click node for metronome - mixed into output automatically
+    click_node: UnsafeCell<Option<ClickNode>>,
 
     /// MIDI input source (hardware/virtual ports) - optional
     #[cfg(feature = "midi")]
@@ -49,6 +53,7 @@ impl AudioCallbackState {
             metering,
             sample_position: AtomicU64::new(0),
             sample_rate,
+            click_node: UnsafeCell::new(None),
             #[cfg(feature = "midi")]
             midi_input: None,
             #[cfg(feature = "midi")]
@@ -56,6 +61,18 @@ impl AudioCallbackState {
             #[cfg(feature = "midi")]
             midi_routing: Arc::new(ArcSwap::from_pointee(MidiRoutingSnapshot::empty())),
         }
+    }
+
+    /// Set the click node for metronome audio.
+    pub(crate) fn set_click_node(&mut self, click_state: Arc<ClickState>, sample_rate: f64) {
+        let node = ClickNode::new(click_state, sample_rate);
+        unsafe { *self.click_node.get() = Some(node) }
+    }
+
+    #[inline]
+    #[allow(clippy::mut_from_ref)]
+    unsafe fn click_node_mut(&self) -> &mut Option<ClickNode> {
+        &mut *self.click_node.get()
     }
 
     pub(crate) fn set_net_backend(&mut self, backend: NetBackend) {
@@ -112,13 +129,33 @@ fn process_audio_inner(state: &AudioCallbackState, output: &mut [f32]) {
         let _looped = state.transport.advance_position_rt(beat_increment);
     }
 
-    // Process Net
+    // Process Net and click node
     let net_backend = unsafe { state.net_backend_mut() };
+    let click_node = unsafe { state.click_node_mut() };
+
     if let Some(ref mut backend) = net_backend {
-        for i in 0..frames {
-            let (l, r) = backend.get_stereo();
-            output[i * 2] = l;
-            output[i * 2 + 1] = r;
+        if state.transport.is_paused() {
+            // Silence output when stopped
+            for i in 0..frames {
+                output[i * 2] = 0.0;
+                output[i * 2 + 1] = 0.0;
+            }
+        } else {
+            // Process audio and mix in metronome click
+            for i in 0..frames {
+                let (l, r) = backend.get_stereo();
+
+                // Mix in click if present (click handles its own mode check)
+                let (click_l, click_r) = if let Some(ref mut click) = click_node {
+                    let frame = click.tick(&fundsp::prelude::Frame::default());
+                    (frame[0], frame[1])
+                } else {
+                    (0.0, 0.0)
+                };
+
+                output[i * 2] = l + click_l;
+                output[i * 2 + 1] = r + click_r;
+            }
         }
     }
 

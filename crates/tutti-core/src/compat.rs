@@ -16,7 +16,7 @@ pub use alloc::{
 pub use core::{
     any,
     cell::UnsafeCell,
-    sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering},
+    sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering},
 };
 
 pub use hashbrown::HashMap;

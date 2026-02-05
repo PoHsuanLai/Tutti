@@ -60,21 +60,12 @@ impl NeuralNodeManager {
 
     /// Register a neural node with its model ID.
     pub fn register(&self, node_id: NodeId, model_id: NeuralModelId) {
-        tracing::debug!(
-            "Registering neural node {:?} with model {}",
-            node_id,
-            model_id
-        );
         self.nodes.insert(node_id, model_id);
     }
 
     /// Unregister a neural node.
     pub(crate) fn unregister(&self, node_id: &NodeId) -> Option<NeuralModelId> {
-        let result = self.nodes.remove(node_id).map(|(_, v)| v);
-        if result.is_some() {
-            tracing::debug!("Unregistered neural node {:?}", node_id);
-        }
-        result
+        self.nodes.remove(node_id).map(|(_, v)| v)
     }
 
     /// Checks if a node is registered as neural.

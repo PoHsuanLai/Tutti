@@ -95,6 +95,18 @@ impl CpuMeter {
         self.average.get() * 100.0
     }
 
+    pub fn peak_percent(&self) -> f32 {
+        self.peak.get() * 100.0
+    }
+
+    pub fn current_percent(&self) -> f32 {
+        self.current.get() * 100.0
+    }
+
+    pub fn underruns(&self) -> u64 {
+        self.underruns.load(Ordering::Relaxed)
+    }
+
     pub fn reset(&self) {
         self.current.set(0.0);
         self.peak.set(0.0);

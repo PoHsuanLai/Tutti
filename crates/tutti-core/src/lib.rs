@@ -52,16 +52,17 @@ pub use net_frontend::{NodeInfo, TuttiNet};
 // Transport
 pub(crate) mod transport;
 pub use transport::{
-    automation_curves, AutomationEnvelopeFn, AutomationReaderInput, Metronome, MetronomeHandle,
-    MetronomeMode, MotionState, SmpteFrameRate, SyncSnapshot, SyncSource, SyncState, SyncStatus,
-    TempoMap, TimeSignature, TransportClock, TransportHandle, TransportManager, BBT,
+    automation_curves, click, AutomationEnvelopeFn, AutomationReaderInput, ClickNode, ClickState,
+    Direction, MetronomeHandle, MetronomeMode, MotionState, SmpteFrameRate, SyncSnapshot,
+    SyncSource, SyncState, SyncStatus, TempoMap, TimeSignature, TransportClock, TransportHandle,
+    TransportManager, BBT,
 };
 
 // Metering
 pub(crate) mod metering;
 pub use metering::{
     analyze_loudness, analyze_true_peak, AtomicAmplitude, AtomicStereoAnalysis, CpuMeter,
-    CpuMetrics, LoudnessResult, MeteringManager, StereoAnalysisSnapshot,
+    CpuMetrics, LoudnessResult, MeteringHandle, MeteringManager, StereoAnalysisSnapshot,
 };
 
 // Plugin delay compensation
@@ -72,12 +73,12 @@ pub use pdc::{DelayBuffer, PdcDelayUnit, PdcManager, PdcState};
 pub mod registry;
 pub use registry::{
     get_param, get_param_or, NodeConstructor, NodeParamValue, NodeParams, NodeRegistry,
-    ParamConvert,
+    ParamConvert, Params,
 };
 
 // Lock-free primitives
 pub(crate) mod lockfree;
-pub use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+pub use compat::{Arc, AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 pub use lockfree::{AtomicDouble, AtomicFlag, AtomicFloat};
 
 // FunDSP re-exports
@@ -121,8 +122,8 @@ pub mod midi;
 
 #[cfg(feature = "midi")]
 pub use midi::{
-    AsMidiAudioUnit, MidiAudioUnit, MidiEvent, MidiInputSource, MidiRegistry, MidiRoute,
-    MidiRoutingSnapshot, MidiRoutingTable, NoMidiInput,
+    Channel, ChannelVoiceMsg, ControlChange, MidiEvent, MidiEventBuilder, MidiInputSource, MidiMsg,
+    MidiRegistry, MidiRoute, MidiRoutingSnapshot, MidiRoutingTable, NoMidiInput, RawMidiEvent,
 };
 
 // Feature-gated: Neural audio
@@ -131,6 +132,14 @@ pub mod neural;
 
 #[cfg(feature = "neural")]
 pub use neural::{
-    ArcNeuralEffectBuilder, ArcNeuralSynthBuilder, BatchingStrategy, NeuralEffectBuilder,
+    ArcNeuralEffectBuilder, ArcNeuralSynthBuilder, BackendCapabilities, BackendFactory,
+    BatchingStrategy, InferenceBackend, InferenceConfig, InferenceError, NeuralEffectBuilder,
     NeuralModelId, NeuralNodeManager, NeuralSynthBuilder, SharedNeuralNodeManager,
 };
+
+// Parameter range and smoothing
+pub mod parameter;
+pub use parameter::{ParameterRange, ParameterScale};
+
+pub mod smooth;
+pub use smooth::{SmoothedStereo, SmoothedValue};

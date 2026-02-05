@@ -9,7 +9,7 @@ use crate::error::Result;
 use crate::metering::MeteringManager;
 use crate::net_frontend::TuttiNet;
 use crate::pdc::PdcManager;
-use crate::transport::{Metronome, TransportHandle, TransportManager};
+use crate::transport::{ClickState, TransportHandle, TransportManager};
 
 #[cfg(feature = "std")]
 use crate::output::AudioEngine;
@@ -24,14 +24,14 @@ pub struct TuttiSystem {
     net: Mutex<TuttiNet>,
     transport: Arc<TransportManager>,
     metering: Arc<MeteringManager>,
-    metronome: Arc<Metronome>,
+    click_state: Arc<ClickState>,
     pdc: Arc<PdcManager>,
     sample_rate: f64,
     #[cfg(not(feature = "std"))]
     channels: usize,
 
     /// MIDI routing table for channel/port/layer routing
-    #[cfg(all(feature = "std", feature = "midi"))]
+    #[cfg(feature = "midi")]
     midi_routing: Mutex<MidiRoutingTable>,
 }
 
@@ -127,7 +127,7 @@ impl TuttiSystem {
     ///     .play();
     /// ```
     pub fn transport(&self) -> TransportHandle {
-        TransportHandle::new(self.transport.clone(), self.metronome.clone())
+        TransportHandle::new(self.transport.clone(), self.click_state.clone())
     }
 
     /// Get the transport manager (advanced use - prefer `transport()` for fluent API).
@@ -140,9 +140,12 @@ impl TuttiSystem {
         &self.metering
     }
 
-    /// Get the metronome (advanced use - prefer `transport().metronome()` for fluent API).
-    pub fn metronome(&self) -> &Arc<Metronome> {
-        &self.metronome
+    /// Get the click state for creating a ClickNode.
+    ///
+    /// Prefer `transport().metronome()` for fluent configuration,
+    /// or `transport().click_state()` for node creation.
+    pub fn click_state(&self) -> &Arc<ClickState> {
+        &self.click_state
     }
 
     /// Get the PDC manager.
@@ -186,7 +189,7 @@ impl TuttiSystem {
     ///      .port(1, controller_synth_id);
     /// });
     /// ```
-    #[cfg(all(feature = "std", feature = "midi"))]
+    #[cfg(feature = "midi")]
     pub fn midi_routing<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut MidiRoutingTable) -> R,
@@ -212,7 +215,7 @@ impl TuttiSystem {
     ///
     /// system.set_midi_target(synth_id);
     /// ```
-    #[cfg(all(feature = "std", feature = "midi"))]
+    #[cfg(feature = "midi")]
     pub fn set_midi_target(&self, unit_id: u64) {
         self.midi_routing(|r| {
             r.clear().fallback(unit_id);
@@ -305,17 +308,19 @@ impl TuttiSystemBuilder {
 
         let transport = Arc::new(TransportManager::new(sample_rate));
         let metering = Arc::new(MeteringManager::new(sample_rate));
-        let metronome = Arc::new(Metronome::new(sample_rate as f32));
+        let click_state = Arc::new(ClickState::new(
+            transport.current_beat().clone(),
+            transport.paused().clone(),
+            transport.recording().clone(),
+            transport.in_preroll().clone(),
+        ));
 
         // Initialize PDC with outputs count (channels = outputs for now)
         let pdc = Arc::new(PdcManager::new(outputs, 0));
 
         // Create MIDI routing table
-        #[cfg(all(feature = "std", feature = "midi"))]
-        let midi_routing = {
-            let table = MidiRoutingTable::new();
-            table
-        };
+        #[cfg(feature = "midi")]
+        let midi_routing = MidiRoutingTable::new();
 
         #[cfg(feature = "std")]
         {
@@ -323,6 +328,9 @@ impl TuttiSystemBuilder {
                 AudioCallbackState::new(transport.clone(), metering.clone(), sample_rate);
 
             callback_state.set_net_backend(backend);
+
+            // Set up click node for metronome (mixed into output automatically)
+            callback_state.set_click_node(click_state.clone(), sample_rate);
 
             // Wire up MIDI input routing if configured
             #[cfg(feature = "midi")]
@@ -351,12 +359,12 @@ impl TuttiSystemBuilder {
             net: Mutex::new(net),
             transport,
             metering,
-            metronome,
+            click_state,
             pdc,
             sample_rate,
             #[cfg(not(feature = "std"))]
             channels: outputs,
-            #[cfg(all(feature = "std", feature = "midi"))]
+            #[cfg(feature = "midi")]
             midi_routing: Mutex::new(midi_routing),
         })
     }
@@ -381,9 +389,8 @@ mod tests {
         let system = TuttiSystem::builder().build().unwrap();
 
         system.graph(|net| {
-            use crate::compat::Box;
             use fundsp::prelude::*;
-            let _node = net.add(Box::new(sine_hz::<f32>(440.0)));
+            let _node = net.add(sine_hz::<f32>(440.0));
         });
     }
 

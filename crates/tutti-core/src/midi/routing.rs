@@ -27,7 +27,7 @@
 use crate::compat::{Arc, Vec};
 use arc_swap::ArcSwap;
 
-use super::MidiEvent;
+use tutti_midi::MidiEvent;
 
 /// Maximum number of targets per routing rule.
 /// Supports layering up to 8 synths on a single channel.
@@ -115,8 +115,8 @@ impl MidiRoute {
         if !self.enabled {
             return false;
         }
-        let port_matches = self.port.map_or(true, |p| p == port);
-        let channel_matches = self.channel.map_or(true, |c| c == event.channel_num());
+        let port_matches = self.port.is_none_or(|p| p == port);
+        let channel_matches = self.channel.is_none_or(|c| c == event.channel_num());
         port_matches && channel_matches
     }
 }

@@ -18,7 +18,6 @@
 //! let back = cutoff.normalize(freq_hz);  // ~0.5
 //! ```
 
-
 /// How a parameter value is scaled between normalized (0-1) and real values.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ParameterScale {
@@ -440,7 +439,12 @@ mod tests {
         let db = -12.0;
         let linear = ParameterRange::db_to_linear(db);
         let back = ParameterRange::linear_to_db(linear);
-        assert!(approx_eq(db, back), "dB roundtrip failed: {} -> {}", db, back);
+        assert!(
+            approx_eq(db, back),
+            "dB roundtrip failed: {} -> {}",
+            db,
+            back
+        );
     }
 
     #[test]
