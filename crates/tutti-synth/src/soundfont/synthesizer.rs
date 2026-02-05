@@ -1,7 +1,7 @@
 //! SoundFont synthesizer wrapper
 
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
-use std::sync::Arc;
+use tutti_core::Arc;
 
 /// SoundFont synthesizer wrapper.
 pub struct SoundFontSynth {

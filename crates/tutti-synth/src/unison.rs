@@ -30,6 +30,58 @@ impl Default for UnisonConfig {
     }
 }
 
+impl UnisonConfig {
+    /// Create a new unison configuration builder.
+    pub fn builder() -> UnisonConfigBuilder {
+        UnisonConfigBuilder::default()
+    }
+}
+
+/// Builder for [`UnisonConfig`].
+#[derive(Debug, Clone, Default)]
+pub struct UnisonConfigBuilder {
+    voice_count: Option<u8>,
+    detune_cents: Option<f32>,
+    stereo_spread: Option<f32>,
+    phase_randomize: Option<bool>,
+}
+
+impl UnisonConfigBuilder {
+    /// Set the number of unison voices (1-16).
+    pub fn voices(mut self, count: u8) -> Self {
+        self.voice_count = Some(count.clamp(1, MAX_UNISON_VOICES as u8));
+        self
+    }
+
+    /// Set the detune spread in cents.
+    pub fn detune(mut self, cents: f32) -> Self {
+        self.detune_cents = Some(cents.max(0.0));
+        self
+    }
+
+    /// Set the stereo spread (0.0 = mono, 1.0 = full stereo).
+    pub fn spread(mut self, spread: f32) -> Self {
+        self.stereo_spread = Some(spread.clamp(0.0, 1.0));
+        self
+    }
+
+    /// Enable phase randomization on note-on.
+    pub fn randomize_phase(mut self) -> Self {
+        self.phase_randomize = Some(true);
+        self
+    }
+
+    /// Build the unison configuration.
+    pub fn build(self) -> UnisonConfig {
+        UnisonConfig {
+            voice_count: self.voice_count.unwrap_or(1),
+            detune_cents: self.detune_cents.unwrap_or(0.0),
+            stereo_spread: self.stereo_spread.unwrap_or(0.0),
+            phase_randomize: self.phase_randomize.unwrap_or(false),
+        }
+    }
+}
+
 /// Pre-computed parameters for a single unison voice.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnisonVoiceParams {
@@ -47,6 +99,7 @@ pub struct UnisonVoiceParams {
 ///
 /// Pre-computes frequency ratios, pan positions, and amplitudes
 /// for efficient RT-safe per-sample use.
+#[cfg(any(feature = "midi", test))]
 #[derive(Debug, Clone)]
 pub struct UnisonEngine {
     config: UnisonConfig,
@@ -56,6 +109,7 @@ pub struct UnisonEngine {
     rng_state: u32,
 }
 
+#[cfg(any(feature = "midi", test))]
 impl UnisonEngine {
     /// Create a new unison engine.
     pub fn new(config: UnisonConfig) -> Self {
@@ -81,21 +135,13 @@ impl UnisonEngine {
         let detune_semitones = self.config.detune_cents / 100.0;
 
         for i in 0..count {
-            // Spread voices evenly across detune range
-            // For odd count: center voice at 0, others spread symmetrically
-            // For even count: spread symmetrically with no center
             let position = if count == 1 {
                 0.0
             } else {
-                // Position from -1.0 to 1.0
                 (i as f32 / (count - 1) as f32) * 2.0 - 1.0
             };
 
-            // Frequency ratio from detune (in log space)
-            // semitones * position / 12 gives octave fraction
             let freq_ratio = 2.0_f32.powf(detune_semitones * position / 12.0);
-
-            // Pan position (spread from center)
             let pan = position * self.config.stereo_spread;
 
             self.voices[i] = UnisonVoiceParams {

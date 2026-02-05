@@ -1,13 +1,13 @@
 //! SoundFont file management and loading
 
 use crate::error::{Error, Result};
+use core::sync::atomic::{AtomicUsize, Ordering};
 use dashmap::DashMap;
 use rustysynth::{SoundFont, SynthesizerSettings};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use tutti_core::Arc;
 
 /// Handle to a loaded SoundFont
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -44,7 +44,7 @@ impl SoundFontSystem {
         let path = path.as_ref().to_path_buf();
 
         if let Some(handle) = self.path_to_handle.get(&path) {
-            return Ok(handle.clone());
+            return Ok(*handle);
         }
 
         // Load the SoundFont file (I/O happens outside lock)
@@ -64,7 +64,7 @@ impl SoundFontSystem {
         let handle = SoundFontHandle(handle_id);
 
         self.soundfonts.insert(handle_id, soundfont);
-        self.path_to_handle.insert(path, handle.clone());
+        self.path_to_handle.insert(path, handle);
 
         Ok(handle)
     }

@@ -9,28 +9,23 @@ repository = "https://github.com/PoHsuanLai/Tutti"
 [features]
 default = []
 
-# Individual building blocks
-voice-alloc = []
-modulation = []
-unison = []
-portamento = []
-tuning = []
+# MIDI support (for SoundFont MIDI input)
+midi = ["tutti-core/midi"]
 
 # SoundFont synthesis (requires tutti-core midi for MidiAudioUnit)
-soundfont = ["dep:rustysynth", "tutti-core/midi"]
+soundfont = ["dep:rustysynth", "midi"]
 
-# SynthBuilder fluent API (requires all synth blocks + tuning + midi)
-builder = ["synth-blocks", "tuning", "tutti-core/midi"]
-
-# Convenience feature groups
-synth-blocks = ["voice-alloc", "modulation", "unison", "portamento"]
-full = ["synth-blocks", "tuning", "soundfont", "builder"]
+# Everything
+full = ["soundfont"]
 
 [dependencies]
-tutti-core = { path = "../tutti-core" }
+tutti-core = { path = "../tutti-core", default-features = false }
 
 # Lock-free collections (for SoundFont manager)
 dashmap = "6.1"
+
+# RT-safe small vectors
+smallvec = "1.13"
 
 # Error handling
 thiserror = "2"

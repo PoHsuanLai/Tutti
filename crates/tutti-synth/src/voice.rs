@@ -456,7 +456,7 @@ impl VoiceAllocator {
         if let Some((i, _)) = releasing.min_by(|(_, a), (_, b)| {
             a.envelope_level
                 .partial_cmp(&b.envelope_level)
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .unwrap_or(core::cmp::Ordering::Equal)
         }) {
             return Some(i);
         }
@@ -474,7 +474,7 @@ impl VoiceAllocator {
                 .min_by(|(_, a), (_, b)| {
                     a.envelope_level
                         .partial_cmp(&b.envelope_level)
-                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .unwrap_or(core::cmp::Ordering::Equal)
                 })
                 .map(|(i, _)| i),
             AllocationStrategy::HighestNote => active.max_by_key(|(_, s)| s.note).map(|(i, _)| i),

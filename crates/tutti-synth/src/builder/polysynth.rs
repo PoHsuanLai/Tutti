@@ -1,4 +1,4 @@
-//! Polyphonic synthesizer implementing [`AudioUnit`] and [`MidiAudioUnit`].
+//! Polyphonic synthesizer implementing [`AudioUnit`].
 
 use super::voice::SynthVoice;
 use super::SynthConfig;
@@ -6,16 +6,21 @@ use crate::{
     AllocationResult, ModSourceValues, ModulationMatrix, Portamento, UnisonEngine, VoiceAllocator,
     VoiceAllocatorConfig,
 };
-use tutti_core::midi::{ChannelVoiceMsg, MidiAudioUnit, MidiEvent};
+use smallvec::SmallVec;
+use tutti_core::midi::{ChannelVoiceMsg, MidiEvent, MidiRegistry};
 use tutti_core::{AudioUnit, BufferMut, BufferRef, Shared, SignalFrame};
 
 extern crate alloc;
 use alloc::vec::Vec;
 
+/// Stack capacity for finished notes per tick (covers typical polyphony)
+const FINISHED_NOTES_CAPACITY: usize = 16;
+
 /// Polyphonic synthesizer combining tutti-synth building blocks with FunDSP.
 ///
 /// Created via [`SynthBuilder`](super::SynthBuilder). Implements [`AudioUnit`]
-/// for audio processing and [`MidiAudioUnit`] for MIDI input.
+/// for audio processing. MIDI events are received via pull-based polling from
+/// [`MidiRegistry`] during `tick()`/`process()`.
 #[derive(Clone)]
 pub struct PolySynth {
     config: SynthConfig,
@@ -30,11 +35,20 @@ pub struct PolySynth {
     /// Master volume (0.0 - 1.0)
     master_volume: Shared,
 
-    /// Pending MIDI events
-    pending_midi: Vec<MidiEvent>,
+    /// Unique ID for this synth instance (used for MIDI registry lookup)
+    id: u64,
+
+    /// MIDI registry for pull-based event delivery
+    midi_registry: Option<MidiRegistry>,
+
+    /// Pre-allocated buffer for RT-safe MIDI polling
+    midi_buffer: Vec<MidiEvent>,
 
     /// Output mix buffer (stereo)
     mix_buffer: [f32; 2],
+
+    /// Pre-allocated buffer for finished notes (RT-safe)
+    finished_notes: SmallVec<[u8; FINISHED_NOTES_CAPACITY]>,
 }
 
 impl PolySynth {
@@ -88,6 +102,11 @@ impl PolySynth {
 
         let master_volume = tutti_core::shared(1.0);
 
+        // Generate unique ID for MIDI registry lookup
+        use tutti_core::{AtomicU64, Ordering};
+        static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let id = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+
         Ok(Self {
             config,
             allocator,
@@ -97,9 +116,37 @@ impl PolySynth {
             modulation,
             mod_sources: ModSourceValues::default(),
             master_volume,
-            pending_midi: Vec::with_capacity(64),
+            id,
+            midi_registry: None,
+            midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
             mix_buffer: [0.0; 2],
+            finished_notes: SmallVec::new(),
         })
+    }
+
+    /// Set the MIDI registry for pull-based event delivery.
+    ///
+    /// When set, the synth will poll for MIDI events during `tick()`/`process()`.
+    pub fn with_midi_registry(mut self, registry: MidiRegistry) -> Self {
+        self.midi_registry = Some(registry);
+        self
+    }
+
+    /// Poll MIDI events from the registry.
+    ///
+    /// Called at the start of `tick()` and `process()`.
+    fn poll_midi_events(&mut self) {
+        let registry = match &self.midi_registry {
+            Some(r) => r.clone(),
+            None => return,
+        };
+
+        let count = registry.poll_into(self.id, &mut self.midi_buffer);
+        for i in 0..count {
+            // Copy event to avoid borrow conflict
+            let event = self.midi_buffer[i];
+            self.process_midi_event(&event);
+        }
     }
 
     /// Set master volume (0.0 - 1.0).
@@ -115,6 +162,73 @@ impl PolySynth {
     /// Get number of active voices.
     pub fn active_voice_count(&self) -> usize {
         self.voices.iter().filter(|v| v.active).count()
+    }
+
+    /// Get the current unison configuration, if unison is enabled.
+    pub fn unison_config(&self) -> Option<&crate::UnisonConfig> {
+        self.unison.as_ref().map(|u| u.config())
+    }
+
+    /// Get the number of unison voices (1 if unison is disabled).
+    pub fn unison_voice_count(&self) -> usize {
+        self.unison.as_ref().map_or(1, |u| u.voice_count())
+    }
+
+    /// Set the unison detune amount in cents.
+    ///
+    /// Takes effect immediately for all active voices on next tick.
+    pub fn set_unison_detune(&mut self, cents: f32) {
+        if let Some(ref mut unison) = self.unison {
+            unison.set_detune(cents);
+        }
+    }
+
+    /// Set the unison stereo spread (0.0 = mono, 1.0 = full stereo).
+    ///
+    /// Takes effect immediately for all active voices on next tick.
+    pub fn set_unison_stereo_spread(&mut self, spread: f32) {
+        if let Some(ref mut unison) = self.unison {
+            unison.set_stereo_spread(spread);
+        }
+    }
+
+    /// Set the number of unison voices.
+    ///
+    /// This rebuilds sub-voice DSP chains for all polyphonic voices.
+    /// New sub-voices start silent and will join on the next note-on.
+    pub fn set_unison_voice_count(&mut self, count: u8) {
+        if let Some(ref mut unison) = self.unison {
+            unison.set_voice_count(count);
+            let new_count = unison.voice_count();
+            for voice in &mut self.voices {
+                voice.resize_unison(new_count);
+            }
+        }
+    }
+
+    /// Replace the entire unison configuration.
+    ///
+    /// This rebuilds sub-voice DSP chains if the voice count changed.
+    pub fn set_unison_config(&mut self, config: crate::UnisonConfig) {
+        if let Some(ref mut unison) = self.unison {
+            unison.set_config(config);
+            let new_count = unison.voice_count();
+            for voice in &mut self.voices {
+                voice.resize_unison(new_count);
+            }
+        }
+    }
+
+    /// Seed the unison RNG for reproducible phase randomization.
+    pub fn seed_unison_rng(&mut self, seed: u32) {
+        if let Some(ref mut unison) = self.unison {
+            unison.seed_rng(seed);
+        }
+    }
+
+    /// Get the unison voice parameters as a slice (for inspection/visualization).
+    pub fn unison_params(&self) -> Option<&[crate::UnisonVoiceParams]> {
+        self.unison.as_ref().map(|u| u.all_params())
     }
 
     /// Process a single MIDI event.
@@ -201,36 +315,33 @@ impl PolySynth {
     fn handle_control_change(&mut self, control: tutti_core::midi::ControlChange, channel: u8) {
         use tutti_core::midi::ControlChange;
 
-        match control {
-            ControlChange::CC { control: cc, value } => {
-                // Update CC in mod sources
-                self.mod_sources.cc[cc as usize] = value as f32 / 127.0;
+        if let ControlChange::CC { control: cc, value } = control {
+            // Update CC in mod sources
+            self.mod_sources.cc[cc as usize] = value as f32 / 127.0;
 
-                // Handle special CCs
-                match cc {
-                    1 => {
-                        // Mod wheel
-                        self.mod_sources.mod_wheel = value as f32 / 127.0;
-                    }
-                    64 => {
-                        // Sustain pedal
-                        self.allocator.sustain_pedal(channel, value >= 64);
-                    }
-                    66 => {
-                        // Sostenuto pedal
-                        self.allocator.sostenuto_pedal(channel, value >= 64);
-                    }
-                    123 => {
-                        // All notes off
-                        for voice in &mut self.voices {
-                            voice.note_off();
-                        }
-                        self.allocator.all_notes_off(channel);
-                    }
-                    _ => {}
+            // Handle special CCs
+            match cc {
+                1 => {
+                    // Mod wheel
+                    self.mod_sources.mod_wheel = value as f32 / 127.0;
                 }
+                64 => {
+                    // Sustain pedal
+                    self.allocator.sustain_pedal(channel, value >= 64);
+                }
+                66 => {
+                    // Sostenuto pedal
+                    self.allocator.sostenuto_pedal(channel, value >= 64);
+                }
+                123 => {
+                    // All notes off
+                    for voice in &mut self.voices {
+                        voice.note_off();
+                    }
+                    self.allocator.all_notes_off(channel);
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 
@@ -257,7 +368,6 @@ impl AudioUnit for PolySynth {
             // Reset portamento to A4
             porta.reset(440.0);
         }
-        self.pending_midi.clear();
     }
 
     fn set_sample_rate(&mut self, sample_rate: f64) {
@@ -270,11 +380,8 @@ impl AudioUnit for PolySynth {
     }
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
-        // Process pending MIDI
-        let events: Vec<_> = self.pending_midi.drain(..).collect();
-        for event in events {
-            self.process_midi_event(&event);
-        }
+        // Poll MIDI from registry
+        self.poll_midi_events();
 
         // Update portamento
         if let Some(ref mut porta) = self.portamento {
@@ -309,7 +416,7 @@ impl AudioUnit for PolySynth {
 
         // Mix all voices with unison panning
         self.mix_buffer = [0.0, 0.0];
-        let mut finished_notes = Vec::new();
+        self.finished_notes.clear(); // RT-safe: reuse pre-allocated SmallVec
 
         for voice in &mut self.voices {
             if voice.active {
@@ -323,7 +430,7 @@ impl AudioUnit for PolySynth {
                     voice.envelope_level = level;
                     if level < 0.0001 {
                         voice.active = false;
-                        finished_notes.push(voice.note);
+                        self.finished_notes.push(voice.note);
                     }
                 }
 
@@ -333,7 +440,7 @@ impl AudioUnit for PolySynth {
         }
 
         // Mark finished voices
-        for note in finished_notes {
+        for &note in &self.finished_notes {
             self.mark_voice_finished(note);
         }
 
@@ -374,8 +481,7 @@ impl AudioUnit for PolySynth {
     }
 
     fn get_id(&self) -> u64 {
-        // Unique ID for PolySynth
-        0x504F4C5953594E54 // "POLYSYNT" in hex
+        self.id
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -389,7 +495,7 @@ impl AudioUnit for PolySynth {
     fn footprint(&self) -> usize {
         core::mem::size_of::<Self>()
             + self.voices.iter().map(|v| v.footprint()).sum::<usize>()
-            + self.pending_midi.capacity() * core::mem::size_of::<MidiEvent>()
+            + self.midi_buffer.capacity() * core::mem::size_of::<MidiEvent>()
     }
 
     fn allocate(&mut self) {
@@ -399,21 +505,20 @@ impl AudioUnit for PolySynth {
     }
 }
 
-impl MidiAudioUnit for PolySynth {
-    fn queue_midi(&mut self, events: &[MidiEvent]) {
-        self.pending_midi.extend_from_slice(events);
-    }
-
-    fn clear_midi(&mut self) {
-        self.pending_midi.clear();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builder::{OscillatorType, SynthBuilder};
     use crate::UnisonConfig;
+
+    /// Helper to create a synth with registry and queue MIDI events.
+    fn queue_midi_via_registry(
+        synth: &mut PolySynth,
+        registry: &MidiRegistry,
+        events: &[MidiEvent],
+    ) {
+        registry.queue(synth.get_id(), events);
+    }
 
     #[test]
     fn test_polysynth_creation() {
@@ -430,15 +535,17 @@ mod tests {
 
     #[test]
     fn test_polysynth_midi() {
+        let registry = MidiRegistry::new();
         let mut synth = SynthBuilder::new(44100.0)
             .poly(4)
             .oscillator(OscillatorType::Sine)
             .build()
-            .unwrap();
+            .unwrap()
+            .with_midi_registry(registry.clone());
 
-        // Queue a note on
+        // Queue a note on via registry
         let note_on = MidiEvent::note_on_builder(60, 100).build();
-        synth.queue_midi(&[note_on]);
+        queue_midi_via_registry(&mut synth, &registry, &[note_on]);
 
         // Process one sample to trigger the note
         let mut output = [0.0f32; 2];
@@ -483,6 +590,7 @@ mod tests {
 
     #[test]
     fn test_unison_stereo_output() {
+        let registry = MidiRegistry::new();
         let mut synth = SynthBuilder::new(44100.0)
             .poly(2)
             .oscillator(OscillatorType::Saw)
@@ -494,15 +602,16 @@ mod tests {
                 phase_randomize: false,
             })
             .build()
-            .unwrap();
+            .unwrap()
+            .with_midi_registry(registry.clone());
 
         // Verify unison is set up
         assert!(synth.unison.is_some());
         assert_eq!(synth.voices[0].sub_voice_count(), 3);
 
-        // Trigger a note
+        // Trigger a note via registry
         let note_on = MidiEvent::note_on_builder(60, 100).build();
-        synth.queue_midi(&[note_on]);
+        queue_midi_via_registry(&mut synth, &registry, &[note_on]);
 
         // Process samples and accumulate max output
         // Note: FunDSP EnvelopeIn samples at 2ms intervals (~88 samples at 44100Hz)
@@ -552,11 +661,9 @@ mod tests {
         use tutti_core::dsp::{adsr_live, saw, var};
         use tutti_core::AudioUnit;
 
-        // Create a minimal DSP chain similar to what we use
         let pitch = tutti_core::shared(440.0);
-        let gate = tutti_core::shared(0.0); // Gate OFF initially
+        let gate = tutti_core::shared(0.0);
 
-        // Simple: just saw oscillator - box it to use AudioUnit interface
         let mut osc: Box<dyn AudioUnit> = Box::new(var(&pitch) >> saw());
         osc.set_sample_rate(44100.0);
 
@@ -564,7 +671,6 @@ mod tests {
         osc.tick(&[], &mut out);
         assert!(out[0] != 0.0, "Oscillator should produce output");
 
-        // Test envelope with osc - using correct FunDSP pattern from live_adsr example
         let mut chain: Box<dyn AudioUnit> =
             Box::new(var(&pitch) >> saw() * (var(&gate) >> adsr_live(0.001, 0.1, 0.8, 0.1)));
         chain.set_sample_rate(44100.0);
@@ -586,6 +692,58 @@ mod tests {
         assert!(
             max_out > 0.0001,
             "Chain should produce output after triggering gate, max={}",
+            max_out
+        );
+    }
+
+    #[test]
+    fn test_dynamic_unison_resize() {
+        let registry = MidiRegistry::new();
+        // Create synth with 2-voice unison
+        let mut synth = SynthBuilder::new(44100.0)
+            .poly(2)
+            .oscillator(OscillatorType::Saw)
+            .unison(UnisonConfig {
+                voice_count: 2,
+                detune_cents: 10.0,
+                stereo_spread: 0.5,
+                phase_randomize: false,
+            })
+            .build()
+            .unwrap()
+            .with_midi_registry(registry.clone());
+
+        // Initial state: 2 sub-voices per polyphonic voice
+        assert_eq!(synth.voices[0].sub_voice_count(), 2);
+        assert_eq!(synth.voices[1].sub_voice_count(), 2);
+        assert_eq!(synth.unison_voice_count(), 2);
+
+        // Increase to 5 unison voices
+        synth.set_unison_voice_count(5);
+        assert_eq!(synth.voices[0].sub_voice_count(), 5);
+        assert_eq!(synth.voices[1].sub_voice_count(), 5);
+        assert_eq!(synth.unison_voice_count(), 5);
+
+        // Decrease to 3 unison voices
+        synth.set_unison_voice_count(3);
+        assert_eq!(synth.voices[0].sub_voice_count(), 3);
+        assert_eq!(synth.voices[1].sub_voice_count(), 3);
+        assert_eq!(synth.unison_voice_count(), 3);
+
+        // Verify it still produces sound
+        let note_on = MidiEvent::note_on_builder(60, 100).build();
+        queue_midi_via_registry(&mut synth, &registry, &[note_on]);
+
+        let mut output = [0.0f32; 2];
+        let mut max_out = 0.0f32;
+        for _ in 0..2000 {
+            synth.tick(&[], &mut output);
+            max_out = max_out.max(output[0].abs().max(output[1].abs()));
+        }
+
+        assert!(
+            max_out > 0.0,
+            "Synth should produce output after resize, got max={}",
             max_out
         );
     }

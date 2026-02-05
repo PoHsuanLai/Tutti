@@ -3,9 +3,12 @@
 //! Combines tutti-synth building blocks with FunDSP primitives into
 //! complete polyphonic synthesizers.
 
+#[cfg(feature = "midi")]
 mod polysynth;
+#[cfg(feature = "midi")]
 mod voice;
 
+#[cfg(feature = "midi")]
 pub use polysynth::PolySynth;
 
 use crate::{
@@ -13,11 +16,12 @@ use crate::{
 };
 
 /// Oscillator types wrapping FunDSP oscillators.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum OscillatorType {
     /// Sine wave oscillator
     Sine,
     /// Sawtooth wave oscillator (band-limited)
+    #[default]
     Saw,
     /// Square/pulse wave oscillator with configurable pulse width
     Square { pulse_width: f32 },
@@ -25,12 +29,6 @@ pub enum OscillatorType {
     Triangle,
     /// White noise generator
     Noise,
-}
-
-impl Default for OscillatorType {
-    fn default() -> Self {
-        Self::Saw
-    }
 }
 
 /// SVF (State Variable Filter) modes.
@@ -55,7 +53,7 @@ pub enum BiquadMode {
 }
 
 /// Filter types wrapping FunDSP filters.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum FilterType {
     /// Moog ladder filter (4-pole lowpass with resonance)
     Moog { cutoff: f32, resonance: f32 },
@@ -68,13 +66,8 @@ pub enum FilterType {
         mode: BiquadMode,
     },
     /// No filter (bypass)
+    #[default]
     None,
-}
-
-impl Default for FilterType {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// ADSR envelope configuration.
@@ -266,6 +259,7 @@ impl SynthBuilder {
     }
 
     /// Build the synthesizer.
+    #[cfg(feature = "midi")]
     pub fn build(self) -> crate::Result<PolySynth> {
         PolySynth::from_config(self.config)
     }

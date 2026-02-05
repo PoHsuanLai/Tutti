@@ -1,11 +1,18 @@
 //! SoundFont audio unit for Tutti
 //!
-//! Wraps RustySynth's Synthesizer to implement AudioUnit and MidiAudioUnit traits.
+//! Wraps RustySynth's Synthesizer to implement AudioUnit trait.
 //! Lock-free: each voice owns its Synthesizer instance (no shared state).
+//! MIDI events are received via pull-based polling from MidiRegistry.
+//!
+//! ## RT Safety
+//!
+//! Uses SmallVec for pending MIDI events to avoid heap allocation
+//! for typical MIDI event counts (up to 128 per buffer).
 
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
-use std::sync::Arc;
-use tutti_core::midi::{MidiAudioUnit, MidiEvent};
+use smallvec::SmallVec;
+use tutti_core::midi::{MidiEvent, MidiRegistry};
+use tutti_core::Arc;
 use tutti_core::{AudioUnit, BufferMut, BufferRef, Setting, SignalFrame};
 
 /// SoundFont synthesizer audio unit
@@ -16,7 +23,9 @@ use tutti_core::{AudioUnit, BufferMut, BufferRef, Setting, SignalFrame};
 ///
 /// **Lock-free**: Each SoundFontUnit owns its own Synthesizer instance.
 /// Synthesizer is Clone, so voices can be cloned without shared state.
-#[derive(Clone)]
+///
+/// **RT-safe**: Uses SmallVec for pending MIDI to avoid heap allocation
+/// for typical event counts.
 pub struct SoundFontUnit {
     synthesizer: Synthesizer,
     sample_rate: u32,
@@ -24,8 +33,9 @@ pub struct SoundFontUnit {
     left_buffer: Vec<f32>,
     right_buffer: Vec<f32>,
     buffer_pos: usize,
-    pending_midi: Vec<MidiEvent>,
-    midi_registry: Option<tutti_core::midi::MidiRegistry>,
+    /// Pending MIDI events - SmallVec avoids allocation for up to 128 events
+    pending_midi: SmallVec<[MidiEvent; 128]>,
+    midi_registry: Option<MidiRegistry>,
     midi_buffer: Vec<MidiEvent>,
 }
 
@@ -44,7 +54,7 @@ impl SoundFontUnit {
             left_buffer: vec![0.0; buffer_size],
             right_buffer: vec![0.0; buffer_size],
             buffer_pos: buffer_size,
-            pending_midi: Vec::with_capacity(128),
+            pending_midi: SmallVec::new(),
             midi_registry: None,
             midi_buffer: vec![MidiEvent::note_on_builder(0, 0).build(); 256],
         }
@@ -54,7 +64,7 @@ impl SoundFontUnit {
     pub fn with_midi(
         soundfont: Arc<SoundFont>,
         settings: &SynthesizerSettings,
-        midi_registry: tutti_core::midi::MidiRegistry,
+        midi_registry: MidiRegistry,
     ) -> Self {
         let mut unit = Self::new(soundfont, settings);
         unit.midi_registry = Some(midi_registry);
@@ -201,18 +211,18 @@ impl AudioUnit for SoundFontUnit {
         0x52555354595359 // "RUSTYSY" in hex
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
         self
     }
 
     fn footprint(&self) -> usize {
-        std::mem::size_of::<Self>()
-            + self.left_buffer.capacity() * std::mem::size_of::<f32>()
-            + self.right_buffer.capacity() * std::mem::size_of::<f32>()
+        core::mem::size_of::<Self>()
+            + self.left_buffer.capacity() * core::mem::size_of::<f32>()
+            + self.right_buffer.capacity() * core::mem::size_of::<f32>()
     }
 
     fn allocate(&mut self) {
@@ -220,13 +230,19 @@ impl AudioUnit for SoundFontUnit {
     }
 }
 
-impl MidiAudioUnit for SoundFontUnit {
-    fn queue_midi(&mut self, events: &[MidiEvent]) {
-        self.pending_midi.extend_from_slice(events);
-    }
-
-    fn clear_midi(&mut self) {
-        self.pending_midi.clear();
+impl Clone for SoundFontUnit {
+    fn clone(&self) -> Self {
+        Self {
+            synthesizer: self.synthesizer.clone(),
+            sample_rate: self.sample_rate,
+            buffer_size: self.buffer_size,
+            left_buffer: self.left_buffer.clone(),
+            right_buffer: self.right_buffer.clone(),
+            buffer_pos: self.buffer_pos,
+            pending_midi: SmallVec::new(), // Fresh empty buffer for clone
+            midi_registry: self.midi_registry.clone(),
+            midi_buffer: vec![MidiEvent::note_on_builder(0, 0).build(); 256],
+        }
     }
 }
 

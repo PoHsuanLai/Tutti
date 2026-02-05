@@ -35,6 +35,10 @@ pub(crate) struct SynthVoice {
     pub active: bool,
     /// Sub-voices for unison (1 if no unison)
     sub_voices: Vec<SubVoice>,
+    /// Stored config for rebuilding sub-voices
+    config: SynthConfig,
+    /// Current sample rate
+    sample_rate: f64,
 }
 
 impl SynthVoice {
@@ -79,6 +83,8 @@ impl SynthVoice {
             envelope_level: 0.0,
             active: false,
             sub_voices,
+            config: config.clone(),
+            sample_rate: config.sample_rate,
         }
     }
 
@@ -149,7 +155,7 @@ impl SynthVoice {
         }
     }
 
-    /// Get the number of sub-voices (for testing).
+    /// Get the number of sub-voices.
     #[cfg(test)]
     pub fn sub_voice_count(&self) -> usize {
         self.sub_voices.len()
@@ -196,8 +202,44 @@ impl SynthVoice {
 
     /// Set sample rate for all sub-voices.
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
+        self.sample_rate = sample_rate;
         for sub in &mut self.sub_voices {
             sub.dsp.set_sample_rate(sample_rate);
+        }
+    }
+
+    /// Resize sub-voices to match new unison count.
+    ///
+    /// Rebuilds DSP chains as needed. If the voice is currently active,
+    /// new sub-voices start silent (gate is shared, so they'll join on next note-on).
+    pub fn resize_unison(&mut self, new_count: usize) {
+        let new_count = new_count.max(1);
+        let current_count = self.sub_voices.len();
+
+        if new_count == current_count {
+            return;
+        }
+
+        if new_count > current_count {
+            // Add more sub-voices
+            for _ in current_count..new_count {
+                let pitch = tutti_core::shared(440.0);
+                let mut dsp =
+                    build_sub_voice_dsp(&self.config, &pitch, &self.gate, &self.filter_cutoff);
+                dsp.set_sample_rate(self.sample_rate);
+
+                // Initialize the DSP chain
+                let num_outputs = dsp.outputs();
+                let mut init_buf = [0.0f32; 2];
+                for _ in 0..100 {
+                    dsp.tick(&[], &mut init_buf[..num_outputs]);
+                }
+
+                self.sub_voices.push(SubVoice { pitch, dsp });
+            }
+        } else {
+            // Remove excess sub-voices
+            self.sub_voices.truncate(new_count);
         }
     }
 
@@ -253,27 +295,27 @@ fn build_sub_voice_dsp(
         (OscillatorType::Sine, FilterType::Moog { resonance, .. }) => Box::new(
             ((var(pitch) >> sine::<f32>()) | var(filter_cutoff))
                 >> moog_q::<f32>(*resonance)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Saw, FilterType::Moog { resonance, .. }) => Box::new(
             ((var(pitch) >> saw()) | var(filter_cutoff))
                 >> moog_q::<f32>(*resonance)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Square { .. }, FilterType::Moog { resonance, .. }) => Box::new(
             ((var(pitch) >> square()) | var(filter_cutoff))
                 >> moog_q::<f32>(*resonance)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Triangle, FilterType::Moog { resonance, .. }) => Box::new(
             ((var(pitch) >> triangle()) | var(filter_cutoff))
                 >> moog_q::<f32>(*resonance)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Noise, FilterType::Moog { resonance, .. }) => Box::new(
             (pink::<f32>() | var(filter_cutoff))
                 >> moog_q::<f32>(*resonance)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
 
         // SVF/Biquad - use Moog filter as approximation (mono)
@@ -281,31 +323,31 @@ fn build_sub_voice_dsp(
         | (OscillatorType::Sine, FilterType::Biquad { q, .. }) => Box::new(
             ((var(pitch) >> sine::<f32>()) | var(filter_cutoff))
                 >> moog_q::<f32>(*q)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Saw, FilterType::Svf { q, .. })
         | (OscillatorType::Saw, FilterType::Biquad { q, .. }) => Box::new(
             ((var(pitch) >> saw()) | var(filter_cutoff))
                 >> moog_q::<f32>(*q)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Square { .. }, FilterType::Svf { q, .. })
         | (OscillatorType::Square { .. }, FilterType::Biquad { q, .. }) => Box::new(
             ((var(pitch) >> square()) | var(filter_cutoff))
                 >> moog_q::<f32>(*q)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Triangle, FilterType::Svf { q, .. })
         | (OscillatorType::Triangle, FilterType::Biquad { q, .. }) => Box::new(
             ((var(pitch) >> triangle()) | var(filter_cutoff))
                 >> moog_q::<f32>(*q)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
         (OscillatorType::Noise, FilterType::Svf { q, .. })
         | (OscillatorType::Noise, FilterType::Biquad { q, .. }) => Box::new(
             (pink::<f32>() | var(filter_cutoff))
                 >> moog_q::<f32>(*q)
-                >> make_env(gate, env) * pass(),
+                >> (make_env(gate, env) * pass()),
         ),
     }
 }

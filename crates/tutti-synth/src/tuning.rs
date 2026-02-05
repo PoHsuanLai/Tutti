@@ -229,7 +229,7 @@ impl Tuning {
 
         // Compute frequency for each MIDI note
         for note in 0..128 {
-            let note_scale_pos = (note as usize) % scale_size;
+            let note_scale_pos = note % scale_size;
             let note_octave = (note as i32) / (scale_size as i32);
 
             // Get cents offset within scale
