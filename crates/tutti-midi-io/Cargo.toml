@@ -18,6 +18,7 @@ tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
 
 # Core types (MidiEvent, lockfree atomics)
+tutti-midi = { path = "../tutti-midi", default-features = false }
 tutti-core = { path = "../tutti-core", default-features = false, features = ["midi"] }
 
 # Lock-free
@@ -30,7 +31,6 @@ arc-swap = "1.7"
 
 # MIDI
 midir = { version = "0.9", optional = true }
-midi-msg = { version = "0.8", default-features = false }
 midly = "0.5"
 
 [dependencies.midi2]

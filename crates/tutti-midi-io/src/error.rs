@@ -36,18 +36,21 @@ impl From<midly::Error> for Error {
     }
 }
 
+#[cfg(feature = "midi-io")]
 impl From<midir::InitError> for Error {
     fn from(e: midir::InitError) -> Self {
         Error::MidiDevice(e.to_string())
     }
 }
 
+#[cfg(feature = "midi-io")]
 impl From<midir::ConnectError<midir::MidiOutput>> for Error {
     fn from(e: midir::ConnectError<midir::MidiOutput>) -> Self {
         Error::MidiPort(e.to_string())
     }
 }
 
+#[cfg(feature = "midi-io")]
 impl From<midir::ConnectError<midir::MidiInput>> for Error {
     fn from(e: midir::ConnectError<midir::MidiInput>) -> Self {
         Error::MidiPort(e.to_string())

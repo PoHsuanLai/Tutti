@@ -22,8 +22,6 @@ pub struct Midi2Event {
 }
 
 impl Midi2Event {
-    // ==================== Constructors ====================
-
     /// Create a MIDI 2.0 Note On event
     #[inline]
     pub fn note_on(frame: usize, group: u4, channel: u4, note: u7, velocity: u16) -> Self {
@@ -168,8 +166,6 @@ impl Midi2Event {
         }
     }
 
-    // ==================== Parsing ====================
-
     /// Try to create a Midi2Event from raw UMP data
     #[inline]
     pub fn try_from_ump(frame: usize, data: &[u32]) -> Option<Self> {
@@ -187,8 +183,6 @@ impl Midi2Event {
             data: [data[0], data[1]],
         })
     }
-
-    // ==================== Accessors ====================
 
     /// Get the UMP group (0-15).
     #[inline]
@@ -373,13 +367,11 @@ impl Midi2Event {
         self.velocity_16bit().map(midi2_velocity_to_midi1)
     }
 
-    // ==================== Conversion ====================
-
     /// Convert to MIDI 1.0 event (lossy - reduces resolution).
     ///
     /// Returns None for MIDI 2.0-only message types (per-note pitch bend, per-note controllers).
     pub fn to_midi1(&self) -> Option<crate::MidiEvent> {
-        use midi_msg::{Channel, ChannelVoiceMsg, ControlChange};
+        use crate::{Channel, ChannelVoiceMsg, ControlChange};
 
         use super::convert::midi2_cc_to_midi1;
 

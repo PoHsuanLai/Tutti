@@ -96,7 +96,7 @@ pub fn midi2_pitch_bend_to_midi1(v: u32) -> u16 {
 ///
 /// This upsamples resolution (7-bit to 16-bit velocity, etc).
 pub fn midi1_to_midi2(event: &crate::MidiEvent) -> Option<Midi2Event> {
-    use midi_msg::ChannelVoiceMsg;
+    use crate::ChannelVoiceMsg;
 
     let group = u4::new(0);
     let channel = u4::new(event.channel as u8);
@@ -117,7 +117,7 @@ pub fn midi1_to_midi2(event: &crate::MidiEvent) -> Option<Midi2Event> {
             midi1_velocity_to_midi2(velocity),
         )),
         ChannelVoiceMsg::ControlChange { control } => {
-            if let midi_msg::ControlChange::CC { control: cc, value } = control {
+            if let crate::ControlChange::CC { control: cc, value } = control {
                 Some(Midi2Event::control_change(
                     event.frame_offset,
                     group,
@@ -204,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_midi1_to_midi2_conversion() {
-        use midi_msg::{Channel, ChannelVoiceMsg};
+        use crate::{Channel, ChannelVoiceMsg};
 
         let midi1 = crate::MidiEvent::new(
             100,

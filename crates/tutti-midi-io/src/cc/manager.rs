@@ -49,8 +49,6 @@ impl CCMappingManager {
         Arc::clone(&self.mappings)
     }
 
-    // ==================== Mapping CRUD ====================
-
     /// Add a MIDI CC mapping
     pub fn add_mapping(
         &self,
@@ -117,8 +115,6 @@ impl CCMappingManager {
         self.mappings.clear();
     }
 
-    // ==================== MIDI Learn ====================
-
     /// Start MIDI learn mode for a target
     pub fn start_learn(
         &self,
@@ -151,8 +147,6 @@ impl CCMappingManager {
         let guard = self.learn_state.load();
         guard.as_ref().as_ref().map(|state| state.target.clone())
     }
-
-    // ==================== CC Processing ====================
 
     /// Process a MIDI CC message and return targets to apply (lock-free!)
     ///

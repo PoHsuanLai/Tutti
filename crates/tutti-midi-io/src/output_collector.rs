@@ -125,7 +125,7 @@ impl Default for MidiOutputAggregator {
 mod tests {
     use super::super::event::MidiEvent;
     use super::*;
-    use midi_msg::{Channel, ChannelVoiceMsg};
+    use crate::{Channel, ChannelVoiceMsg};
 
     #[test]
     fn test_channel_push_and_drain() {

@@ -213,8 +213,6 @@ impl AsyncMidiPort {
         }
     }
 
-    // ==================== RT Thread Methods ====================
-
     pub fn cycle_start_read_input(&self, _nframes: usize) -> Vec<MidiEvent> {
         let mut events = Vec::new();
         let consumer = unsafe { &mut *self.input_consumer.get() };

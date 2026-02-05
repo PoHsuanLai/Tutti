@@ -6,8 +6,8 @@
 
 use std::sync::Arc;
 
+use crate::ChannelVoiceMsg;
 use crate::MidiEvent;
-use midi_msg::ChannelVoiceMsg;
 
 mod expression;
 mod voice_map;
@@ -157,7 +157,7 @@ impl MpeProcessor {
                 self.expression.set_pressure(note, normalized);
             }
             ChannelVoiceMsg::ControlChange {
-                control: midi_msg::ControlChange::CC { control: cc, value },
+                control: crate::ControlChange::CC { control: cc, value },
             } => {
                 if cc == 74 {
                     // CC74 = Slide (MPE standard)
@@ -305,10 +305,6 @@ impl MpeProcessor {
             crate::event::UnifiedMidiEvent::V2(e) => self.process_midi2(e),
         }
     }
-
-    // ========================================================================
-    // Outgoing MPE: Send notes with automatic channel allocation
-    // ========================================================================
 
     /// Allocate a channel for a note and return the channel to send on
     ///

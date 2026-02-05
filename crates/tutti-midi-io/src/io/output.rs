@@ -6,8 +6,8 @@
 #![cfg_attr(not(feature = "midi-io"), allow(unused_imports, dead_code))]
 
 use crate::MidiEvent;
+use crate::MidiMsg;
 use crossbeam_channel::{bounded, Receiver, Sender};
-use midi_msg::MidiMsg;
 #[cfg(feature = "midi-io")]
 use midir::{MidiOutput, MidiOutputConnection};
 use std::sync::atomic::{AtomicBool, Ordering};

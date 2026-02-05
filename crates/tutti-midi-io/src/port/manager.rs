@@ -187,8 +187,6 @@ impl MidiPortManager {
         }
     }
 
-    // ==================== RT Thread Methods ====================
-
     /// Read input from all active ports. RT-safe (lock-free).
     pub fn cycle_start_read_all_inputs(&self, nframes: usize) -> &[(usize, MidiEvent)] {
         unsafe {
@@ -395,11 +393,6 @@ mod tests {
         assert_eq!(outputs.len(), 1);
         assert!(outputs.iter().any(|p| p.index == id3));
     }
-
-    // NOTE: This test is commented out because remove_port() method
-    // doesn't exist in the current API. Ports can be deactivated with set_port_active().
-    // #[test]
-    // fn test_remove_port() { ... }
 
     #[test]
     fn test_port_active_state() {

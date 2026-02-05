@@ -34,16 +34,8 @@
 //! }
 //! ```
 
-// =============================================================================
-// Error types
-// =============================================================================
-
 pub mod error;
 pub use error::{Error, Result};
-
-// =============================================================================
-// Main entry point
-// =============================================================================
 
 mod system;
 pub use system::{MidiSystem, MidiSystemBuilder};
@@ -60,29 +52,17 @@ pub use system::Midi2Handle;
 #[cfg(feature = "mpe")]
 pub use system::MpeHandle;
 
-// =============================================================================
-// Core types
-// =============================================================================
-
 pub(crate) mod event;
 pub use event::{MidiEvent, RawMidiEvent};
 
-// Re-export essential upstream types (users shouldn't need to import midi-msg directly)
-pub use midi_msg::{
+// Re-export essential upstream types from tutti-midi (users shouldn't need to import midi-msg directly)
+pub use tutti_midi::{
     Channel, ChannelModeMsg, ChannelVoiceMsg, ControlChange, MidiMsg, SystemCommonMsg,
     SystemRealTimeMsg,
 };
 
-// =============================================================================
-// Port management (internal routing)
-// =============================================================================
-
 pub(crate) mod port;
 pub use port::PortInfo;
-
-// =============================================================================
-// Hardware I/O (feature: midi-io)
-// =============================================================================
 
 #[cfg(feature = "midi-io")]
 pub(crate) mod io;
@@ -90,18 +70,10 @@ pub(crate) mod io;
 #[cfg(feature = "midi-io")]
 pub use io::{MidiInputDevice, MidiOutputDevice, MidiOutputMessage};
 
-// =============================================================================
-// CC mapping subsystem
-// =============================================================================
-
 pub mod cc;
 pub use cc::{
     CCMapping, CCMappingManager, CCNumber, CCProcessResult, CCTarget, MappingId, MidiChannel,
 };
-
-// =============================================================================
-// MIDI output collection (lock-free)
-// =============================================================================
 
 pub mod output_collector;
 pub use output_collector::{
@@ -109,33 +81,19 @@ pub use output_collector::{
     MidiOutputConsumer, MidiOutputProducer,
 };
 
-// =============================================================================
-// MIDI file parsing
-// =============================================================================
-
 pub(crate) mod file;
 pub use file::{MidiEventType, ParsedMidiFile, TimedMidiEvent};
 
-// =============================================================================
-// Utilities
-// =============================================================================
+pub mod note;
+pub use note::Note;
 
-pub(crate) mod utils;
-pub use utils::{gain_to_velocity, hz_to_note, note_to_hz, velocity_to_gain};
-
-// =============================================================================
-// MPE support (feature: mpe)
-// =============================================================================
+pub use tutti_midi::{gain_to_velocity, hz_to_note, note_to_hz, velocity_to_gain};
 
 #[cfg(feature = "mpe")]
 pub(crate) mod mpe;
 
 #[cfg(feature = "mpe")]
 pub use mpe::{MpeMode, MpeZone, MpeZoneConfig};
-
-// =============================================================================
-// MIDI 2.0 support (feature: midi2)
-// =============================================================================
 
 #[cfg(feature = "midi2")]
 pub(crate) mod midi2;

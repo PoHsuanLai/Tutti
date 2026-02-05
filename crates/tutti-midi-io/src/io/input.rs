@@ -291,7 +291,7 @@ impl Drop for MidiInputManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use midi_msg::{Channel, ChannelVoiceMsg, ControlChange};
+    use crate::{Channel, ChannelVoiceMsg, ControlChange};
 
     #[test]
     fn test_parse_note_on() {

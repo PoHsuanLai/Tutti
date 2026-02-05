@@ -43,6 +43,7 @@ pub use mpe_handle::MpeHandle;
 #[cfg(feature = "midi2")]
 pub use midi2_handle::Midi2Handle;
 
+#[cfg(feature = "midi-io")]
 use crate::error::Result;
 use crate::event::MidiEvent;
 use crate::port::{MidiPortManager, PortInfo};
@@ -60,10 +61,6 @@ use parking_lot::RwLock;
 
 #[cfg(feature = "midi2")]
 use crate::midi2::Midi2Event;
-
-// ============================================================================
-// MidiSystem - Main Entry Point
-// ============================================================================
 
 /// Complete MIDI system - the main entry point for tutti-midi
 ///
@@ -105,8 +102,6 @@ impl MidiSystem {
         MidiSystemBuilder::default()
     }
 
-    // ==================== Port Management ====================
-
     /// Create a new MIDI input port
     ///
     /// Returns the port index for later reference.
@@ -142,8 +137,6 @@ impl MidiSystem {
     pub fn list_output_ports(&self) -> Vec<PortInfo> {
         self.inner.port_manager.list_output_ports()
     }
-
-    // ==================== Hardware Device Connection ====================
 
     /// List available MIDI input devices
     #[cfg(feature = "midi-io")]
@@ -208,8 +201,6 @@ impl MidiSystem {
             .as_ref()
             .and_then(|m| m.connected_port_index())
     }
-
-    // ==================== MIDI 1.0 Output ====================
 
     /// Send a Note On message
     ///
@@ -302,8 +293,6 @@ impl MidiSystem {
         crate::midi_builder::MidiBuilder::new(Some(self))
     }
 
-    // ==================== MIDI 1.0 Event Creation ====================
-
     /// Create a Note On event (for scheduling, recording, etc.)
     ///
     /// * `channel` - MIDI channel (0-15)
@@ -372,8 +361,6 @@ impl MidiSystem {
         MidiEvent::poly_aftertouch(0, channel.min(15), note, pressure)
     }
 
-    // ==================== MPE (MIDI Polyphonic Expression) ====================
-
     /// Get the MPE sub-handle for per-note expression
     #[cfg(feature = "mpe")]
     pub fn mpe(&self) -> MpeHandle {
@@ -398,8 +385,6 @@ impl MidiSystem {
             .map(|p| !matches!(p.read().mode(), MpeMode::Disabled))
             .unwrap_or(false)
     }
-
-    // ==================== MIDI 2.0 ====================
 
     /// Get the MIDI 2.0 sub-handle for high-resolution messages
     #[cfg(feature = "midi2")]
@@ -433,8 +418,6 @@ impl MidiSystem {
             .port_manager
             .push_unified_event(port_index, event)
     }
-
-    // ==================== Advanced: Direct Access ====================
 
     /// Get direct access to the underlying port manager (advanced usage)
     ///

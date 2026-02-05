@@ -3,16 +3,16 @@
 //! Core types (`MidiEvent`, `RawMidiEvent`, `MidiEventBuilder`) are defined in
 //! `tutti-core` and re-exported here. This module adds MIDI 2.0 extensions.
 
-// Re-export core MIDI types from tutti-core
-pub use tutti_core::midi::{MidiEvent, RawMidiEvent};
+// Re-export core MIDI types from tutti-midi
+pub use tutti_midi::{MidiEvent, RawMidiEvent};
 
 // Re-export ControlChange for tests
 #[cfg(test)]
-pub(crate) use tutti_core::midi::ControlChange;
+pub(crate) use tutti_midi::ControlChange;
 
 // Import ChannelVoiceMsg for midi2 feature functions
 #[cfg(feature = "midi2")]
-use tutti_core::midi::ChannelVoiceMsg;
+use tutti_midi::ChannelVoiceMsg;
 
 /// Get velocity as 16-bit MIDI 2.0 value
 #[cfg(feature = "midi2")]
@@ -320,15 +320,15 @@ mod tests {
         #[test]
         fn test_velocity_normalized() {
             let event = MidiEvent::note_on(0, 0, 60, 127);
-            let norm = velocity_normalized(&event).unwrap();
+            let norm = event.velocity().map(|v| v as f32 / 127.0).unwrap();
             assert!((norm - 1.0).abs() < 0.01);
 
             let event = MidiEvent::note_on(0, 0, 60, 0);
-            let norm = velocity_normalized(&event).unwrap();
+            let norm = event.velocity().map(|v| v as f32 / 127.0).unwrap();
             assert!((norm - 0.0).abs() < 0.01);
 
             let event = MidiEvent::note_on(0, 0, 60, 64);
-            let norm = velocity_normalized(&event).unwrap();
+            let norm = event.velocity().map(|v| v as f32 / 127.0).unwrap();
             assert!((norm - 0.5).abs() < 0.02);
         }
 

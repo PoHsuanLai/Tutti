@@ -107,10 +107,6 @@ impl MpeHandle {
             .unwrap_or(false)
     }
 
-    // ========================================================================
-    // Incoming: Process unified MIDI events
-    // ========================================================================
-
     /// Process a unified MIDI event (MIDI 1.0 or 2.0)
     ///
     /// Dispatches to the appropriate handler based on the event type.
@@ -121,10 +117,6 @@ impl MpeHandle {
             p.write().process_unified(event);
         }
     }
-
-    // ========================================================================
-    // Outgoing MPE: Send notes with automatic channel allocation
-    // ========================================================================
 
     /// Allocate a channel for outgoing MPE note
     ///

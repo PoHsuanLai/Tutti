@@ -1,0 +1,17 @@
+[package]
+name = "tutti-midi"
+version = "0.0.1"
+edition = "2021"
+description = "Pure MIDI types for Tutti - MidiEvent, RawMidiEvent, utilities"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/PoHsuanLai/Tutti"
+keywords = ["midi", "audio", "real-time"]
+categories = ["multimedia::audio"]
+
+[features]
+default = []
+std = []
+
+[dependencies]
+midi-msg = { version = "0.8", default-features = false }
+libm = "0.2"

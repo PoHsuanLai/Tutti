@@ -7,8 +7,6 @@ use crate::midi2::Midi2Event;
 pub struct Midi2Handle;
 
 impl Midi2Handle {
-    // ==================== Event Creation ====================
-
     /// Create a MIDI 2.0 Note On event
     ///
     /// * `note` - MIDI note number (0-127)
@@ -98,8 +96,6 @@ impl Midi2Handle {
         Midi2Event::channel_pressure(0, u4::new(0), u4::new(channel.min(15)), press32)
     }
 
-    // ==================== Conversion ====================
-
     /// Convert a MIDI 1.0 event to MIDI 2.0 (upsamples resolution)
     pub fn convert_to_midi2(&self, event: &MidiEvent) -> Option<Midi2Event> {
         crate::midi2::midi1_to_midi2(event)
@@ -109,8 +105,6 @@ impl Midi2Handle {
     pub fn convert_to_midi1(&self, event: &Midi2Event) -> Option<MidiEvent> {
         event.to_midi1()
     }
-
-    // ==================== Value Conversion Utilities ====================
 
     /// Convert 7-bit MIDI 1.0 velocity to 16-bit MIDI 2.0
     #[inline]
