@@ -16,7 +16,7 @@ For audio UI components, see [Armas](https://github.com/PoHsuanLai/Armas).
 ## Design
 
 - **Audio graph**: Uses FunDSP's `Net` with macros (`chain!`, `mix!`, `stack!`)
-- **NodeRegistry**: Load resources once (`load_*`), create instances many times (`instance()`)
+- **NodeRegistry**: Load resources once (`load_*`), create instances many times (`create()`)
 - **Lock-free audio**: No allocations or mutexes in audio callback
 - **Feature gates**: Only compile what you need (core ~500KB)
 - **Fluent API**: Handles always available, no-op if subsystem disabled
@@ -53,8 +53,8 @@ engine.add_node("lowpass", |params| {
 });
 
 // Instantiate nodes (creates instances and returns NodeIds)
-let sine = engine.instance("sine", &params! { "frequency" => 440.0 })?;
-let filter = engine.instance("lowpass", &params! { "cutoff" => 2000.0 })?;
+let sine = engine.create("sine", &params! { "frequency" => 440.0 })?;
+let filter = engine.create("lowpass", &params! { "cutoff" => 2000.0 })?;
 
 // Build audio graph with macros
 engine.graph(|net| {
@@ -110,9 +110,9 @@ engine.add_node("my_filter", |params| {
 });
 
 // Instantiate nodes (create instances and add to graph)
-let synth = engine.instance("my_synth", &params! {})?;
-let reverb = engine.instance("reverb", &params! { "room_size" => 0.9 })?;
-let filter = engine.instance("my_filter", &params! { "cutoff" => 2000.0 })?;
+let synth = engine.create("my_synth", &params! {})?;
+let reverb = engine.create("reverb", &params! { "room_size" => 0.9 })?;
+let filter = engine.create("my_filter", &params! { "cutoff" => 2000.0 })?;
 
 // Build graph with node IDs
 engine.graph(|net| {
@@ -148,8 +148,8 @@ if transport.is_playing() {
     println!("Currently at beat: {}", beat);
 }
 
-// Locate and play
-transport.locate_and_play(8.0);
+// Seek and play
+transport.seek_and_play(8.0);
 
 // Transport modes
 transport.fast_forward();
@@ -200,8 +200,8 @@ engine.load_wav("kick", "kick.wav")?;
 engine.load_flac("snare", "snare.flac")?;
 
 // Instantiate and use in graph
-let kick = engine.instance("kick", &params! {})?;
-let snare = engine.instance("snare", &params! {})?;
+let kick = engine.create("kick", &params! {})?;
+let snare = engine.create("snare", &params! {})?;
 
 engine.graph(|net| {
     let mix = mix!(net, kick, snare);

@@ -51,7 +51,7 @@ engine.add_node("polysynth", |params| {
 })?;
 
 // Instantiate with parameters
-let synth = engine.instance("polysynth", &params! {
+let synth = engine.create("polysynth", &params! {
     "sample_rate" => 44100.0,
     "voices" => 8,
     "waveform" => "saw",
@@ -90,7 +90,7 @@ use tutti::prelude::*;
 engine.load_sf2("piano", "piano.sf2")?;
 
 // Instantiate with optional preset/channel
-let piano = engine.instance("piano", &params! {
+let piano = engine.create("piano", &params! {
     "preset" => 0,   // Optional: SoundFont preset number
     "channel" => 0,  // Optional: MIDI channel
 })?;
@@ -549,8 +549,8 @@ engine.add_node("bass", |params| {
 })?;
 
 // Instantiate many times
-let bass1 = engine.instance("bass", &params! { "frequency" => 110.0 })?;
-let bass2 = engine.instance("bass", &params! { "frequency" => 55.0 })?;
+let bass1 = engine.create("bass", &params! { "frequency" => 110.0 })?;
+let bass2 = engine.create("bass", &params! { "frequency" => 55.0 })?;
 ```
 
 ### Method 3: Via load_*() helpers (files)
@@ -564,7 +564,7 @@ engine.load_synth_mpk("synth", "model.mpk")?;
 engine.load_vst3("reverb", "plugin.vst3")?;
 
 // Then instance
-let piano = engine.instance("piano", &params! {})?;
+let piano = engine.create("piano", &params! {})?;
 ```
 
 ---

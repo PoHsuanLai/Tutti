@@ -11,7 +11,6 @@ use super::tempo_map::{TempoMap, TempoMapSnapshot, TimeSignature, BBT};
 use crate::compat::Ordering;
 use crate::{AtomicDouble, AtomicFlag, AtomicFloat, AtomicU8};
 
-// Re-export from FSM
 pub use super::fsm::{Direction, MotionState};
 
 impl MotionState {
@@ -40,14 +39,9 @@ impl MotionState {
 
 /// Transport manager - lock-free command queue for FSM updates.
 pub struct TransportManager {
-    // Lock-free command queue (UI thread sends, processor thread receives)
     command_tx: Sender<TransportEvent>,
     command_rx: Receiver<TransportEvent>,
-
-    // FSM state (owned by audio thread, accessed via UnsafeCell)
     fsm: UnsafeCell<TransportFSM>,
-
-    // Atomic mirrors for RT reads (updated by FSM processor)
     tempo: Arc<AtomicFloat>,
     paused: Arc<AtomicFlag>,
     reverse: Arc<AtomicFlag>,
@@ -262,8 +256,6 @@ impl TransportManager {
         false
     }
 
-    // FSM-based transport commands (lock-free via command queue)
-
     /// Start playback.
     pub fn play(&self) {
         self.send_command(TransportEvent::Play);
@@ -456,8 +448,6 @@ impl TransportManager {
     pub fn samples_per_beat(&self) -> f64 {
         self.sample_rate / self.beats_per_second()
     }
-
-    // --- External Sync API ---
 
     /// Get shared sync state (for butler thread access).
     pub fn sync_state(&self) -> &Arc<SyncState> {
@@ -727,8 +717,6 @@ mod tests {
             handle.join().expect("Thread panicked");
         }
     }
-
-    // --- External Sync Tests ---
 
     #[test]
     fn test_sync_default_state() {
