@@ -1,6 +1,9 @@
 //! Fluent handle for creating MIDI-responsive synthesizers.
 
-use crate::{EnvelopeConfig, FilterType, OscillatorType, PolySynth, SvfMode, SynthBuilder};
+use crate::{
+    EnvelopeConfig, FilterType, OscillatorType, PolySynth, PortamentoConfig, PortamentoCurve,
+    PortamentoMode, SvfMode, SynthBuilder, UnisonConfig,
+};
 use tutti_core::midi::MidiRegistry;
 use tutti_core::AudioUnit; // For get_id()
 
@@ -145,6 +148,95 @@ impl SynthHandle {
     /// Use pad envelope preset (slow attack and release).
     pub fn envelope_pad(mut self) -> Self {
         self.builder = self.builder.envelope_config(EnvelopeConfig::pad());
+        self
+    }
+
+    // =========================================================================
+    // Unison
+    // =========================================================================
+
+    /// Enable unison with the specified number of voices and detune.
+    ///
+    /// Creates a "super saw" style thicker sound by stacking detuned voices.
+    ///
+    /// # Arguments
+    /// * `voices` - Number of unison voices (1-16)
+    /// * `detune_cents` - Total detune spread in cents (e.g., 15.0 for ±7.5 cents)
+    pub fn unison(mut self, voices: u8, detune_cents: f32) -> Self {
+        self.builder = self.builder.unison(UnisonConfig {
+            voice_count: voices,
+            detune_cents,
+            stereo_spread: 0.5, // Default stereo spread
+            phase_randomize: true,
+        });
+        self
+    }
+
+    /// Enable unison with full configuration.
+    ///
+    /// # Arguments
+    /// * `voices` - Number of unison voices (1-16)
+    /// * `detune_cents` - Total detune spread in cents
+    /// * `stereo_spread` - Stereo width (0.0 = mono, 1.0 = full stereo)
+    pub fn unison_full(mut self, voices: u8, detune_cents: f32, stereo_spread: f32) -> Self {
+        self.builder = self.builder.unison(UnisonConfig {
+            voice_count: voices,
+            detune_cents,
+            stereo_spread,
+            phase_randomize: true,
+        });
+        self
+    }
+
+    // =========================================================================
+    // Portamento
+    // =========================================================================
+
+    /// Enable portamento (pitch glide) with the specified time.
+    ///
+    /// Glides between all notes.
+    ///
+    /// # Arguments
+    /// * `time` - Glide time in seconds
+    pub fn portamento(mut self, time: f32) -> Self {
+        self.builder = self.builder.portamento(PortamentoConfig {
+            mode: PortamentoMode::Always,
+            curve: PortamentoCurve::Linear,
+            time,
+            constant_time: true,
+        });
+        self
+    }
+
+    /// Enable legato-only portamento.
+    ///
+    /// Only glides when notes overlap (legato playing).
+    ///
+    /// # Arguments
+    /// * `time` - Glide time in seconds
+    pub fn portamento_legato(mut self, time: f32) -> Self {
+        self.builder = self.builder.portamento(PortamentoConfig {
+            mode: PortamentoMode::LegatoOnly,
+            curve: PortamentoCurve::Linear,
+            time,
+            constant_time: true,
+        });
+        self
+    }
+
+    /// Enable portamento with exponential curve.
+    ///
+    /// Starts slow, speeds up toward target pitch.
+    ///
+    /// # Arguments
+    /// * `time` - Glide time in seconds
+    pub fn portamento_exp(mut self, time: f32) -> Self {
+        self.builder = self.builder.portamento(PortamentoConfig {
+            mode: PortamentoMode::Always,
+            curve: PortamentoCurve::Exponential,
+            time,
+            constant_time: true,
+        });
         self
     }
 

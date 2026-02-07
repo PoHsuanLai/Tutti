@@ -161,17 +161,10 @@ impl ModSourceValues {
         }
     }
 
-    /// Set key tracking from MIDI note number.
+    /// Set key tracking from MIDI note number (for tests).
+    #[cfg(test)]
     pub fn set_key_track_from_note(&mut self, note: u8) {
         self.key_track = note as f32 / 127.0;
-    }
-
-    /// Generate new random value.
-    pub fn randomize(&mut self, rng_state: &mut u32) {
-        *rng_state ^= *rng_state << 13;
-        *rng_state ^= *rng_state >> 17;
-        *rng_state ^= *rng_state << 5;
-        self.random = (*rng_state as f32) / (u32::MAX as f32);
     }
 }
 
@@ -193,9 +186,9 @@ impl Default for ModSourceValues {
     }
 }
 
-/// Output values for all modulation destinations.
+/// Output values for all modulation destinations (internal).
 #[derive(Debug, Clone, Default)]
-pub struct ModDestinationValues {
+pub(crate) struct ModDestinationValues {
     /// Pitch modulation in semitones
     pub pitch: f32,
     /// Filter cutoff modulation (additive, normalized)
@@ -290,11 +283,11 @@ impl ModulationMatrix {
         matrix
     }
 
-    /// Compute destination values from source values.
+    /// Compute destination values from source values (internal).
     ///
     /// RT-safe: no allocations, bounded loops.
     #[inline]
-    pub fn compute(&mut self, sources: &ModSourceValues) -> &ModDestinationValues {
+    pub(crate) fn compute(&mut self, sources: &ModSourceValues) -> &ModDestinationValues {
         self.destinations.reset();
 
         for i in 0..self.route_count {
@@ -313,12 +306,6 @@ impl ModulationMatrix {
             }
         }
 
-        &self.destinations
-    }
-
-    /// Get current destination values without recomputing.
-    #[inline]
-    pub fn destinations(&self) -> &ModDestinationValues {
         &self.destinations
     }
 

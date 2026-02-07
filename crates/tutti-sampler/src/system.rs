@@ -124,18 +124,30 @@ impl SamplerSystem {
         self
     }
 
-    /// Stream an audio file to a channel.
+    /// Stream an audio file to a specific channel.
+    ///
+    /// Convenience method that pre-sets the channel. Equivalent to:
+    /// `sampler.stream(path).channel(channel_index)`
     pub fn stream_file(
         &self,
         channel_index: usize,
         file_path: impl Into<PathBuf>,
-    ) -> StreamBuilder {
-        StreamBuilder {
-            butler_tx: self.butler_tx.clone(),
+    ) -> crate::stream_builder::StreamBuilder<'_> {
+        crate::stream_builder::StreamBuilder::new(self, file_path).channel(channel_index)
+    }
+
+    /// Internal: send stream command to butler thread.
+    pub(crate) fn send_stream_command(
+        &self,
+        channel_index: usize,
+        file_path: PathBuf,
+        offset_samples: usize,
+    ) {
+        let _ = self.butler_tx.send(ButlerCommand::StreamAudioFile {
             channel_index,
-            file_path: file_path.into(),
-            offset_samples: 0,
-        }
+            file_path,
+            offset_samples,
+        });
     }
 
     /// Stop streaming for a channel.
@@ -601,31 +613,6 @@ impl CaptureSession {
     /// Get producer.
     pub fn producer(&self) -> &CaptureBufferProducer {
         &self.producer
-    }
-}
-
-/// Builder for file streaming configuration.
-pub struct StreamBuilder {
-    butler_tx: Sender<ButlerCommand>,
-    channel_index: usize,
-    file_path: PathBuf,
-    offset_samples: usize,
-}
-
-impl StreamBuilder {
-    /// Set offset in samples.
-    pub fn offset_samples(mut self, offset: usize) -> Self {
-        self.offset_samples = offset;
-        self
-    }
-
-    /// Start streaming.
-    pub fn start(self) {
-        let _ = self.butler_tx.send(ButlerCommand::StreamAudioFile {
-            channel_index: self.channel_index,
-            file_path: self.file_path,
-            offset_samples: self.offset_samples,
-        });
     }
 }
 

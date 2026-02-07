@@ -40,9 +40,9 @@ pub enum VoiceMode {
     Legato,
 }
 
-/// State of a single voice slot.
+/// State of a single voice slot (internal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum VoiceState {
+pub(crate) enum VoiceState {
     /// Voice is idle and available for allocation
     #[default]
     Idle,
@@ -54,9 +54,9 @@ pub enum VoiceState {
     Stolen,
 }
 
-/// Information about an allocated voice slot.
+/// Information about an allocated voice slot (internal).
 #[derive(Debug, Clone)]
-pub struct VoiceSlot {
+pub(crate) struct VoiceSlot {
     /// Unique voice identifier
     pub voice_id: VoiceId,
     /// MIDI note number that triggered this voice (0-127)
@@ -381,19 +381,9 @@ impl VoiceAllocator {
         self.config.max_voices
     }
 
-    /// Iterate over all voice slots.
-    pub fn slots(&self) -> &[VoiceSlot] {
+    /// Iterate over all voice slots (internal).
+    pub(crate) fn slots(&self) -> &[VoiceSlot] {
         &self.slots
-    }
-
-    /// Get a voice slot by index.
-    pub fn get_slot(&self, index: usize) -> Option<&VoiceSlot> {
-        self.slots.get(index)
-    }
-
-    /// Get a mutable voice slot by index.
-    pub fn get_slot_mut(&mut self, index: usize) -> Option<&mut VoiceSlot> {
-        self.slots.get_mut(index)
     }
 
     /// Reset all voices to idle.

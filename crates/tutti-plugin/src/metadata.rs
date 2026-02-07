@@ -1,20 +1,14 @@
-//! Plugin metadata for IPC protocol
-//!
-//! This is used for serializing plugin information between the host and bridge processes.
+//! Plugin metadata for IPC serialization.
 
 use serde::{Deserialize, Serialize};
 
-/// Audio I/O configuration
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AudioIO {
-    /// Number of audio input channels
     pub inputs: usize,
-    /// Number of audio output channels
     pub outputs: usize,
 }
 
 impl AudioIO {
-    /// Stereo in, stereo out
     pub fn stereo() -> Self {
         Self {
             inputs: 2,
@@ -23,46 +17,23 @@ impl AudioIO {
     }
 }
 
-/// Plugin metadata for bridge protocol
-///
-/// This is a simplified version used for IPC. It contains the essential
-/// information needed to identify and configure a plugin.
+/// Plugin metadata exchanged over IPC.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PluginMetadata {
-    /// Unique plugin ID
     pub id: String,
-
-    /// Human-readable name
     pub name: String,
-
-    /// Vendor/author name
     pub vendor: String,
-
-    /// Version string
     pub version: String,
-
-    /// Audio I/O configuration
     pub audio_io: AudioIO,
-
-    /// Does this plugin receive MIDI?
     pub receives_midi: bool,
-
-    /// Does this plugin have a custom GUI?
     pub has_editor: bool,
-
-    /// Editor size (width, height) if available
     pub editor_size: Option<(u32, u32)>,
-
-    /// Plugin latency in samples
     pub latency_samples: usize,
-
-    /// Whether the plugin supports 64-bit (f64) audio processing
     #[serde(default)]
     pub supports_f64: bool,
 }
 
 impl PluginMetadata {
-    /// Create new metadata with required fields
     pub fn new(id: impl Into<String>, name: impl Into<String>) -> Self {
         Self {
             id: id.into(),

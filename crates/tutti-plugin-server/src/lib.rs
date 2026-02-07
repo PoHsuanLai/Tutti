@@ -1,16 +1,12 @@
-//! Plugin server for tutti-plugin
+//! Plugin server for isolated process hosting.
 //!
-//! This crate provides the server-side implementation for multi-process plugin hosting.
-//! It loads and runs VST2, VST3, and CLAP plugins in an isolated process.
-//!
-//! This crate is used by the `plugin-server` binary and is not intended for direct use
-//! by DAW applications. Use `tutti-plugin` for the client-side API.
+//! Loads VST2, VST3, and CLAP plugins. Used by the `plugin-server` binary.
+//! DAW applications should use `tutti-plugin` instead.
 
 pub mod instance;
 pub mod server;
 pub mod transport;
 
-// Plugin loaders (feature-gated)
 #[cfg(feature = "vst2")]
 pub mod vst2_loader;
 
@@ -20,18 +16,13 @@ pub mod vst3_loader;
 #[cfg(feature = "clap")]
 pub mod clap_loader;
 
-// Re-exports
-pub use server::PluginServer;
 pub use instance::{PluginInstance, ProcessContext, ProcessOutput};
+pub use server::PluginServer;
 pub use transport::{MessageTransport, TransportListener};
 
-// Re-export shared types from tutti-plugin
 pub use tutti_plugin::{
-    BridgeConfig, BridgeError, LoadStage, Result,
-    SampleFormat, PluginMetadata, AudioIO,
-    MidiEvent, MidiEventVec,
-    ParameterChanges, ParameterQueue, ParameterPoint,
-    ParameterInfo, ParameterFlags,
-    NoteExpressionChanges, NoteExpressionType, NoteExpressionValue,
-    TransportInfo,
+    AudioIO, BridgeConfig, BridgeError, LoadStage, MidiEvent, MidiEventVec,
+    NoteExpressionChanges, NoteExpressionType, NoteExpressionValue, ParameterChanges,
+    ParameterFlags, ParameterInfo, ParameterPoint, ParameterQueue, PluginMetadata, Result,
+    SampleFormat, TransportInfo,
 };

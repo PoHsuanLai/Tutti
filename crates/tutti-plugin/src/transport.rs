@@ -1,7 +1,4 @@
-//! IPC transport layer (client-side)
-//!
-//! Handles message passing from host to bridge process via Unix sockets
-//! or Windows named pipes.
+//! Client-side IPC transport via Unix sockets or Windows named pipes.
 
 use crate::error::Result;
 use crate::protocol::{BridgeMessage, HostMessage};
@@ -15,7 +12,7 @@ use tokio::{
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::ClientOptions;
 
-/// Message transport for IPC (client-side only)
+/// IPC transport to plugin server.
 pub struct MessageTransport {
     #[cfg(unix)]
     stream: UnixStream,
@@ -24,7 +21,6 @@ pub struct MessageTransport {
 }
 
 impl MessageTransport {
-    /// Connect to socket path (Unix) or named pipe (Windows)
     #[cfg(unix)]
     pub async fn connect(socket_path: &std::path::Path) -> Result<Self> {
         let stream = UnixStream::connect(socket_path).await?;
@@ -37,7 +33,6 @@ impl MessageTransport {
         Ok(Self { pipe })
     }
 
-    /// Send a host message to the server
     pub async fn send_host_message(&mut self, msg: &HostMessage) -> Result<()> {
         let data = bincode::serialize(msg)?;
         let len = data.len() as u32;
@@ -58,15 +53,13 @@ impl MessageTransport {
         Ok(())
     }
 
-    /// Receive a bridge message from the server
     pub async fn recv_bridge_message(&mut self) -> Result<BridgeMessage> {
         #[cfg(unix)]
         {
             let len = self.stream.read_u32().await? as usize;
             let mut data = vec![0u8; len];
             self.stream.read_exact(&mut data).await?;
-            let msg = bincode::deserialize(&data)?;
-            Ok(msg)
+            Ok(bincode::deserialize(&data)?)
         }
 
         #[cfg(windows)]
@@ -75,8 +68,7 @@ impl MessageTransport {
             let len = self.pipe.read_u32().await? as usize;
             let mut data = vec![0u8; len];
             self.pipe.read_exact(&mut data).await?;
-            let msg = bincode::deserialize(&data)?;
-            Ok(msg)
+            Ok(bincode::deserialize(&data)?)
         }
     }
 }

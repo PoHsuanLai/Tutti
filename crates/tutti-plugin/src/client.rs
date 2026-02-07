@@ -308,7 +308,6 @@ impl PluginClient {
             }
         };
 
-        // Write inputs to bridge
         let write_ok = match self.negotiated_format {
             SampleFormat::Float64 => {
                 let mut ok = true;
@@ -349,7 +348,6 @@ impl PluginClient {
             return;
         }
 
-        // Convert midi_drain_buffer slice to MidiEventVec
         let midi_events: crate::protocol::MidiEventVec =
             self.midi_drain_buffer.iter().copied().collect();
         if !bridge.process(
@@ -363,7 +361,6 @@ impl PluginClient {
             return;
         }
 
-        // Read outputs from bridge
         match self.negotiated_format {
             SampleFormat::Float64 => {
                 for ch in 0..self.outputs {
@@ -409,7 +406,6 @@ impl PluginClient {
             return;
         }
 
-        // Write inputs
         let write_ok = match self.negotiated_format {
             SampleFormat::Float64 => {
                 let mut ok = true;
@@ -469,7 +465,6 @@ impl PluginClient {
             return;
         }
 
-        // Read outputs
         match self.negotiated_format {
             SampleFormat::Float64 => {
                 for ch in 0..self.outputs {
@@ -523,7 +518,6 @@ impl PluginClient {
             return;
         }
 
-        // Write inputs
         let write_ok = match self.negotiated_format {
             SampleFormat::Float64 => {
                 let mut ok = true;
@@ -583,7 +577,6 @@ impl PluginClient {
             return;
         }
 
-        // Read outputs
         match self.negotiated_format {
             SampleFormat::Float64 => {
                 for ch in 0..self.outputs {

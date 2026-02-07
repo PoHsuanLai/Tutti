@@ -10,10 +10,15 @@ use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, Wave};
 use crate::butler::LoopCrossfade;
 
 /// In-memory sample playback with optional loop crossfade.
+///
+/// By default, plays immediately when added to the graph (suitable for timeline clips
+/// and offline export). Use `stop()` and `trigger()` for manual control if needed
+/// (e.g., MIDI-triggered one-shots).
 pub struct SamplerUnit {
     wave: Arc<Wave>,
     position: AtomicU64,
 
+    /// Play/stop control. Defaults to true (auto-play).
     playing: AtomicBool,
 
     looping: AtomicBool,
@@ -52,13 +57,13 @@ impl Clone for SamplerUnit {
 }
 
 impl SamplerUnit {
-    /// Create new sampler.
+    /// Create new sampler. Plays immediately by default.
     pub fn new(wave: Arc<Wave>) -> Self {
         let sample_rate = wave.sample_rate() as f32;
         Self {
             wave,
             position: AtomicU64::new(0),
-            playing: AtomicBool::new(false),
+            playing: AtomicBool::new(true), // Auto-play by default
             looping: AtomicBool::new(false),
             gain: 1.0,
             speed: 1.0,
@@ -69,13 +74,13 @@ impl SamplerUnit {
         }
     }
 
-    /// Create with custom settings.
+    /// Create with custom settings. Plays immediately by default.
     pub fn with_settings(wave: Arc<Wave>, gain: f32, speed: f32, looping: bool) -> Self {
         let sample_rate = wave.sample_rate() as f32;
         Self {
             wave,
             position: AtomicU64::new(0),
-            playing: AtomicBool::new(false),
+            playing: AtomicBool::new(true), // Auto-play by default
             looping: AtomicBool::new(looping),
             gain,
             speed,
@@ -802,7 +807,8 @@ mod tests {
         let wave = Wave::with_capacity(1, 44100.0, 100);
         let sampler = SamplerUnit::new(Arc::new(wave));
 
-        assert!(!sampler.is_playing());
+        // SamplerUnit auto-plays by default (playing: true)
+        assert!(sampler.is_playing());
         assert!(!sampler.is_looping());
         assert_eq!(sampler.position(), 0);
     }
@@ -824,6 +830,9 @@ mod tests {
     fn test_sampler_outputs_silence_when_stopped() {
         let wave = Wave::with_capacity(1, 44100.0, 100);
         let mut sampler = SamplerUnit::new(Arc::new(wave));
+
+        // Stop the auto-playing sampler
+        sampler.stop();
 
         let mut output = [0.0f32; 2];
         sampler.tick(&[], &mut output);

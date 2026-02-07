@@ -105,15 +105,15 @@ impl<'a> StreamBuilder<'a> {
             return;
         };
 
-        sampler
-            .stream_file(self.channel, self.file_path)
-            .offset_samples(self.offset_samples)
-            .start();
+        // Send the stream command to butler
+        sampler.send_stream_command(self.channel, self.file_path, self.offset_samples);
 
+        // Apply loop range if set
         if let Some((start, end)) = self.loop_range {
             sampler.set_loop_range_with_crossfade(self.channel, start, end, self.crossfade_samples);
         }
 
+        // Apply speed/direction if non-default
         if self.direction == PlayDirection::Reverse || (self.speed - 1.0).abs() > 0.001 {
             sampler.set_speed(
                 self.channel,

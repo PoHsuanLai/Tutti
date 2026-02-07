@@ -92,36 +92,27 @@ impl SoundFontUnit {
             .process_midi_message(channel, 0xC0, preset, 0);
     }
 
-    /// Refill internal buffers
     fn refill_buffers(&mut self) {
-        // Clear buffers
         self.left_buffer[..self.buffer_size].fill(0.0);
         self.right_buffer[..self.buffer_size].fill(0.0);
-
-        // Render new samples
         self.synthesizer
             .render(&mut self.left_buffer, &mut self.right_buffer);
         self.buffer_pos = 0;
     }
 
-    /// Poll MIDI events from registry and trigger synthesizer
     fn poll_midi_events(&mut self) {
         use tutti_core::midi::ChannelVoiceMsg;
 
-        // Poll MIDI events from registry if available
         if let Some(ref registry) = self.midi_registry {
             let unit_id = self.get_id();
             let count = registry.poll_into(unit_id, &mut self.midi_buffer);
-
             for i in 0..count {
                 self.pending_midi.push(self.midi_buffer[i]);
             }
         }
 
-        // Process pending MIDI events
         for event in self.pending_midi.drain(..) {
             let channel = event.channel_num() as i32;
-
             match event.msg {
                 ChannelVoiceMsg::NoteOn { note, velocity } => {
                     if velocity > 0 {
@@ -138,7 +129,7 @@ impl SoundFontUnit {
                     self.synthesizer
                         .process_midi_message(channel, 0xC0, program as i32, 0);
                 }
-                _ => {} // Ignore other MIDI messages for now
+                _ => {}
             }
         }
     }
@@ -146,26 +137,22 @@ impl SoundFontUnit {
 
 impl AudioUnit for SoundFontUnit {
     fn reset(&mut self) {
-        // Reset by sending note offs for all notes
         (0..16).for_each(|channel| {
             (0..128).for_each(|key| {
                 self.synthesizer.note_off(channel, key);
             });
         });
-        self.buffer_pos = self.buffer_size; // Force refill on next tick
+        self.buffer_pos = self.buffer_size;
     }
 
     fn set_sample_rate(&mut self, _sample_rate: f64) {
-        // RustySynth sample rate is set at construction time
-        // We can't change it after creation
+        // RustySynth sample rate is fixed at construction
     }
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
         assert_eq!(output.len(), 2, "SoundFontUnit is stereo (2 outputs)");
-
         self.poll_midi_events();
 
-        // Refill buffers if needed
         if self.buffer_pos >= self.buffer_size {
             self.refill_buffers();
         }
@@ -179,11 +166,9 @@ impl AudioUnit for SoundFontUnit {
         self.poll_midi_events();
 
         (0..size).for_each(|i| {
-            // Refill buffers if needed
             if self.buffer_pos >= self.buffer_size {
                 self.refill_buffers();
             }
-
             output.set_f32(0, i, self.left_buffer[self.buffer_pos]);
             output.set_f32(1, i, self.right_buffer[self.buffer_pos]);
             self.buffer_pos += 1;
@@ -191,24 +176,21 @@ impl AudioUnit for SoundFontUnit {
     }
 
     fn inputs(&self) -> usize {
-        0 // Generator - no inputs
+        0
     }
 
     fn outputs(&self) -> usize {
-        2 // Stereo output
+        2
     }
 
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         SignalFrame::new(self.outputs())
     }
 
-    fn set(&mut self, _setting: Setting) {
-        // RustySynth doesn't use fundsp's Setting system
-    }
+    fn set(&mut self, _setting: Setting) {}
 
     fn get_id(&self) -> u64 {
-        // Unique ID for RustySynth
-        0x52555354595359 // "RUSTYSY" in hex
+        0x52555354595359
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -225,9 +207,7 @@ impl AudioUnit for SoundFontUnit {
             + self.right_buffer.capacity() * core::mem::size_of::<f32>()
     }
 
-    fn allocate(&mut self) {
-        // Buffers are already allocated
-    }
+    fn allocate(&mut self) {}
 }
 
 impl Clone for SoundFontUnit {

@@ -145,7 +145,7 @@ fn now_ms() -> u64 {
 }
 
 /// Cache statistics snapshot.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CacheStats {
     /// Current number of cached entries
     pub entries: usize,

@@ -30,6 +30,17 @@
 //! |---------|-------------|
 //! | `soundfont` | SoundFont (.sf2) synthesis |
 //! | `full` | Everything |
+//!
+//! # Limits
+//!
+//! Fixed limits for RT-safe, allocation-free operation:
+//!
+//! | Constant | Value | Description |
+//! |----------|-------|-------------|
+//! | [`MAX_MOD_ROUTES`] | 32 | Maximum modulation matrix routes |
+//! | [`MAX_LFOS`] | 8 | Maximum LFO sources |
+//! | [`MAX_ENVELOPES`] | 4 | Maximum envelope sources |
+//! | [`MAX_UNISON_VOICES`] | 16 | Maximum unison voices per note |
 
 pub mod error;
 pub use error::{Error, Result};
@@ -44,6 +55,7 @@ mod modulation;
 
 pub use modulation::{
     ModDestination, ModRoute, ModSource, ModulationMatrix, ModulationMatrixConfig,
+    MAX_ENVELOPES, MAX_LFOS, MAX_MOD_ROUTES,
 };
 
 // Internal value struct used by builder
@@ -64,7 +76,7 @@ pub use portamento::{Portamento, PortamentoConfig, PortamentoCurve, PortamentoMo
 
 mod tuning;
 
-pub use tuning::{Tuning, A4_FREQ, A4_NOTE};
+pub use tuning::{ScaleDegree, Tuning, A4_FREQ, A4_NOTE};
 
 #[cfg(feature = "soundfont")]
 mod soundfont;

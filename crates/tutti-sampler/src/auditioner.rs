@@ -152,6 +152,11 @@ impl Auditioner {
         self.gain.set(gain.max(0.0));
     }
 
+    /// Get current gain.
+    pub fn gain(&self) -> f32 {
+        self.gain.get()
+    }
+
     /// Set preview speed (clamped to 0.25 - 4.0).
     pub fn set_speed(&self, speed: f32) {
         let clamped = speed.clamp(0.25, 4.0);
@@ -160,6 +165,11 @@ impl Auditioner {
         if let Some(PreviewMode::Streaming) = mode.as_ref() {
             self.sampler.set_speed(AUDITIONER_CHANNEL, clamped);
         }
+    }
+
+    /// Get current speed.
+    pub fn speed(&self) -> f32 {
+        self.speed.get()
     }
 
     /// Get the current file path being previewed.

@@ -232,15 +232,7 @@ impl SharedAudioBuffer {
         Ok(mmap)
     }
 
-    /// Write audio data to the buffer
-    ///
-    /// # Arguments
-    /// Write channel data (RT-safe with interior mutability)
-    ///
-    /// # Arguments
-    ///
-    /// * `channel` - Channel index
-    /// * `data` - Sample data for this channel
+    /// Write channel data (RT-safe with interior mutability).
     ///
     /// # Safety
     ///

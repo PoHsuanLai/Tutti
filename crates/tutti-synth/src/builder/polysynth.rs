@@ -7,8 +7,8 @@ use crate::{
     VoiceAllocatorConfig,
 };
 use smallvec::SmallVec;
-use tutti_core::midi::{ChannelVoiceMsg, MidiEvent, MidiRegistry};
-use tutti_core::{AudioUnit, BufferMut, BufferRef, Shared, SignalFrame};
+use tutti_core::midi::{ChannelVoiceMsg, MidiEvent, MidiRegistry, MidiSnapshot};
+use tutti_core::{Arc, AudioUnit, BufferMut, BufferRef, ExportTimeline, Shared, SignalFrame};
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -44,6 +44,15 @@ pub struct PolySynth {
     /// Pre-allocated buffer for RT-safe MIDI polling
     midi_buffer: Vec<MidiEvent>,
 
+    /// Export mode: MIDI snapshot for non-destructive event delivery
+    midi_snapshot: Option<MidiSnapshot>,
+
+    /// Export mode: Timeline for beat-based MIDI polling
+    export_timeline: Option<Arc<ExportTimeline>>,
+
+    /// Export mode: Last polled beat position
+    last_poll_beat: f64,
+
     /// Output mix buffer (stereo)
     mix_buffer: [f32; 2],
 
@@ -54,14 +63,12 @@ pub struct PolySynth {
 impl PolySynth {
     /// Create a new PolySynth from configuration.
     pub(crate) fn from_config(config: SynthConfig) -> crate::Result<Self> {
-        // Validate configuration
         if config.max_voices == 0 {
             return Err(crate::Error::InvalidConfig(
                 "max_voices must be at least 1".into(),
             ));
         }
 
-        // Create voice allocator
         let allocator_config = VoiceAllocatorConfig {
             max_voices: config.max_voices,
             mode: config.voice_mode,
@@ -70,17 +77,13 @@ impl PolySynth {
         };
         let allocator = VoiceAllocator::new(allocator_config);
 
-        // Create unison engine
         let unison = config.unison.as_ref().map(|u| UnisonEngine::new(u.clone()));
-
-        // Determine unison count for voice construction
         let unison_count = config
             .unison
             .as_ref()
             .map(|u| u.voice_count as usize)
             .unwrap_or(1);
 
-        // Create voices with sub-voices for unison
         let mut voices = Vec::with_capacity(config.max_voices);
         for _ in 0..config.max_voices {
             let mut voice = SynthVoice::from_config(&config, unison_count);
@@ -88,13 +91,11 @@ impl PolySynth {
             voices.push(voice);
         }
 
-        // Create portamento
         let portamento = config
             .portamento
             .as_ref()
             .map(|p| Portamento::new(p.clone(), config.sample_rate as f32));
 
-        // Create modulation matrix
         let modulation = config
             .modulation
             .as_ref()
@@ -102,7 +103,6 @@ impl PolySynth {
 
         let master_volume = tutti_core::shared(1.0);
 
-        // Generate unique ID for MIDI registry lookup
         use tutti_core::{AtomicU64, Ordering};
         static ID_COUNTER: AtomicU64 = AtomicU64::new(1);
         let id = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -119,6 +119,9 @@ impl PolySynth {
             id,
             midi_registry: None,
             midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
+            midi_snapshot: None,
+            export_timeline: None,
+            last_poll_beat: 0.0,
             mix_buffer: [0.0; 2],
             finished_notes: SmallVec::new(),
         })
@@ -132,10 +135,54 @@ impl PolySynth {
         self
     }
 
-    /// Poll MIDI events from the registry.
+    /// Configure the synth for export mode with snapshot and timeline.
+    ///
+    /// When configured for export:
+    /// - MIDI events are read from the snapshot (non-destructive)
+    /// - Events are triggered based on beat position from the export timeline
+    /// - The live MIDI registry is disabled
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mut snapshot = MidiSnapshot::new();
+    /// snapshot.add_event(synth.get_id(), 0.0, note_on(60, 100));
+    /// snapshot.add_event(synth.get_id(), 1.0, note_off(60));
+    ///
+    /// synth.configure_for_export(snapshot, export_context.timeline.clone());
+    /// ```
+    pub fn configure_for_export(&mut self, snapshot: MidiSnapshot, timeline: Arc<ExportTimeline>) {
+        self.midi_snapshot = Some(snapshot);
+        self.export_timeline = Some(timeline);
+        self.midi_registry = None; // Disable live registry in export mode
+        self.last_poll_beat = 0.0;
+    }
+
+    /// Check if the synth is in export mode.
+    pub fn is_export_mode(&self) -> bool {
+        self.export_timeline.is_some()
+    }
+
+    /// Poll MIDI events from the registry or snapshot.
     ///
     /// Called at the start of `tick()` and `process()`.
     fn poll_midi_events(&mut self) {
+        // Export mode: poll from snapshot based on timeline beat
+        if let Some(timeline) = &self.export_timeline {
+            let current_beat = timeline.current_beat();
+            let beat_increment = timeline.beats_per_sample();
+
+            if let Some(ref mut snapshot) = self.midi_snapshot {
+                let events = snapshot.poll_range(self.id, self.last_poll_beat, current_beat + beat_increment);
+                for event in events {
+                    self.process_midi_event(&event);
+                }
+            }
+
+            self.last_poll_beat = current_beat;
+            return;
+        }
+
+        // Live mode: poll from MIDI registry
         let registry = match &self.midi_registry {
             Some(r) => r.clone(),
             None => return,
@@ -143,7 +190,6 @@ impl PolySynth {
 
         let count = registry.poll_into(self.id, &mut self.midi_buffer);
         for i in 0..count {
-            // Copy event to avoid borrow conflict
             let event = self.midi_buffer[i];
             self.process_midi_event(&event);
         }
@@ -249,7 +295,6 @@ impl PolySynth {
                 self.handle_control_change(control, event.channel_num());
             }
             ChannelVoiceMsg::PitchBend { bend } => {
-                // Update mod sources for pitch bend
                 self.mod_sources.pitch_bend = (bend as f32 - 8192.0) / 8192.0;
             }
             ChannelVoiceMsg::ChannelPressure { pressure } => {
@@ -263,21 +308,16 @@ impl PolySynth {
         let vel_norm = velocity as f32 / 127.0;
         let result = self.allocator.allocate(note, channel, vel_norm);
 
-        // Extract slot_index from allocation result
         let slot_index = match result {
             AllocationResult::Allocated { slot_index, .. } => Some(slot_index),
             AllocationResult::Stolen { slot_index, .. } => Some(slot_index),
             AllocationResult::LegatoRetrigger { slot_index, .. } => Some(slot_index),
             AllocationResult::Unavailable => None,
         };
-
-        // Check if this is a legato retrigger (don't retrigger envelope)
         let is_legato = matches!(result, AllocationResult::LegatoRetrigger { .. });
 
         if let Some(slot_index) = slot_index {
             let freq = self.config.tuning.note_to_freq(note);
-
-            // Handle portamento
             let target_freq = if let Some(ref mut porta) = self.portamento {
                 porta.set_target(freq, is_legato);
                 porta.current()
@@ -285,17 +325,14 @@ impl PolySynth {
                 freq
             };
 
-            // Trigger voice with unison
             let voice = &mut self.voices[slot_index];
             if is_legato {
-                // Legato: just update pitch, don't retrigger
                 voice.set_pitch(target_freq, self.unison.as_ref());
                 voice.note = note;
             } else {
                 voice.note_on(note, vel_norm, target_freq, self.unison.as_mut());
             }
 
-            // Update velocity in mod sources
             self.mod_sources.velocity = vel_norm;
         }
     }
@@ -303,7 +340,6 @@ impl PolySynth {
     fn handle_note_off(&mut self, note: u8, channel: u8) {
         self.allocator.release(note, channel);
 
-        // Find and release the voice playing this note
         for voice in &mut self.voices {
             if voice.active && voice.note == note {
                 voice.note_off();
@@ -316,25 +352,13 @@ impl PolySynth {
         use tutti_core::midi::ControlChange;
 
         if let ControlChange::CC { control: cc, value } = control {
-            // Update CC in mod sources
             self.mod_sources.cc[cc as usize] = value as f32 / 127.0;
 
-            // Handle special CCs
             match cc {
-                1 => {
-                    // Mod wheel
-                    self.mod_sources.mod_wheel = value as f32 / 127.0;
-                }
-                64 => {
-                    // Sustain pedal
-                    self.allocator.sustain_pedal(channel, value >= 64);
-                }
-                66 => {
-                    // Sostenuto pedal
-                    self.allocator.sostenuto_pedal(channel, value >= 64);
-                }
+                1 => self.mod_sources.mod_wheel = value as f32 / 127.0,
+                64 => self.allocator.sustain_pedal(channel, value >= 64),
+                66 => self.allocator.sostenuto_pedal(channel, value >= 64),
                 123 => {
-                    // All notes off
                     for voice in &mut self.voices {
                         voice.note_off();
                     }
@@ -345,9 +369,7 @@ impl PolySynth {
         }
     }
 
-    /// Mark a voice as finished after envelope completes.
     fn mark_voice_finished(&mut self, note: u8) {
-        // Find the voice_id for this note from the allocator's slots
         if let Some(slot_index) = (0..self.voices.len()).find(|&i| self.voices[i].note == note) {
             let slots = self.allocator.slots();
             if slot_index < slots.len() {
@@ -365,7 +387,6 @@ impl AudioUnit for PolySynth {
         }
         self.allocator.reset();
         if let Some(ref mut porta) = self.portamento {
-            // Reset portamento to A4
             porta.reset(440.0);
         }
     }
@@ -380,13 +401,10 @@ impl AudioUnit for PolySynth {
     }
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
-        // Poll MIDI from registry
         self.poll_midi_events();
 
-        // Update portamento
         if let Some(ref mut porta) = self.portamento {
             let current_freq = porta.tick();
-            // Update all active voices with the portamento frequency
             let unison_ref = self.unison.as_ref();
             for voice in &mut self.voices {
                 if voice.active {
@@ -395,14 +413,11 @@ impl AudioUnit for PolySynth {
             }
         }
 
-        // Apply modulation matrix
         if let Some(ref mut modulation) = self.modulation {
             let destinations = modulation.compute(&self.mod_sources);
-            // Apply filter cutoff modulation to all voices
             let cutoff_mod = destinations.filter_cutoff;
             for voice in &mut self.voices {
                 if voice.active {
-                    // Base cutoff from config, modulated
                     let base_cutoff = match self.config.filter {
                         super::FilterType::Moog { cutoff, .. } => cutoff,
                         super::FilterType::Svf { cutoff, .. } => cutoff,
@@ -414,18 +429,15 @@ impl AudioUnit for PolySynth {
             }
         }
 
-        // Mix all voices with unison panning
         self.mix_buffer = [0.0, 0.0];
-        self.finished_notes.clear(); // RT-safe: reuse pre-allocated SmallVec
+        self.finished_notes.clear();
 
         for voice in &mut self.voices {
             if voice.active {
-                // Process all sub-voices and get stereo output with unison panning
                 let (left, right) = voice.tick_stereo(self.unison.as_ref());
 
-                // Check if voice has finished (envelope level near zero and gate off)
+                // Check if voice envelope has finished
                 if voice.gate.value() == 0.0 {
-                    // Simple heuristic: if output is very quiet, voice is done
                     let level = left.abs().max(right.abs());
                     voice.envelope_level = level;
                     if level < 0.0001 {
@@ -439,12 +451,10 @@ impl AudioUnit for PolySynth {
             }
         }
 
-        // Mark finished voices
-        for &note in &self.finished_notes {
+        for note in core::mem::take(&mut self.finished_notes) {
             self.mark_voice_finished(note);
         }
 
-        // Apply master volume
         let volume = self.master_volume.value();
         output[0] = self.mix_buffer[0] * volume;
         if output.len() > 1 {

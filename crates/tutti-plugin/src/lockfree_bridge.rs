@@ -1,6 +1,4 @@
-//! Lock-free plugin bridge for RT-safe audio processing.
-//!
-//! Audio thread → lock-free queues → bridge thread → IPC → plugin server.
+//! Lock-free bridge for RT-safe plugin communication.
 
 use crate::error::Result;
 use crate::protocol::{BridgeMessage, HostMessage, IpcMidiEvent};
@@ -25,13 +23,8 @@ enum BridgeCommand {
         note_expression: crate::protocol::NoteExpressionChanges,
         transport: crate::protocol::TransportInfo,
     },
-    SetParameter {
-        param_id: u32,
-        value: f32,
-    },
-    SetSampleRate {
-        rate: f64,
-    },
+    SetParameter { param_id: u32, value: f32 },
+    SetSampleRate { rate: f64 },
     Reset,
     Shutdown,
 }
@@ -42,9 +35,7 @@ enum BridgeResponse {
     Error,
 }
 
-/// Lock-free bridge for RT-safe plugin communication.
-///
-/// Cloning is cheap - shared state is behind Arcs.
+/// Lock-free bridge for RT-safe plugin communication. Clone is cheap.
 #[derive(Clone)]
 pub struct LockFreeBridge {
     command_queue: Arc<ArrayQueue<BridgeCommand>>,
@@ -54,14 +45,13 @@ pub struct LockFreeBridge {
     running: Arc<AtomicBool>,
 }
 
-/// Bridge thread handle. Drops gracefully when dropped.
+/// Handle to bridge thread. Shuts down on drop.
 pub struct BridgeThreadHandle {
     bridge: LockFreeBridge,
     thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl LockFreeBridge {
-    /// Create bridge and spawn thread for IPC communication.
     pub fn new(
         transport: MessageTransport,
         audio_buffer: Arc<SharedAudioBuffer>,
@@ -78,18 +68,16 @@ impl LockFreeBridge {
             running: Arc::clone(&running),
         };
 
-        let bridge_thread =
-            Self::spawn_bridge_thread(command_queue, response_queue, running, transport);
-
+        let thread = Self::spawn_thread(command_queue, response_queue, running, transport);
         let handle = BridgeThreadHandle {
             bridge: bridge.clone(),
-            thread_handle: Some(bridge_thread),
+            thread_handle: Some(thread),
         };
 
         Ok((bridge, handle))
     }
 
-    fn spawn_bridge_thread(
+    fn spawn_thread(
         command_queue: Arc<ArrayQueue<BridgeCommand>>,
         response_queue: Arc<ArrayQueue<BridgeResponse>>,
         running: Arc<AtomicBool>,
@@ -98,37 +86,27 @@ impl LockFreeBridge {
         thread::Builder::new()
             .name("plugin-bridge".to_string())
             .spawn(move || {
-                let runtime = match tokio::runtime::Builder::new_current_thread()
+                let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
-                {
-                    Ok(rt) => rt,
-                    Err(_e) => return,
+                else {
+                    return;
                 };
-
-                runtime.block_on(async {
-                    Self::bridge_thread_main(
-                        command_queue,
-                        response_queue,
-                        running,
-                        &mut transport,
-                    )
-                    .await;
-                });
+                runtime.block_on(Self::run(command_queue, response_queue, running, &mut transport));
             })
-            .expect("Failed to spawn bridge thread")
+            .expect("failed to spawn bridge thread")
     }
 
-    async fn bridge_thread_main(
-        command_queue: Arc<ArrayQueue<BridgeCommand>>,
-        response_queue: Arc<ArrayQueue<BridgeResponse>>,
+    async fn run(
+        commands: Arc<ArrayQueue<BridgeCommand>>,
+        responses: Arc<ArrayQueue<BridgeResponse>>,
         running: Arc<AtomicBool>,
         transport: &mut MessageTransport,
     ) {
         while running.load(Ordering::Relaxed) {
-            if let Some(command) = command_queue.pop() {
-                if Self::handle_command(command, transport, &response_queue).await.is_err() {
-                    let _ = response_queue.push(BridgeResponse::Error);
+            if let Some(cmd) = commands.pop() {
+                if Self::handle(cmd, transport, &responses).await.is_err() {
+                    let _ = responses.push(BridgeResponse::Error);
                 }
             } else {
                 tokio::time::sleep(Duration::from_micros(100)).await;
@@ -136,66 +114,59 @@ impl LockFreeBridge {
         }
     }
 
-    async fn handle_command(
-        command: BridgeCommand,
+    async fn handle(
+        cmd: BridgeCommand,
         transport: &mut MessageTransport,
-        response_queue: &Arc<ArrayQueue<BridgeResponse>>,
+        responses: &Arc<ArrayQueue<BridgeResponse>>,
     ) -> Result<()> {
-        match command {
+        match cmd {
             BridgeCommand::Process {
                 buffer_id,
                 num_samples,
                 midi_events,
                 param_changes,
                 note_expression,
-                transport: transport_info,
+                transport: info,
             } => {
-                let message = HostMessage::ProcessAudioFull {
+                let msg = HostMessage::ProcessAudioFull {
                     buffer_id,
                     num_samples,
                     midi_events: midi_events.iter().map(IpcMidiEvent::from).collect(),
                     param_changes,
                     note_expression,
-                    transport: transport_info,
+                    transport: info,
                 };
+                transport.send_host_message(&msg).await?;
 
-                transport.send_host_message(&message).await?;
-                let response = transport.recv_bridge_message().await?;
-
-                match response {
+                match transport.recv_bridge_message().await? {
                     BridgeMessage::AudioProcessedFull { .. }
                     | BridgeMessage::AudioProcessedMidi { .. }
                     | BridgeMessage::AudioProcessed { .. } => {
-                        let _ = response_queue.push(BridgeResponse::AudioProcessed);
+                        let _ = responses.push(BridgeResponse::AudioProcessed);
                     }
                     BridgeMessage::Error { .. } => {
-                        let _ = response_queue.push(BridgeResponse::Error);
+                        let _ = responses.push(BridgeResponse::Error);
                     }
                     _ => {}
                 }
             }
-
             BridgeCommand::SetParameter { param_id, value } => {
                 transport
                     .send_host_message(&HostMessage::SetParameter { param_id, value })
                     .await?;
             }
-
             BridgeCommand::SetSampleRate { rate } => {
                 transport
                     .send_host_message(&HostMessage::SetSampleRate { rate })
                     .await?;
             }
-
             BridgeCommand::Reset => {
                 transport.send_host_message(&HostMessage::Reset).await?;
             }
-
             BridgeCommand::Shutdown => {
                 transport.send_host_message(&HostMessage::Shutdown).await?;
             }
         }
-
         Ok(())
     }
 
@@ -227,17 +198,11 @@ impl LockFreeBridge {
         self.audio_buffer.write_channel_f64(channel, data)
     }
 
-    pub fn read_output_channel_into_f64(
-        &self,
-        channel: usize,
-        output: &mut [f64],
-    ) -> Result<usize> {
+    pub fn read_output_channel_into_f64(&self, channel: usize, output: &mut [f64]) -> Result<usize> {
         self.audio_buffer.read_channel_into_f64(channel, output)
     }
 
-    /// Process audio (RT-safe, lock-free).
-    ///
-    /// Call `write_input_channel` before this, and `read_output_channel_into` after.
+    /// Process audio. RT-safe, lock-free.
     pub fn process(
         &self,
         num_samples: usize,
@@ -263,11 +228,7 @@ impl LockFreeBridge {
             return false;
         }
 
-        if let Some(response) = self.response_queue.pop() {
-            matches!(response, BridgeResponse::AudioProcessed)
-        } else {
-            false
-        }
+        matches!(self.response_queue.pop(), Some(BridgeResponse::AudioProcessed))
     }
 }
 
@@ -275,7 +236,6 @@ impl BridgeThreadHandle {
     pub fn shutdown(&mut self) {
         self.bridge.running.store(false, Ordering::Relaxed);
         let _ = self.bridge.command_queue.push(BridgeCommand::Shutdown);
-
         if let Some(handle) = self.thread_handle.take() {
             let _ = handle.join();
         }

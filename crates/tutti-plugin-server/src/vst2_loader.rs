@@ -1,66 +1,43 @@
-//! VST2 plugin loader
-//!
-//! This module handles loading and interfacing with VST2 plugins.
+//! VST2 plugin loader.
 
-use tutti_plugin::{BridgeError, LoadStage, Result, PluginMetadata};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use tutti_midi_io::{ChannelVoiceMsg, ControlChange};
 use tutti_plugin::protocol::{AudioBuffer, MidiEvent};
-use std::path::PathBuf;
+use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
 
 #[cfg(feature = "vst2")]
 use vst::host::{Host, PluginLoader};
-
 #[cfg(feature = "vst2")]
 use vst::plugin::Plugin as VstPlugin;
 
-// Import MIDI types for event conversion
-use tutti_midi_io::{ChannelVoiceMsg, ControlChange};
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-
-/// Parameter change notification (index, value)
 pub type ParameterChange = (i32, f32);
 
-/// VST2 plugin instance wrapper
 pub struct Vst2Instance {
     #[cfg(feature = "vst2")]
     instance: vst::host::PluginInstance,
-
-    /// Kept alive for the `vst` crate's Host trait dispatch (automate, get_time_info, etc.)
     #[cfg(feature = "vst2")]
     #[allow(dead_code)]
     host: Arc<Mutex<BridgeHost>>,
-
-    /// Shared lock-free time info — updated directly from process_with_transport,
-    /// read lock-free by the plugin via Host::get_time_info.
     #[cfg(feature = "vst2")]
     time_info: Arc<arc_swap::ArcSwap<Option<vst::api::TimeInfo>>>,
-
     metadata: PluginMetadata,
     sample_rate: f64,
-
-    /// Channel for receiving parameter changes from plugin automation
     #[cfg(feature = "vst2")]
     param_rx: crossbeam_channel::Receiver<ParameterChange>,
 }
 
 impl Vst2Instance {
-    /// Load a VST2 plugin from path
     pub fn load(path: &Path, sample_rate: f64, block_size: usize) -> Result<Self> {
         #[cfg(feature = "vst2")]
         {
-            // Create channel for parameter automation
             let (param_tx, param_rx) = crossbeam_channel::unbounded();
-
-            // Shared lock-free time info (updated by process_with_transport, read by plugin)
             let time_info = Arc::new(arc_swap::ArcSwap::from_pointee(None));
-
-            // Create host with parameter change sender and shared time info
             let host = Arc::new(Mutex::new(BridgeHost::new(
                 param_tx,
                 Arc::clone(&time_info),
             )));
 
-            // Load plugin (clone host since it will be moved into the loader)
             let mut loader = PluginLoader::load(path, Arc::clone(&host)).map_err(|e| {
                 BridgeError::LoadFailed {
                     path: path.to_path_buf(),
@@ -75,15 +52,11 @@ impl Vst2Instance {
                 reason: format!("Failed to create instance: {:?}", e),
             })?;
 
-            // Initialize plugin
             instance.init();
             instance.set_sample_rate(sample_rate as f32);
             instance.set_block_size(block_size as i64);
 
-            // Get plugin info
             let info = instance.get_info();
-
-            // Build metadata (use id as unique identifier)
             let metadata =
                 PluginMetadata::new(format!("vst2.{}", info.unique_id), info.name.clone())
                     .author(info.vendor.clone())
@@ -113,25 +86,14 @@ impl Vst2Instance {
         }
     }
 
-    /// Get plugin metadata
     pub fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
 
-    /// Check if this plugin supports 64-bit (f64) audio processing
     pub fn supports_f64(&self) -> bool {
         self.metadata.supports_f64
     }
 
-    /// Process audio with MIDI events and optional transport info.
-    ///
-    /// This is the unified processing method that handles both f32 and f64 buffers.
-    /// For f32 buffers, pass `AudioBuffer`. For f64 buffers, pass `AudioBuffer64`.
-    ///
-    /// # Arguments
-    /// * `buffer` - Audio buffer (f32 or f64)
-    /// * `midi_events` - MIDI events to send to plugin
-    /// * `transport` - Optional transport info (tempo, position, etc.)
     pub fn process(
         &mut self,
         buffer: &mut AudioBuffer,
@@ -140,12 +102,10 @@ impl Vst2Instance {
     ) -> tutti_plugin::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
-            // Update transport info if provided
             if let Some(t) = transport {
                 self.time_info
                     .store(Arc::new(Some(build_vst2_time_info(t, buffer.sample_rate))));
             }
-
             self.process_f32_internal(buffer, midi_events)
         }
 
@@ -156,10 +116,7 @@ impl Vst2Instance {
         }
     }
 
-    /// Process audio with f64 buffers, MIDI events, and optional transport info.
-    ///
-    /// Note: VST2's `processDoubleReplacing` is not widely exposed in the `vst` crate,
-    /// so this converts f64 → f32, processes, then converts f32 → f64.
+    /// Converts f64 → f32, processes, then converts back (VST2 crate limitation).
     pub fn process_f64(
         &mut self,
         buffer: &mut tutti_plugin::protocol::AudioBuffer64,
@@ -168,12 +125,10 @@ impl Vst2Instance {
     ) -> tutti_plugin::protocol::MidiEventVec {
         #[cfg(feature = "vst2")]
         {
-            // Update transport info if provided
             if let Some(t) = transport {
                 self.time_info
                     .store(Arc::new(Some(build_vst2_time_info(t, buffer.sample_rate))));
             }
-
             self.process_f64_internal(buffer, midi_events)
         }
 
@@ -184,7 +139,6 @@ impl Vst2Instance {
         }
     }
 
-    /// Internal f32 processing implementation
     #[cfg(feature = "vst2")]
     fn process_f32_internal(
         &mut self,
@@ -198,20 +152,16 @@ impl Vst2Instance {
             return smallvec::SmallVec::new();
         }
 
-        // Send MIDI events to plugin
         self.send_midi_events(midi_events);
 
-        // Convert Tutti's borrowed slices to owned vectors for VST processing
         let mut input_vecs: Vec<Vec<f32>> =
             buffer.inputs.iter().map(|slice| slice.to_vec()).collect();
-
         let mut output_vecs: Vec<Vec<f32>> = buffer
             .outputs
             .iter()
             .map(|_| vec![0.0; num_samples])
             .collect();
 
-        // Ensure we have at least the channels the plugin expects
         let info = self.instance.get_info();
         while input_vecs.len() < info.inputs as usize {
             input_vecs.push(vec![0.0; num_samples]);
@@ -220,13 +170,10 @@ impl Vst2Instance {
             output_vecs.push(vec![0.0; num_samples]);
         }
 
-        // Create raw pointer arrays for VST
         let input_ptrs: Vec<*const f32> = input_vecs.iter().map(|v| v.as_ptr()).collect();
-
         let mut output_ptrs: Vec<*mut f32> =
             output_vecs.iter_mut().map(|v| v.as_mut_ptr()).collect();
 
-        // Create VST AudioBuffer from raw pointers
         let mut vst_buffer = unsafe {
             VstBuffer::from_raw(
                 input_ptrs.len(),
@@ -237,21 +184,17 @@ impl Vst2Instance {
             )
         };
 
-        // Process through VST
         self.instance.process(&mut vst_buffer);
 
-        // Copy processed output back to Tutti buffer
         for (i, out_channel) in buffer.outputs.iter_mut().enumerate() {
             if i < output_vecs.len() {
                 out_channel.copy_from_slice(&output_vecs[i][..num_samples]);
             }
         }
 
-        // VST2 doesn't have explicit MIDI output
         smallvec::SmallVec::new()
     }
 
-    /// Internal f64 processing implementation (converts to f32 and back)
     #[cfg(feature = "vst2")]
     fn process_f64_internal(
         &mut self,
@@ -265,16 +208,13 @@ impl Vst2Instance {
             return smallvec::SmallVec::new();
         }
 
-        // Send MIDI events to plugin
         self.send_midi_events(midi_events);
 
-        // Convert f64 → f32 for processing
         let mut input_vecs: Vec<Vec<f32>> = buffer
             .inputs
             .iter()
             .map(|ch| ch.iter().map(|&s| s as f32).collect())
             .collect();
-
         let mut output_vecs: Vec<Vec<f32>> = buffer
             .outputs
             .iter()
@@ -305,7 +245,6 @@ impl Vst2Instance {
 
         self.instance.process(&mut vst_buffer);
 
-        // Convert f32 → f64 output
         for (i, out_channel) in buffer.outputs.iter_mut().enumerate() {
             if i < output_vecs.len() {
                 for (j, sample) in out_channel.iter_mut().enumerate().take(num_samples) {
@@ -317,7 +256,6 @@ impl Vst2Instance {
         smallvec::SmallVec::new()
     }
 
-    /// Send MIDI events to the VST2 plugin
     #[cfg(feature = "vst2")]
     fn send_midi_events(&mut self, midi_events: &[MidiEvent]) {
         use vst::api;
@@ -336,11 +274,7 @@ impl Vst2Instance {
         }
 
         let num_events = api_events.len() as i32;
-
-        // Box the events to get stable pointers
         let boxed_events: Vec<Box<api::MidiEvent>> = api_events.into_iter().map(Box::new).collect();
-
-        // Create event pointers (cast MidiEvent* to Event*)
         let event_ptrs: Vec<*mut api::Event> = boxed_events
             .iter()
             .map(|e| e.as_ref() as *const api::MidiEvent as *mut api::Event)
@@ -357,7 +291,6 @@ impl Vst2Instance {
             }
             self.instance.process_events(&events);
         } else {
-            // For more than 2 events, we need custom layout
             #[repr(C)]
             struct LargeEvents {
                 num_events: i32,
@@ -377,21 +310,15 @@ impl Vst2Instance {
             }
         }
 
-        // Keep boxed_events alive until after process_events
         drop(boxed_events);
     }
 
-    /// Convert Tutti MidiEvent to VST API MidiEvent
     #[cfg(feature = "vst2")]
     fn midi_to_api_event(event: &MidiEvent) -> Option<vst::api::MidiEvent> {
         use std::mem;
         use vst::api;
 
-        // Access midi_msg types through the imported MidiEvent
-        // We need to match on the msg field which contains ChannelVoiceMsg
         let channel_num = event.channel as u8;
-
-        // Convert to MIDI bytes
         let (status, data1, data2) = match event.msg {
             ChannelVoiceMsg::NoteOn { note, velocity } => (0x90 | channel_num, note, velocity),
             ChannelVoiceMsg::NoteOff { note, velocity } => (0x80 | channel_num, note, velocity),
@@ -434,12 +361,10 @@ impl Vst2Instance {
         })
     }
 
-    /// Process audio through the plugin (convenience method without MIDI or transport)
     pub fn process_simple(&mut self, buffer: &mut AudioBuffer) {
         self.process(buffer, &[], None);
     }
 
-    /// Set sample rate
     pub fn set_sample_rate(&mut self, rate: f64) {
         self.sample_rate = rate;
 
@@ -449,10 +374,8 @@ impl Vst2Instance {
         }
     }
 
-    /// Check if plugin has editor
     #[cfg(feature = "vst2")]
     pub fn has_editor(&mut self) -> bool {
-        // Try to get editor - if it returns Some, the plugin has an editor
         self.instance.get_editor().is_some()
     }
 
@@ -461,7 +384,6 @@ impl Vst2Instance {
         false
     }
 
-    /// Open plugin editor
     #[cfg(feature = "vst2")]
     pub fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
         let mut editor = self
@@ -474,8 +396,6 @@ impl Vst2Instance {
             })?;
 
         editor.open(parent);
-
-        // Get editor size
         let size = editor.size();
         Ok((size.0 as u32, size.1 as u32))
     }
@@ -489,7 +409,6 @@ impl Vst2Instance {
         })
     }
 
-    /// Close plugin editor
     #[cfg(feature = "vst2")]
     pub fn close_editor(&mut self) {
         if let Some(mut editor) = self.instance.get_editor() {
@@ -498,11 +417,8 @@ impl Vst2Instance {
     }
 
     #[cfg(not(feature = "vst2"))]
-    pub fn close_editor(&mut self) {
-        // No-op
-    }
+    pub fn close_editor(&mut self) {}
 
-    /// Editor idle (call periodically to update GUI)
     #[cfg(feature = "vst2")]
     pub fn editor_idle(&mut self) {
         if let Some(mut editor) = self.instance.get_editor() {
@@ -511,11 +427,8 @@ impl Vst2Instance {
     }
 
     #[cfg(not(feature = "vst2"))]
-    pub fn editor_idle(&mut self) {
-        // No-op
-    }
+    pub fn editor_idle(&mut self) {}
 
-    /// Get parameter count
     #[cfg(feature = "vst2")]
     pub fn get_parameter_count(&self) -> i32 {
         self.instance.get_info().parameters
@@ -526,7 +439,6 @@ impl Vst2Instance {
         0
     }
 
-    /// Get parameter value (normalized 0-1)
     #[cfg(feature = "vst2")]
     pub fn get_parameter(&mut self, index: i32) -> f32 {
         let params = self.instance.get_parameter_object();
@@ -538,7 +450,6 @@ impl Vst2Instance {
         0.0
     }
 
-    /// Set parameter value (normalized 0-1)
     #[cfg(feature = "vst2")]
     pub fn set_parameter(&mut self, index: i32, value: f32) {
         let params = self.instance.get_parameter_object();
@@ -546,11 +457,8 @@ impl Vst2Instance {
     }
 
     #[cfg(not(feature = "vst2"))]
-    pub fn set_parameter(&mut self, _index: i32, _value: f32) {
-        // No-op
-    }
+    pub fn set_parameter(&mut self, _index: i32, _value: f32) {}
 
-    /// Get parameter name
     #[cfg(feature = "vst2")]
     pub fn get_parameter_name(&mut self, index: i32) -> String {
         let params = self.instance.get_parameter_object();
@@ -562,7 +470,6 @@ impl Vst2Instance {
         String::new()
     }
 
-    /// Get parameter text (formatted value)
     #[cfg(feature = "vst2")]
     pub fn get_parameter_text(&mut self, index: i32) -> String {
         let params = self.instance.get_parameter_object();
@@ -574,9 +481,6 @@ impl Vst2Instance {
         String::new()
     }
 
-    /// Get list of all parameters with their metadata.
-    ///
-    /// For VST2, the param_id is simply the index (0 to count-1).
     #[cfg(feature = "vst2")]
     pub fn get_parameter_list(&mut self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         let count = self.instance.get_info().parameters;
@@ -590,10 +494,10 @@ impl Vst2Instance {
                 tutti_plugin::protocol::ParameterInfo {
                     id: i as u32,
                     name,
-                    unit: String::new(), // VST2 doesn't have a standard way to get units
+                    unit: String::new(),
                     min_value: 0.0,
                     max_value: 1.0,
-                    default_value: value as f64, // Best we can do - current value as "default"
+                    default_value: value as f64,
                     step_count: 0,
                     flags: tutti_plugin::protocol::ParameterFlags {
                         automatable: true,
@@ -612,9 +516,6 @@ impl Vst2Instance {
         Vec::new()
     }
 
-    /// Get info about a specific parameter by index.
-    ///
-    /// For VST2, param_id is the parameter index.
     #[cfg(feature = "vst2")]
     pub fn get_parameter_info(&mut self, param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
         let count = self.instance.get_info().parameters;
@@ -651,18 +552,12 @@ impl Vst2Instance {
         None
     }
 
-    /// Save plugin state to byte array
     #[cfg(feature = "vst2")]
     pub fn get_state(&mut self) -> Result<Vec<u8>> {
-        // VST2 uses effGetChunk for state serialization
-        // For now, we save all parameter values as a simple binary format
         let param_count = self.get_parameter_count();
         let mut state = Vec::with_capacity((param_count as usize + 1) * 4);
-
-        // Write parameter count
         state.extend_from_slice(&param_count.to_le_bytes());
 
-        // Write all parameter values (normalized 0-1)
         for i in 0..param_count {
             let value = self.get_parameter(i);
             state.extend_from_slice(&value.to_le_bytes());
@@ -676,7 +571,6 @@ impl Vst2Instance {
         Ok(Vec::new())
     }
 
-    /// Load plugin state from byte array
     #[cfg(feature = "vst2")]
     pub fn set_state(&mut self, data: &[u8]) -> Result<()> {
         if data.len() < 4 {
@@ -687,7 +581,6 @@ impl Vst2Instance {
             });
         }
 
-        // Read parameter count
         let param_count = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         let expected_size = (param_count as usize + 1) * 4;
 
@@ -703,7 +596,6 @@ impl Vst2Instance {
             });
         }
 
-        // Read and set all parameter values
         for i in 0..param_count {
             let offset = 4 + (i as usize * 4);
             let value = f32::from_le_bytes([
@@ -723,8 +615,6 @@ impl Vst2Instance {
         Ok(())
     }
 
-    /// Poll for parameter changes from plugin automation
-    /// Returns all pending parameter changes
     #[cfg(feature = "vst2")]
     pub fn poll_parameter_changes(&self) -> Vec<ParameterChange> {
         self.param_rx.try_iter().collect()
@@ -736,7 +626,6 @@ impl Vst2Instance {
     }
 }
 
-/// Build VST2 TimeInfo from transport state.
 #[cfg(feature = "vst2")]
 fn build_vst2_time_info(
     transport: &tutti_plugin::protocol::TransportInfo,
@@ -754,7 +643,6 @@ fn build_vst2_time_info(
         flags |= 1 << 2; // kVstTransportCycleActive
     }
 
-    // Always valid fields
     flags |= 1 << 0; // kVstTransportChanged
     flags |= 1 << 9; // kVstTempoValid
     flags |= 1 << 10; // kVstTimeSigValid
@@ -776,12 +664,9 @@ fn build_vst2_time_info(
     }
 }
 
-/// Host implementation for VST2 plugins
 #[cfg(feature = "vst2")]
 struct BridgeHost {
-    /// Channel for sending parameter changes to main thread
     param_tx: crossbeam_channel::Sender<ParameterChange>,
-    /// Lock-free transport/timing information (shared with Vst2Instance)
     time_info: Arc<arc_swap::ArcSwap<Option<vst::api::TimeInfo>>>,
 }
 
@@ -801,33 +686,25 @@ impl BridgeHost {
 #[cfg(feature = "vst2")]
 impl Host for BridgeHost {
     fn automate(&self, index: i32, value: f32) {
-        // Send parameter change to main thread via lock-free channel
         let _ = self.param_tx.try_send((index, value));
     }
 
     fn get_plugin_id(&self) -> i32 {
-        // Return a unique host ID
-        0x44415749 // "DAWI" in ASCII
+        0x44415749
     }
 
-    fn idle(&self) {
-        // Called by plugin during processing
-    }
+    fn idle(&self) {}
 
     fn get_time_info(&self, _mask: i32) -> Option<vst::api::TimeInfo> {
-        // Lock-free read of transport info
         **self.time_info.load()
     }
 }
 
 #[cfg(feature = "vst2")]
 impl Drop for Vst2Instance {
-    fn drop(&mut self) {
-        // Plugin will be dropped automatically
-    }
+    fn drop(&mut self) {}
 }
 
-// Implement the unified PluginInstance trait
 impl crate::instance::PluginInstance for Vst2Instance {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
@@ -871,11 +748,7 @@ impl crate::instance::PluginInstance for Vst2Instance {
         Vst2Instance::get_parameter_count(self) as usize
     }
 
-    fn get_parameter(&self, id: u32) -> f64 {
-        // Need mutable self for VST2, but trait has &self
-        // This is a limitation - VST2 API requires &mut self
-        // For now, return 0.0 - proper fix would require interior mutability
-        let _ = id;
+    fn get_parameter(&self, _id: u32) -> f64 {
         0.0
     }
 

@@ -123,11 +123,9 @@ impl PluginServer {
         })
     }
 
-    /// Ensure audio buffers are sized correctly
-    /// Only reallocates if channel count or buffer size changed
+    /// Ensure audio buffers are sized correctly (only reallocates if size changed).
     fn ensure_buffers_sized(&mut self, num_channels: usize, buffer_size: usize) {
         if self.current_num_channels != num_channels || self.current_buffer_size != buffer_size {
-            // Resize f32 buffers
             self.input_buffers_f32.clear();
             self.output_buffers_f32.clear();
             for _ in 0..num_channels {
@@ -135,7 +133,6 @@ impl PluginServer {
                 self.output_buffers_f32.push(vec![0.0f32; buffer_size]);
             }
 
-            // Resize f64 buffers
             self.input_buffers_f64.clear();
             self.output_buffers_f64.clear();
             for _ in 0..num_channels {
@@ -148,20 +145,13 @@ impl PluginServer {
         }
     }
 
-    /// Run the bridge server
+    /// Run the bridge server.
     pub async fn run(&mut self) -> Result<()> {
-        // Listen for connection from host
         let listener = TransportListener::bind(&self.config.socket_path).await?;
-
-        // Accept connection
         let mut transport = listener.accept().await?;
-
-        // Send Ready message
         transport.send_bridge_message(&BridgeMessage::Ready).await?;
-
         self.transport = Some(transport);
 
-        // Message loop
         loop {
             let msg = self
                 .transport
@@ -180,10 +170,8 @@ impl PluginServer {
                     .await?;
             }
 
-            // Poll for parameter changes from plugin automation
             self.poll_parameter_changes().await?;
 
-            // Check for shutdown
             if self.transport.is_none() {
                 break;
             }
@@ -333,7 +321,6 @@ impl PluginServer {
             }
 
             HostMessage::EditorIdle => {
-                // Call editor idle for VST2 (VST3 uses own event loop)
                 if self.editor_open {
                     if let Some(ref mut plugin) = self.plugin {
                         plugin.as_instance_mut().editor_idle();
@@ -350,13 +337,7 @@ impl PluginServer {
                 Ok(None)
             }
 
-            HostMessage::Reset => {
-                // Reset plugin state (silence audio buffers, reset internal state)
-                // VST2/VST3 don't have explicit reset, so we do soft reset via suspend/resume pattern
-                // This is handled by the plugin itself on next process() call
-
-                Ok(None)
-            }
+            HostMessage::Reset => Ok(None),
 
             HostMessage::SaveState => {
                 if let Some(ref mut plugin) = self.plugin {
@@ -406,31 +387,24 @@ impl PluginServer {
 
         let start = std::time::Instant::now();
 
-        // Reuse pre-allocated MIDI output buffer (RT-safe)
         self.midi_output_buffer.clear();
 
-        // Ensure buffers are sized before processing (avoids borrow checker issues)
         if let (Some(_), Some(ref plugin)) = (&self.shared_buffer, &self.plugin) {
             let metadata = plugin.as_instance().metadata();
             let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
             self.ensure_buffers_sized(num_channels, num_samples);
         }
 
-        // Process audio through plugin
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
             (&mut self.shared_buffer, &mut self.plugin)
         {
             let metadata = plugin.as_instance().metadata();
             let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
 
-            // Create process context with MIDI events
             let ctx = ProcessContext::new().midi(midi_events);
 
             match self.negotiated_format {
                 SampleFormat::Float64 => {
-                    // f64 path - RT-safe: reuse pre-allocated buffers (already sized above)
-
-                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel_f64(ch) {
                             self.input_buffers_f64[ch][..num_samples]
@@ -439,7 +413,6 @@ impl PluginServer {
                         }
                     }
 
-                    // Create slice views (no allocation)
                     let input_slices: Vec<&[f64]> = self.input_buffers_f64[..num_channels]
                         .iter()
                         .map(|v| &v[..num_samples])
@@ -451,7 +424,6 @@ impl PluginServer {
                         .collect();
 
                     let sample_rate = self.sample_rate;
-
                     let mut audio_buffer = tutti_plugin::protocol::AudioBuffer64 {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
@@ -464,18 +436,12 @@ impl PluginServer {
                         .process_f64(&mut audio_buffer, &ctx);
                     self.midi_output_buffer = output.midi_events;
 
-                    // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer
-                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples])
-                        {
-                        }
+                        let _ = shared_buffer
+                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]);
                     }
                 }
                 SampleFormat::Float32 => {
-                    // f32 path - RT-safe: reuse pre-allocated buffers (already sized above)
-
-                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel(ch) {
                             self.input_buffers_f32[ch][..num_samples]
@@ -484,7 +450,6 @@ impl PluginServer {
                         }
                     }
 
-                    // Create slice views (no allocation)
                     let input_slices: Vec<&[f32]> = self.input_buffers_f32[..num_channels]
                         .iter()
                         .map(|v| &v[..num_samples])
@@ -496,7 +461,6 @@ impl PluginServer {
                         .collect();
 
                     let sample_rate = self.sample_rate;
-
                     let mut audio_buffer = tutti_plugin::protocol::AudioBuffer {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
@@ -509,12 +473,9 @@ impl PluginServer {
                         .process_f32(&mut audio_buffer, &ctx);
                     self.midi_output_buffer = output.midi_events;
 
-                    // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer
-                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples])
-                        {
-                        }
+                        let _ = shared_buffer
+                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples]);
                     }
                 }
             }
@@ -522,7 +483,6 @@ impl PluginServer {
 
         let latency_us = start.elapsed().as_micros() as u64;
 
-        // Return appropriate response based on whether we have MIDI output
         if !self.midi_output_buffer.is_empty() {
             Ok(Some(BridgeMessage::AudioProcessedMidi {
                 latency_us,
@@ -555,19 +515,16 @@ impl PluginServer {
 
         let start = std::time::Instant::now();
 
-        // Reuse pre-allocated MIDI output buffer (RT-safe)
         self.midi_output_buffer.clear();
         let mut param_output = tutti_plugin::protocol::ParameterChanges::new();
         let mut note_expression_output = tutti_plugin::protocol::NoteExpressionChanges::new();
 
-        // Process audio through plugin
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
             (&mut self.shared_buffer, &mut self.plugin)
         {
             let metadata = plugin.as_instance().metadata();
             let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
 
-            // Create process context with all data
             let ctx = ProcessContext::new()
                 .midi(midi_events)
                 .params(param_changes)
@@ -576,9 +533,6 @@ impl PluginServer {
 
             match self.negotiated_format {
                 SampleFormat::Float64 => {
-                    // f64 path - RT-safe: reuse pre-allocated buffers (already sized above)
-
-                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel_f64(ch) {
                             self.input_buffers_f64[ch][..num_samples]
@@ -587,7 +541,6 @@ impl PluginServer {
                         }
                     }
 
-                    // Create slice views (no allocation)
                     let input_slices: Vec<&[f64]> = self.input_buffers_f64[..num_channels]
                         .iter()
                         .map(|v| &v[..num_samples])
@@ -599,7 +552,6 @@ impl PluginServer {
                         .collect();
 
                     let sample_rate = self.sample_rate;
-
                     let mut audio_buffer = tutti_plugin::protocol::AudioBuffer64 {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
@@ -614,18 +566,12 @@ impl PluginServer {
                     param_output = output.param_changes;
                     note_expression_output = output.note_expression;
 
-                    // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer
-                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples])
-                        {
-                        }
+                        let _ = shared_buffer
+                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]);
                     }
                 }
                 SampleFormat::Float32 => {
-                    // f32 path - RT-safe: reuse pre-allocated buffers (already sized above)
-
-                    // Copy input data into pre-allocated buffers
                     for ch in 0..num_channels {
                         if let Ok(data) = shared_buffer.read_channel(ch) {
                             self.input_buffers_f32[ch][..num_samples]
@@ -634,7 +580,6 @@ impl PluginServer {
                         }
                     }
 
-                    // Create slice views (no allocation)
                     let input_slices: Vec<&[f32]> = self.input_buffers_f32[..num_channels]
                         .iter()
                         .map(|v| &v[..num_samples])
@@ -646,7 +591,6 @@ impl PluginServer {
                         .collect();
 
                     let sample_rate = self.sample_rate;
-
                     let mut audio_buffer = tutti_plugin::protocol::AudioBuffer {
                         inputs: &input_slices,
                         outputs: &mut output_slices,
@@ -661,12 +605,9 @@ impl PluginServer {
                     param_output = output.param_changes;
                     note_expression_output = output.note_expression;
 
-                    // Write output from pre-allocated buffers
                     for ch in 0..num_channels {
-                        if let Err(_e) = shared_buffer
-                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples])
-                        {
-                        }
+                        let _ = shared_buffer
+                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples]);
                     }
                 }
             }
@@ -674,7 +615,6 @@ impl PluginServer {
 
         let latency_us = start.elapsed().as_micros() as u64;
 
-        // Return full automation response
         Ok(Some(BridgeMessage::AudioProcessedFull {
             latency_us,
             midi_output: self
@@ -701,11 +641,10 @@ impl PluginServer {
             }
         }
 
-        // VST3 doesn't need polling - it uses a different callback mechanism
         Ok(())
     }
 
-    /// Load plugin (VST2, VST3, or stub)
+    /// Load plugin (VST2, VST3, or CLAP).
     fn load_plugin(
         &mut self,
         path: PathBuf,
@@ -713,9 +652,8 @@ impl PluginServer {
         block_size: usize,
         preferred_format: SampleFormat,
     ) -> Result<PluginMetadata> {
-        // Store sample rate for use during processing
         self.sample_rate = sample_rate;
-        // Validate plugin exists
+
         if !path.exists() {
             return Err(BridgeError::LoadFailed {
                 path: path.to_path_buf(),
@@ -724,7 +662,6 @@ impl PluginServer {
             });
         }
 
-        // Determine plugin format from extension
         let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let (plugin, metadata): (LoadedPlugin, PluginMetadata) = match extension
@@ -733,12 +670,8 @@ impl PluginServer {
         {
             #[cfg(feature = "vst3")]
             "vst3" => {
-                // Load as VST3
                 let mut vst = Vst3Instance::load(&path, sample_rate, block_size)?;
-                // Negotiate format: use f64 if preferred AND plugin supports it
-                if preferred_format == SampleFormat::Float64
-                    && vst.can_process_f64()
-                {
+                if preferred_format == SampleFormat::Float64 && vst.can_process_f64() {
                     let _ = vst.set_sample_format(SampleFormat::Float64);
                 }
                 let metadata = vst.metadata().clone();
@@ -747,7 +680,6 @@ impl PluginServer {
 
             #[cfg(feature = "vst2")]
             "vst" | "dll" | "so" => {
-                // Load as VST2
                 let vst = Vst2Instance::load(&path, sample_rate, block_size)?;
                 let metadata = vst.metadata().clone();
                 (LoadedPlugin::Vst2(vst), metadata)
@@ -755,7 +687,6 @@ impl PluginServer {
 
             #[cfg(feature = "clap")]
             "clap" => {
-                // Load as CLAP
                 let clap = ClapInstance::load(&path, sample_rate, block_size)?;
                 let metadata = clap.metadata().clone();
                 (LoadedPlugin::Clap(clap), metadata)
@@ -773,17 +704,14 @@ impl PluginServer {
             }
         };
 
-        // Negotiate format: use f64 only if preferred AND plugin supports it
-        let negotiated_format = if preferred_format == SampleFormat::Float64
-            && metadata.supports_f64
-        {
-            SampleFormat::Float64
-        } else {
-            SampleFormat::Float32
-        };
+        let negotiated_format =
+            if preferred_format == SampleFormat::Float64 && metadata.supports_f64 {
+                SampleFormat::Float64
+            } else {
+                SampleFormat::Float32
+            };
         self.negotiated_format = negotiated_format;
 
-        // Open shared memory buffer with negotiated format
         let buffer_name = format!("dawai_vst_buffer_{}", std::process::id());
         let max_samples = 8192;
         let shared_buffer = SharedAudioBuffer::open_with_format(
@@ -802,7 +730,6 @@ impl PluginServer {
 
 impl Drop for PluginServer {
     fn drop(&mut self) {
-        // Clean up socket
         let _ = std::fs::remove_file(&self.config.socket_path);
     }
 }

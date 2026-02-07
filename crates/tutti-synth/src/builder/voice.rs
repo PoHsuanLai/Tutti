@@ -53,7 +53,6 @@ impl SynthVoice {
             FilterType::None => tutti_core::shared(20000.0),
         };
 
-        // Create sub-voices
         let count = unison_count.max(1);
         let mut sub_voices = Vec::with_capacity(count);
         for _ in 0..count {
@@ -102,15 +101,12 @@ impl SynthVoice {
         self.active = true;
 
         if let Some(unison) = unison {
-            // Randomize phases for natural detuned sound
             unison.randomize_phases();
-            // Set each sub-voice's frequency based on unison detuning
             for (i, sub) in self.sub_voices.iter_mut().enumerate() {
                 let params = unison.voice_params(i);
                 sub.pitch.set(base_freq * params.freq_ratio);
             }
         } else {
-            // No unison - all sub-voices at base frequency
             for sub in &mut self.sub_voices {
                 sub.pitch.set(base_freq);
             }
@@ -120,7 +116,6 @@ impl SynthVoice {
     /// Trigger a note off.
     pub fn note_off(&mut self) {
         self.gate.set(0.0);
-        // Voice stays active until envelope finishes (handled by PolySynth)
     }
 
     /// Set the pitch (frequency in Hz) for all sub-voices.
@@ -166,20 +161,14 @@ impl SynthVoice {
     pub fn tick_stereo(&mut self, unison: Option<&UnisonEngine>) -> (f32, f32) {
         let mut left = 0.0f32;
         let mut right = 0.0f32;
-        // Use a larger buffer to handle potential stereo output from DSP chain
         let mut out_buf = [0.0f32; 2];
 
         for (i, sub) in self.sub_voices.iter_mut().enumerate() {
-            // Check how many outputs the DSP chain has
             let num_outputs = sub.dsp.outputs();
-
-            // Reset output buffer
             out_buf[0] = 0.0;
             out_buf[1] = 0.0;
-
             sub.dsp.tick(&[], &mut out_buf[..num_outputs]);
 
-            // Get pan and amplitude from unison engine (or defaults)
             let (pan_pos, amplitude) = if let Some(u) = unison {
                 let p = u.voice_params(i);
                 (p.pan, p.amplitude)
@@ -190,8 +179,6 @@ impl SynthVoice {
             // Equal-power panning
             let left_gain = ((1.0 - pan_pos) * 0.5).sqrt() * amplitude;
             let right_gain = ((1.0 + pan_pos) * 0.5).sqrt() * amplitude;
-
-            // Use first output channel for mono signal
             let mono_sample = out_buf[0];
             left += mono_sample * left_gain;
             right += mono_sample * right_gain;
@@ -221,14 +208,13 @@ impl SynthVoice {
         }
 
         if new_count > current_count {
-            // Add more sub-voices
             for _ in current_count..new_count {
                 let pitch = tutti_core::shared(440.0);
                 let mut dsp =
                     build_sub_voice_dsp(&self.config, &pitch, &self.gate, &self.filter_cutoff);
                 dsp.set_sample_rate(self.sample_rate);
 
-                // Initialize the DSP chain
+                // Initialize DSP chain (see from_config for explanation)
                 let num_outputs = dsp.outputs();
                 let mut init_buf = [0.0f32; 2];
                 for _ in 0..100 {
@@ -238,7 +224,6 @@ impl SynthVoice {
                 self.sub_voices.push(SubVoice { pitch, dsp });
             }
         } else {
-            // Remove excess sub-voices
             self.sub_voices.truncate(new_count);
         }
     }
