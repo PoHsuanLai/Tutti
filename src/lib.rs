@@ -40,9 +40,9 @@
 //! })?;
 //!
 //! // Instantiate nodes (creates instances and adds to graph)
-//! let synth = engine.instance("my_synth", &params! {})?;
-//! let filter = engine.instance("my_filter", &params! { "cutoff" => 2000.0 })?;
-//! let reverb = engine.instance("reverb", &params! { "room_size" => 0.9 })?;
+//! let synth = engine.create("my_synth", &params! {})?;
+//! let filter = engine.create("my_filter", &params! { "cutoff" => 2000.0 })?;
+//! let reverb = engine.create("reverb", &params! { "room_size" => 0.9 })?;
 //!
 //! // Build audio graph with node IDs
 //! engine.graph(|net| {
@@ -82,9 +82,8 @@ pub use tutti_core as core;
 
 // Core types
 pub use tutti_core::{
-    get_param,
-    get_param_or,
-
+    // Click (metronome as AudioUnit)
+    click,
     AtomicAmplitude,
     AtomicDouble,
     AtomicFlag,
@@ -96,16 +95,19 @@ pub use tutti_core::{
     AudioUnit,
     BufferMut,
     BufferRef,
+    ClickNode,
+    ClickState,
     CpuMeter,
     CpuMetrics,
 
+    Direction,
     // Error
     Error,
     EventId,
     Fade,
     // Metering (includes LUFS!)
+    MeteringHandle,
     MeteringManager,
-    Metronome,
     MetronomeHandle,
     MetronomeMode,
     MotionState,
@@ -117,8 +119,9 @@ pub use tutti_core::{
     NodeInfo,
     NodeParamValue,
     NodeParams,
-    // Note: NodeRegistry is now internal - use engine.add_node() / engine.load_*() APIs
+    // Note: NodeRegistry is now internal - use engine.register() / engine.load_*() APIs
     NodeRegistryError,
+    Params,
     PdcDelayUnit,
 
     // PDC
@@ -140,12 +143,13 @@ pub use tutti_core::{
     // Transport
     TransportHandle,
     TransportManager,
+    TransportReader,
     TuttiNet,
     BBT,
 };
 
-// Atomic types
-pub use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
+// Atomic types (from core:: via tutti-core, no_std compatible)
+pub use tutti_core::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 
 // Sample types
 pub use tutti_core::{Sample, F32, F64};
@@ -156,11 +160,12 @@ pub use tutti_midi_io as midi;
 
 #[cfg(feature = "midi")]
 pub use tutti_midi_io::{
-    MidiEvent, MidiHandle, MidiSystem, MidiSystemBuilder, PortInfo, RawMidiEvent,
+    Channel, ChannelVoiceMsg, ControlChange, MidiEvent, MidiHandle, MidiMsg, MidiSystem,
+    MidiSystemBuilder, Note, PortInfo, RawMidiEvent,
 };
 
 #[cfg(feature = "midi")]
-pub use tutti_core::{AsMidiAudioUnit, MidiAudioUnit, MidiRegistry, MidiRoutingTable};
+pub use tutti_core::{MidiEventBuilder, MidiRegistry, MidiRoutingTable};
 
 // Sampler subsystem (optional)
 #[cfg(feature = "sampler")]
@@ -168,8 +173,8 @@ pub use tutti_sampler as sampler;
 
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::{
-    AudioInput, AudioInputBackend, SamplerHandle, SamplerSystem, SamplerSystemBuilder, SamplerUnit,
-    StreamingSamplerUnit, TimeStretchUnit,
+    AudioInput, AudioInputBackend, PlayDirection, SamplerHandle, SamplerSystem,
+    SamplerSystemBuilder, SamplerUnit, StreamingSamplerUnit, TimeStretchUnit,
 };
 
 // Time stretch types from sampler subcrate
@@ -187,13 +192,18 @@ pub use tutti_synth::{SoundFontHandle, SoundFontSynth, SoundFontSystem, SoundFon
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
 
+// LFO is always available
+pub use tutti_dsp::{LfoMode, LfoNode, LfoShape};
+
+// Dynamics (compressors, gates) - requires dsp-dynamics feature
+#[cfg(feature = "dsp-dynamics")]
 pub use tutti_dsp::{
-    ChannelLayout, LfoMode, LfoNode, LfoShape, SidechainCompressor, SidechainGate,
-    StereoSidechainCompressor, StereoSidechainGate,
+    SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate,
 };
 
-// Spatial audio (always included) - only AudioUnit nodes
-pub use tutti_dsp::{BinauralPannerNode, SpatialPannerNode};
+// Spatial audio (VBAP, binaural) - requires dsp-spatial feature
+#[cfg(feature = "dsp-spatial")]
+pub use tutti_dsp::{BinauralPannerNode, ChannelLayout, SpatialPannerNode};
 
 // Analysis tools (optional)
 #[cfg(feature = "analysis")]
@@ -211,7 +221,11 @@ pub use tutti_analysis::{
 pub use tutti_export as export;
 
 #[cfg(feature = "export")]
-pub use tutti_export::{AudioFormat, ExportBuilder, ExportOptions, NormalizationMode};
+pub use tutti_export::{AudioFormat, ExportBuilder, ExportConfig, ExportContext, ExportOptions, NormalizationMode};
+
+// Export timeline (for advanced export scenarios)
+#[cfg(feature = "export")]
+pub use tutti_core::ExportTimeline;
 
 // Plugin hosting
 #[cfg(feature = "plugin")]
@@ -232,7 +246,14 @@ pub use tutti_neural::{NeuralHandle, NeuralSystem, NeuralSystemBuilder};
 
 // Neural types from tutti-core
 #[cfg(feature = "neural")]
-pub use tutti_core::NeuralModelId;
+pub use tutti_core::{
+    BackendCapabilities, BackendFactory, InferenceBackend, InferenceConfig, InferenceError,
+    NeuralModelId,
+};
+
+// Burn ML backend (optional)
+#[cfg(feature = "burn")]
+pub use tutti_burn;
 
 /// Full FunDSP prelude - oscillators, filters, effects, and more.
 ///
@@ -255,10 +276,37 @@ pub mod dsp {
 }
 
 mod builder;
+pub mod builders;
 mod engine;
 
 pub use builder::TuttiEngineBuilder;
 pub use engine::TuttiEngine;
+
+// Re-export builder types for convenience
+#[cfg(feature = "soundfont")]
+pub use builders::Sf2Builder;
+#[cfg(all(feature = "sampler", feature = "wav"))]
+pub use builders::WavBuilder;
+#[cfg(all(feature = "sampler", feature = "flac"))]
+pub use builders::FlacBuilder;
+#[cfg(all(feature = "sampler", feature = "mp3"))]
+pub use builders::Mp3Builder;
+#[cfg(all(feature = "sampler", feature = "ogg"))]
+pub use builders::OggBuilder;
+#[cfg(feature = "plugin")]
+pub use builders::Vst3Builder;
+#[cfg(all(feature = "plugin", feature = "vst2"))]
+pub use builders::Vst2Builder;
+#[cfg(all(feature = "plugin", feature = "clap"))]
+pub use builders::ClapBuilder;
+#[cfg(all(feature = "neural", feature = "midi"))]
+pub use builders::NeuralSynthBuilder;
+#[cfg(feature = "neural")]
+pub use builders::NeuralEffectBuilder;
+
+// SynthHandle for fluent synth creation
+#[cfg(all(feature = "synth", feature = "midi"))]
+pub use tutti_synth::SynthHandle;
 
 /// Convenience prelude for common imports
 pub mod prelude {
@@ -274,15 +322,15 @@ pub mod prelude {
     // Transport
     pub use crate::core::TransportManager;
 
-    // Node parameters (for instance() calls)
-    pub use crate::core::{get_param, get_param_or, NodeParamValue, NodeParams};
+    // Node parameters (for create() calls)
+    pub use crate::core::{NodeParamValue, NodeParams, Params};
 
     // Re-export macros from tutti-core
     pub use tutti_core::{chain, mix, params, split};
 
     // MIDI (optional)
     #[cfg(feature = "midi")]
-    pub use crate::midi::{MidiEvent, MidiHandle, MidiSystem};
+    pub use crate::midi::{MidiEvent, MidiHandle, MidiSystem, Note};
 
     // Sampler (optional)
     #[cfg(feature = "sampler")]

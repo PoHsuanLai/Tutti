@@ -159,13 +159,9 @@ fn process_audio_inner(state: &AudioCallbackState, output: &mut [f32]) {
         }
     }
 
-    // Update sample position
     state
         .sample_position
         .fetch_add(frames as u64, Ordering::Relaxed);
-
-    // NOTE: LUFS metering is handled in the CPAL callback closure (output/core.rs)
-    // to avoid heap allocations and Mutex locks on the RT thread.
 }
 
 /// Process MIDI input from hardware and route to the audio graph.

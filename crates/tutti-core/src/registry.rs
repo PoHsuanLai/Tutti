@@ -351,36 +351,3 @@ impl Clone for NodeRegistry {
     }
 }
 
-/// Helper to get a required parameter
-///
-/// # Example
-/// ```ignore
-/// let freq: f32 = get_param(params, "frequency")?;
-/// let volume: f64 = get_param(params, "volume")?;
-/// let enabled: bool = get_param(params, "enabled")?;
-/// ```
-pub fn get_param<T: ParamConvert>(params: &NodeParams, name: &str) -> Result<T, NodeRegistryError> {
-    params
-        .get(name)
-        .ok_or_else(|| NodeRegistryError::MissingParameter(name.to_string()))
-        .and_then(|v| {
-            T::from_param(v).ok_or_else(|| {
-                NodeRegistryError::InvalidParameter(name.to_string(), format!("{:?}", v))
-            })
-        })
-}
-
-/// Helper to get an optional parameter with default
-///
-/// # Example
-/// ```ignore
-/// let freq: f32 = get_param_or(params, "frequency", 440.0);
-/// let volume: f64 = get_param_or(params, "volume", 0.5);
-/// let enabled: bool = get_param_or(params, "enabled", true);
-/// ```
-pub fn get_param_or<T: ParamConvert>(params: &NodeParams, name: &str, default: T) -> T {
-    params
-        .get(name)
-        .and_then(|v| T::from_param(v))
-        .unwrap_or(default)
-}

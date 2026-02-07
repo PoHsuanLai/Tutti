@@ -163,6 +163,31 @@ impl TuttiSystem {
         self.net.lock().clone_net()
     }
 
+    /// Create an export context for offline rendering.
+    ///
+    /// The context contains:
+    /// - An isolated timeline that advances by sample count
+    /// - A MIDI snapshot (if midi feature enabled)
+    /// - Transport settings (tempo, loop range)
+    ///
+    /// Nodes configured for export will read from this context
+    /// instead of the live transport.
+    pub fn create_export_context(&self) -> crate::ExportContext {
+        use crate::transport::ExportConfig;
+
+        let transport_handle = TransportHandle::new(
+            self.transport.clone(),
+            self.click_state.clone(),
+        );
+
+        crate::ExportContext::new(ExportConfig {
+            start_beat: 0.0,
+            tempo: transport_handle.get_tempo(),
+            sample_rate: self.sample_rate,
+            loop_range: transport_handle.get_loop_range(),
+        })
+    }
+
     /// Configure MIDI routing.
     ///
     /// Use this to set up channel-based, port-based, or layered MIDI routing.

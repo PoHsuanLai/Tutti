@@ -17,5 +17,6 @@ pub use cpu::{CpuMeter, CpuMetrics};
 pub use handle::MeteringHandle;
 pub use loudness::{analyze_loudness, analyze_true_peak, LoudnessResult};
 pub use manager::MeteringManager;
-pub use rt::MeteringContext;
+#[cfg(feature = "std")]
+pub(crate) use rt::MeteringContext;
 pub use stereo::{AtomicStereoAnalysis, StereoAnalysisSnapshot};

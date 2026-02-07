@@ -37,51 +37,45 @@ extern crate std;
 #[macro_use]
 extern crate alloc;
 
-// Error types
+#[macro_use]
+mod macros;
+
 pub mod error;
 pub use error::{Error, NodeRegistryError, Result};
 
-// Main entry point
 mod system;
 pub use system::{TuttiSystem, TuttiSystemBuilder};
 
-// DSP graph
 mod net_frontend;
 pub use net_frontend::{NodeInfo, TuttiNet};
 
-// Transport
 pub(crate) mod transport;
 pub use transport::{
     automation_curves, click, AutomationEnvelopeFn, AutomationReaderInput, ClickNode, ClickState,
-    Direction, MetronomeHandle, MetronomeMode, MotionState, SmpteFrameRate, SyncSnapshot,
-    SyncSource, SyncState, SyncStatus, TempoMap, TimeSignature, TransportClock, TransportHandle,
-    TransportManager, BBT,
+    Direction, ExportConfig, ExportTimeline, MetronomeHandle, MetronomeMode, MotionState,
+    SmpteFrameRate, SyncSnapshot, SyncSource, SyncState, SyncStatus, TempoMap, TimeSignature,
+    TransportClock, TransportHandle, TransportManager, TransportReader, BBT,
 };
 
-// Metering
+mod export_context;
+pub use export_context::ExportContext;
+
 pub(crate) mod metering;
 pub use metering::{
     analyze_loudness, analyze_true_peak, AtomicAmplitude, AtomicStereoAnalysis, CpuMeter,
     CpuMetrics, LoudnessResult, MeteringHandle, MeteringManager, StereoAnalysisSnapshot,
 };
 
-// Plugin delay compensation
 pub(crate) mod pdc;
 pub use pdc::{DelayBuffer, PdcDelayUnit, PdcManager, PdcState};
 
-// Node registry
 pub mod registry;
-pub use registry::{
-    get_param, get_param_or, NodeConstructor, NodeParamValue, NodeParams, NodeRegistry,
-    ParamConvert, Params,
-};
+pub use registry::{NodeConstructor, NodeParamValue, NodeParams, NodeRegistry, ParamConvert, Params};
 
-// Lock-free primitives
 pub(crate) mod lockfree;
 pub use compat::{Arc, AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 pub use lockfree::{AtomicDouble, AtomicFlag, AtomicFloat};
 
-// FunDSP re-exports
 pub mod dsp {
     //! Re-export of fundsp::prelude for DSP building blocks.
     pub use fundsp::prelude::*;
@@ -107,8 +101,10 @@ pub use fundsp::{Sample, F32, F64};
 /// Voice identifier for polyphonic synths.
 pub type VoiceId = u64;
 
-// Internal modules
-pub(crate) mod compat;
+/// Compatibility layer for no_std + alloc.
+///
+/// Re-exports common types that work in both std and no_std environments.
+pub mod compat;
 
 #[cfg(feature = "std")]
 pub(crate) mod callback;
@@ -116,17 +112,16 @@ pub(crate) mod callback;
 #[cfg(feature = "std")]
 pub(crate) mod output;
 
-// Feature-gated: MIDI
 #[cfg(feature = "midi")]
 pub mod midi;
 
 #[cfg(feature = "midi")]
 pub use midi::{
     Channel, ChannelVoiceMsg, ControlChange, MidiEvent, MidiEventBuilder, MidiInputSource, MidiMsg,
-    MidiRegistry, MidiRoute, MidiRoutingSnapshot, MidiRoutingTable, NoMidiInput, RawMidiEvent,
+    MidiRegistry, MidiRoute, MidiRoutingSnapshot, MidiRoutingTable, MidiSnapshot, NoMidiInput,
+    RawMidiEvent, TimedMidiEvent,
 };
 
-// Feature-gated: Neural audio
 #[cfg(feature = "neural")]
 pub mod neural;
 
@@ -137,7 +132,6 @@ pub use neural::{
     NeuralModelId, NeuralNodeManager, NeuralSynthBuilder, SharedNeuralNodeManager,
 };
 
-// Parameter range and smoothing
 pub mod parameter;
 pub use parameter::{ParameterRange, ParameterScale};
 

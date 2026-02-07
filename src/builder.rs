@@ -2,7 +2,14 @@
 
 use crate::core::TuttiSystemBuilder;
 use crate::{Result, TuttiEngine};
-use std::sync::Arc;
+
+#[cfg(any(
+    feature = "midi",
+    feature = "sampler",
+    feature = "neural",
+    feature = "soundfont"
+))]
+use tutti_core::Arc;
 
 #[cfg(feature = "midi")]
 use crate::midi::MidiSystem;
@@ -47,6 +54,9 @@ pub struct TuttiEngineBuilder {
 
     #[cfg(feature = "plugin")]
     plugin_runtime: Option<tokio::runtime::Handle>,
+
+    #[cfg(feature = "neural")]
+    neural_backend_factory: Option<tutti_core::BackendFactory>,
 }
 
 impl Default for TuttiEngineBuilder {
@@ -62,6 +72,9 @@ impl Default for TuttiEngineBuilder {
 
             #[cfg(feature = "plugin")]
             plugin_runtime: None,
+
+            #[cfg(feature = "neural")]
+            neural_backend_factory: None,
         }
     }
 }
@@ -98,6 +111,26 @@ impl TuttiEngineBuilder {
         self
     }
 
+    /// Set a custom neural inference backend factory.
+    ///
+    /// Use this to provide your own inference backend (e.g. ONNX Runtime, candle)
+    /// instead of the default Burn backend. If not set and the `burn` feature is
+    /// enabled, the Burn backend is used automatically.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let engine = TuttiEngine::builder()
+    ///     .neural_backend(Box::new(|config| {
+    ///         Ok(Box::new(MyOnnxBackend::new(config)?))
+    ///     }))
+    ///     .build()?;
+    /// ```
+    #[cfg(feature = "neural")]
+    pub fn neural_backend(mut self, factory: tutti_core::BackendFactory) -> Self {
+        self.neural_backend_factory = Some(factory);
+        self
+    }
+
     /// Set plugin runtime handle for async plugin loading
     ///
     /// Required for loading VST2, VST3, and CLAP plugins.
@@ -120,9 +153,14 @@ impl TuttiEngineBuilder {
         // Build MIDI subsystem first (if enabled) so we can pass port manager to core
         #[cfg(feature = "midi")]
         let midi = if self.enable_midi {
+            #[allow(unused_mut)]
+            let mut builder = MidiSystem::builder();
+            #[cfg(feature = "midi-io")]
+            {
+                builder = builder.io();
+            }
             Some(Arc::new(
-                MidiSystem::builder()
-                    .io() // Enable hardware I/O
+                builder
                     .build()
                     .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
             ))
@@ -131,6 +169,7 @@ impl TuttiEngineBuilder {
         };
 
         // Build core system with MIDI routing if enabled
+        #[allow(unused_mut)]
         let mut core_builder = TuttiSystemBuilder::default()
             .inputs(self.inputs)
             .outputs(self.outputs);
@@ -150,6 +189,7 @@ impl TuttiEngineBuilder {
 
         let core = core_builder.build()?;
 
+        #[cfg(any(feature = "sampler", feature = "soundfont"))]
         let sample_rate = self.sample_rate.unwrap_or_else(|| core.sample_rate());
 
         // Build sampler subsystem (always enabled when feature is compiled)
@@ -162,11 +202,25 @@ impl TuttiEngineBuilder {
 
         // Build neural subsystem (always enabled when feature is compiled)
         #[cfg(feature = "neural")]
-        let neural = Arc::new(
-            NeuralSystem::builder()
-                .build()
-                .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
-        );
+        let neural = {
+            let mut builder = NeuralSystem::builder();
+
+            // Use custom backend if provided, otherwise use Burn if available
+            if let Some(factory) = self.neural_backend_factory {
+                builder = builder.backend(factory);
+            } else {
+                #[cfg(feature = "burn")]
+                {
+                    builder = builder.backend(tutti_burn::burn_backend_factory());
+                }
+            }
+
+            Arc::new(
+                builder
+                    .build()
+                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+            )
+        };
 
         // Build SoundFont manager (always enabled when feature is compiled)
         #[cfg(feature = "soundfont")]

@@ -9,14 +9,14 @@
 
 pub mod registry;
 pub mod routing;
+pub mod snapshot;
 
-// Re-export pure MIDI types from tutti-midi
 pub use tutti_midi::{
     event, input_source, Channel, ChannelModeMsg, ChannelVoiceMsg, ControlChange, MidiEvent,
     MidiEventBuilder, MidiInputSource, MidiMsg, NoMidiInput, RawMidiEvent, SystemCommonMsg,
     SystemRealTimeMsg,
 };
 
-// Re-export local higher-level types
 pub use registry::MidiRegistry;
 pub use routing::{MidiRoute, MidiRoutingSnapshot, MidiRoutingTable};
+pub use snapshot::{MidiSnapshot, TimedMidiEvent};

@@ -75,27 +75,21 @@ impl MeteringManager {
         elapsed: Duration,
         ctx: &mut MeteringContext,
     ) {
-        // CPU metering (must be first - uses elapsed time)
         self.update_cpu(frames, elapsed);
-
-        // Amplitude metering (peak/RMS)
         self.update_amplitude(output, frames);
 
-        // Stereo correlation (needs deinterleaved buffers)
         if self.correlation_enabled() {
             ctx.ensure_capacity(frames);
             ctx.deinterleave(output, frames);
             self.update_stereo(&ctx.left_buf[..frames], &ctx.right_buf[..frames]);
         }
 
-        // LUFS loudness (needs deinterleaved buffers)
         if self.is_lufs_enabled() {
             ctx.ensure_capacity(frames);
             ctx.deinterleave(output, frames);
             self.update_lufs(&ctx.left_buf[..frames], &ctx.right_buf[..frames]);
         }
 
-        // Analysis tap (for external analysis threads)
         self.push_analysis_tap(output, frames);
     }
 
