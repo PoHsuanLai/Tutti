@@ -13,17 +13,15 @@ categories = ["multimedia::audio"]
 rustfft = "6"
 
 # Lock-free ring buffer and pointer swap for live analysis
-ringbuf = { version = "0.4", optional = true }
-arc-swap = { version = "1", optional = true }
+ringbuf = "0.4"
+arc-swap = "1"
 
 # LRU cache for thumbnail caching
-lru = { version = "0.12", optional = true }
+lru = "0.12"
 
-# Serialization
+# Serialization (optional)
 serde = { version = "1", features = ["derive"], optional = true }
 
 [features]
 default = []
-live = ["ringbuf", "arc-swap"]
-cache = ["lru"]
 serialization = ["serde"]

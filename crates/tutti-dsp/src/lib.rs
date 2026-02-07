@@ -4,10 +4,17 @@
 //!
 //! This crate provides AudioUnit nodes for:
 //! - **LFO** - Low frequency oscillators with multiple waveforms and beat-sync
-//! - **Dynamics** - Compressors and gates with sidechain support
-//! - **Spatial Audio** - VBAP and binaural panning for immersive audio
+//! - **Dynamics** - Compressors and gates with sidechain support (requires `dynamics` feature)
+//! - **Spatial Audio** - VBAP and binaural panning for immersive audio (requires `spatial` feature)
 //!
 //! All nodes are RT-safe and use lock-free atomics for parameter control.
+//!
+//! ## Features
+//!
+//! - `default` - Just LFO (no external dependencies)
+//! - `dynamics` - Compressors and gates with sidechain support
+//! - `spatial` - VBAP and binaural panning (adds `vbap` dependency)
+//! - `full` - All features enabled
 //!
 //! ## Note on Envelope Following
 //!
@@ -41,7 +48,7 @@
 //! lfo.tick(&[], &mut output);
 //! ```
 //!
-//! ### Sidechain Compressor
+//! ### Sidechain Compressor (requires `dynamics` feature)
 //!
 //! ```ignore
 //! use tutti_dsp::SidechainCompressor;
@@ -62,17 +69,29 @@ pub use tutti_core::AudioUnit;
 mod error;
 pub use error::{Error, Result};
 
-mod dynamics;
+// LFO is always available (no external deps)
 mod lfo;
-mod spatial;
+pub use lfo::{LfoMode, LfoNode, LfoShape};
 
+// Dynamics: compressors and gates (no external deps)
+#[cfg(feature = "dynamics")]
+mod dynamics;
+#[cfg(feature = "dynamics")]
 pub use dynamics::{
     SidechainCompressor, SidechainCompressorBuilder, SidechainGate, SidechainGateBuilder,
     StereoSidechainCompressor, StereoSidechainGate,
 };
-pub use lfo::{LfoMode, LfoNode, LfoShape};
+
+// Spatial audio: VBAP and binaural (requires vbap crate)
+#[cfg(feature = "spatial")]
+mod spatial;
+#[cfg(feature = "spatial")]
 pub use spatial::{BinauralPannerNode, ChannelLayout, SpatialPannerNode};
 
 // Fluent API handles
 mod handles;
-pub use handles::{DspHandle, SidechainHandle, SpatialHandle};
+pub use handles::DspHandle;
+#[cfg(feature = "dynamics")]
+pub use handles::SidechainHandle;
+#[cfg(feature = "spatial")]
+pub use handles::SpatialHandle;

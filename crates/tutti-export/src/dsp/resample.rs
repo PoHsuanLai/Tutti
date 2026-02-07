@@ -2,7 +2,9 @@
 //!
 //! Provides high-quality sample rate conversion with SIMD optimization.
 
+#[cfg(any(feature = "wav", feature = "flac"))]
 use crate::error::{ExportError, Result};
+#[cfg(any(feature = "wav", feature = "flac"))]
 use rubato::{FftFixedIn, Resampler};
 
 /// Resampling quality presets
@@ -19,8 +21,8 @@ pub enum ResampleQuality {
     Best,
 }
 
+#[cfg(any(feature = "wav", feature = "flac"))]
 impl ResampleQuality {
-    /// Get the chunk size for this quality level
     fn chunk_size(&self) -> usize {
         match self {
             ResampleQuality::Fast => 512,
@@ -30,7 +32,6 @@ impl ResampleQuality {
         }
     }
 
-    /// Get the sub-chunks for this quality level
     fn sub_chunks(&self) -> usize {
         match self {
             ResampleQuality::Fast => 1,
@@ -41,17 +42,7 @@ impl ResampleQuality {
     }
 }
 
-/// Resample stereo audio to a new sample rate
-///
-/// # Arguments
-/// * `left` - Left channel samples
-/// * `right` - Right channel samples
-/// * `source_rate` - Source sample rate in Hz
-/// * `target_rate` - Target sample rate in Hz
-/// * `quality` - Resampling quality preset
-///
-/// # Returns
-/// Resampled (left, right) channels
+#[cfg(any(feature = "wav", feature = "flac"))]
 pub fn resample_stereo(
     left: &[f32],
     right: &[f32],
@@ -60,7 +51,6 @@ pub fn resample_stereo(
     quality: ResampleQuality,
 ) -> Result<(Vec<f32>, Vec<f32>)> {
     if source_rate == target_rate {
-        // No resampling needed
         return Ok((left.to_vec(), right.to_vec()));
     }
 
@@ -73,16 +63,14 @@ pub fn resample_stereo(
     let chunk_size = quality.chunk_size();
     let sub_chunks = quality.sub_chunks();
 
-    // Create resampler
     let mut resampler = FftFixedIn::<f32>::new(
         source_rate as usize,
         target_rate as usize,
         chunk_size,
         sub_chunks,
-        2, // stereo
+        2,
     )?;
 
-    // Prepare input channels
     let input_frames = left.len();
     let expected_output_frames =
         (input_frames as f64 * target_rate as f64 / source_rate as f64).ceil() as usize;
@@ -90,22 +78,18 @@ pub fn resample_stereo(
     let mut output_left = Vec::with_capacity(expected_output_frames + chunk_size);
     let mut output_right = Vec::with_capacity(expected_output_frames + chunk_size);
 
-    // Process in chunks
     let mut pos = 0;
     while pos < input_frames {
         let remaining = input_frames - pos;
         let frames_to_process = remaining.min(chunk_size);
 
-        // Check if we need the exact number of frames
         let input_frames_needed = resampler.input_frames_next();
         let actual_frames = if remaining < input_frames_needed {
-            // Pad with zeros for final chunk
             input_frames_needed
         } else {
             frames_to_process.max(input_frames_needed)
         };
 
-        // Prepare input buffers
         let mut chunk_left = vec![0.0f32; actual_frames];
         let mut chunk_right = vec![0.0f32; actual_frames];
 
@@ -114,18 +98,13 @@ pub fn resample_stereo(
         chunk_right[..copy_frames].copy_from_slice(&right[pos..pos + copy_frames]);
 
         let input_channels = vec![chunk_left, chunk_right];
-
-        // Resample
         let output = resampler.process(&input_channels, None)?;
-
-        // Collect output
         output_left.extend_from_slice(&output[0]);
         output_right.extend_from_slice(&output[1]);
 
         pos += actual_frames;
     }
 
-    // Trim to expected length (removing padding artifacts)
     let final_length = expected_output_frames.min(output_left.len());
     output_left.truncate(final_length);
     output_right.truncate(final_length);

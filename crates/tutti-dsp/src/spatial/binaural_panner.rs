@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 
 use super::utils::{ExponentialSmoother, DEFAULT_POSITION_SMOOTH_TIME};
@@ -85,14 +85,14 @@ impl BinauralPanner {
         const HEAD_RADIUS: f32 = 0.0875; // ~8.75cm average head radius
         const SPEED_OF_SOUND: f32 = 343.0; // m/s
         let max_itd_seconds = HEAD_RADIUS / SPEED_OF_SOUND;
-        let itd_factor = (azimuth_rad + azimuth_rad.sin()) / std::f32::consts::PI;
+        let itd_factor = (azimuth_rad + azimuth_rad.sin()) / core::f32::consts::PI;
         let itd_seconds = max_itd_seconds * itd_factor;
         let itd_samples = (itd_seconds * self.sample_rate).round() as i32;
 
         // Calculate ILD (Interaural Level Difference)
         // Simple frequency-independent model (real HRTF is frequency-dependent)
         // ILD increases with azimuth, max ~20dB at 90°
-        let ild_db = (azimuth_rad.abs() / (std::f32::consts::PI / 2.0)) * 10.0; // Max 10dB attenuation
+        let ild_db = (azimuth_rad.abs() / (core::f32::consts::PI / 2.0)) * 10.0; // Max 10dB attenuation
         let ild_linear = 10.0_f32.powf(-ild_db / 20.0);
 
         // Apply ILD (level difference)
@@ -142,7 +142,7 @@ impl BinauralPanner {
     /// Process stereo input to binaural stereo output
     ///
     /// Pans left and right channels symmetrically around the specified position
-    pub fn process_stereo(&mut self, left: f32, right: f32, width: f32) -> (f32, f32) {
+    pub(crate) fn process_stereo(&mut self, left: f32, right: f32, width: f32) -> (f32, f32) {
         let width = width.clamp(0.0, 2.0);
 
         if width < 0.001 {

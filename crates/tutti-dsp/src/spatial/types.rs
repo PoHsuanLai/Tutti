@@ -96,36 +96,36 @@ impl ChannelLayout {
 
     /// Get total number of channels in this layout
     pub fn num_channels(&self) -> usize {
-        let mut max = std::cmp::max(self.right, self.left);
+        let mut max = core::cmp::max(self.right, self.left);
         if let Some(c) = self.center {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.lfe {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.surround_left {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.surround_right {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.rear_left {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.rear_right {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.height_front_left {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.height_front_right {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.height_rear_left {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         if let Some(c) = self.height_rear_right {
-            max = std::cmp::max(max, c);
+            max = core::cmp::max(max, c);
         }
         max + 1
     }

@@ -10,9 +10,7 @@
 
 use crate::waveform::MultiResolutionSummary;
 use lru::LruCache;
-use std::collections::hash_map::DefaultHasher;
 use std::fs::{self, File};
-use std::hash::{Hash, Hasher};
 use std::io::{self, Read, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
@@ -56,12 +54,12 @@ impl ThumbnailCache {
         })
     }
 
-    /// Get a cached thumbnail or compute it
+    /// Get a cached thumbnail or compute it.
     ///
     /// Checks memory cache first, then disk cache, then computes.
     ///
     /// # Arguments
-    /// * `hash` - Unique identifier for this audio (use `hash_file` or `hash_samples`)
+    /// * `hash` - Unique identifier for this audio
     /// * `compute` - Function to compute the thumbnail if not cached
     pub fn get_or_compute<F>(&mut self, hash: u64, compute: F) -> &MultiResolutionSummary
     where
@@ -293,43 +291,6 @@ impl ThumbnailCache {
     }
 }
 
-/// Compute a hash for a file based on path, modification time, and size
-///
-/// This provides a fast way to identify if a file has changed without
-/// reading its contents.
-pub fn hash_file(path: &Path) -> io::Result<u64> {
-    let metadata = fs::metadata(path)?;
-    let modified = metadata
-        .modified()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-
-    let mut hasher = DefaultHasher::new();
-    path.hash(&mut hasher);
-    metadata.len().hash(&mut hasher);
-    modified.as_secs().hash(&mut hasher);
-    modified.subsec_nanos().hash(&mut hasher);
-
-    Ok(hasher.finish())
-}
-
-/// Compute a hash for raw sample data
-pub fn hash_samples(samples: &[f32]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-
-    // Hash length
-    samples.len().hash(&mut hasher);
-
-    // Hash a subset of samples for speed (every Nth sample)
-    let step = (samples.len() / 1000).max(1);
-    for (i, &sample) in samples.iter().enumerate().step_by(step) {
-        i.hash(&mut hasher);
-        sample.to_bits().hash(&mut hasher);
-    }
-
-    hasher.finish()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -447,20 +408,6 @@ mod tests {
                 assert!((orig_block.rms - rest_block.rms).abs() < 0.0001);
             }
         }
-    }
-
-    #[test]
-    fn test_hash_samples() {
-        let samples1: Vec<f32> = (0..1000).map(|i| (i as f32 / 100.0).sin()).collect();
-        let samples2: Vec<f32> = (0..1000).map(|i| (i as f32 / 100.0).sin()).collect();
-        let samples3: Vec<f32> = (0..1000).map(|i| (i as f32 / 50.0).sin()).collect();
-
-        let hash1 = hash_samples(&samples1);
-        let hash2 = hash_samples(&samples2);
-        let hash3 = hash_samples(&samples3);
-
-        assert_eq!(hash1, hash2, "Identical samples should have same hash");
-        assert_ne!(hash1, hash3, "Different samples should have different hash");
     }
 
     #[test]

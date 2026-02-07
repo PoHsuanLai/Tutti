@@ -1,14 +1,13 @@
-//! WAV format encoder using hound
-//!
-//! Supports 16-bit, 24-bit, and 32-bit float WAV files.
+//! WAV format encoder.
 
+use crate::dsp::{process_audio, stereo_to_mono};
 use crate::error::{ExportError, Result};
+use crate::export_builder::{ExportPhase, ExportProgress};
 use crate::options::{BitDepth, ExportOptions};
 use hound::{SampleFormat, WavSpec, WavWriter};
 use std::io::{Seek, Write};
 use std::path::Path;
 
-/// WAV encoder config.
 #[derive(Debug, Clone)]
 struct WavConfig {
     sample_rate: u32,
@@ -16,98 +15,34 @@ struct WavConfig {
     channels: u16,
 }
 
-use crate::export_builder::{ExportPhase, ExportProgress};
-
-/// Export stereo audio to WAV file.
-pub fn export_wav(path: &str, left: &[f32], right: &[f32], options: &ExportOptions) -> Result<()> {
-    use crate::dsp::{
-        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
-        DitherState,
-    };
-    use crate::options::NormalizationMode;
-
+pub(crate) fn export_wav(
+    path: &str,
+    left: &[f32],
+    right: &[f32],
+    options: &ExportOptions,
+) -> Result<()> {
     let config = WavConfig {
         sample_rate: options.output_sample_rate(),
         bit_depth: options.bit_depth,
         channels: if options.mono { 1 } else { 2 },
     };
 
-    let mut left_proc = left.to_vec();
-    let mut right_proc = right.to_vec();
-
-    // Resample if needed
-    if let Some(target_rate) = options.sample_rate {
-        if target_rate != options.source_sample_rate {
-            let (l, r) = resample_stereo(
-                &left_proc,
-                &right_proc,
-                options.source_sample_rate,
-                target_rate,
-                options.resample_quality,
-            )?;
-            left_proc = l;
-            right_proc = r;
-        }
-    }
-
-    // Normalize
-    match options.normalization {
-        NormalizationMode::None => {}
-        NormalizationMode::Peak(target_db) => {
-            normalize_peak(&mut left_proc, &mut right_proc, target_db);
-        }
-        NormalizationMode::Loudness {
-            target_lufs,
-            true_peak_dbtp,
-        } => {
-            let current = analyze_loudness(&left_proc, &right_proc, config.sample_rate);
-            normalize_loudness(
-                &mut left_proc,
-                &mut right_proc,
-                current.integrated_lufs,
-                target_lufs,
-                true_peak_dbtp,
-            );
-        }
-    }
-
-    // Dither
-    if options.dither != crate::options::DitherType::None {
-        let mut state = DitherState::new(options.dither);
-        apply_dither(
-            &mut left_proc,
-            &mut right_proc,
-            options.bit_depth.bits(),
-            &mut state,
-        );
-    }
+    let (left_proc, right_proc) = process_audio(left, right, options, config.sample_rate)?;
 
     if options.mono {
-        let mono: Vec<f32> = left_proc
-            .iter()
-            .zip(right_proc.iter())
-            .map(|(l, r)| (l + r) * 0.5)
-            .collect();
-        encode_wav_mono_file(&mono, Path::new(path), &config)
+        encode_wav_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
     } else {
         encode_wav_file(&left_proc, &right_proc, Path::new(path), &config)
     }
 }
 
-/// Export stereo audio to WAV file with progress callback.
-pub fn export_wav_with_progress(
+pub(crate) fn export_wav_with_progress(
     path: &str,
     left: &[f32],
     right: &[f32],
     options: &ExportOptions,
     on_progress: impl Fn(ExportProgress),
 ) -> Result<()> {
-    use crate::dsp::{
-        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
-        DitherState,
-    };
-    use crate::options::NormalizationMode;
-
     on_progress(ExportProgress {
         phase: ExportPhase::Processing,
         progress: 0.0,
@@ -119,65 +54,7 @@ pub fn export_wav_with_progress(
         channels: if options.mono { 1 } else { 2 },
     };
 
-    let mut left_proc = left.to_vec();
-    let mut right_proc = right.to_vec();
-
-    // Resample if needed
-    if let Some(target_rate) = options.sample_rate {
-        if target_rate != options.source_sample_rate {
-            let (l, r) = resample_stereo(
-                &left_proc,
-                &right_proc,
-                options.source_sample_rate,
-                target_rate,
-                options.resample_quality,
-            )?;
-            left_proc = l;
-            right_proc = r;
-        }
-    }
-
-    on_progress(ExportProgress {
-        phase: ExportPhase::Processing,
-        progress: 0.33,
-    });
-
-    // Normalize
-    match options.normalization {
-        NormalizationMode::None => {}
-        NormalizationMode::Peak(target_db) => {
-            normalize_peak(&mut left_proc, &mut right_proc, target_db);
-        }
-        NormalizationMode::Loudness {
-            target_lufs,
-            true_peak_dbtp,
-        } => {
-            let current = analyze_loudness(&left_proc, &right_proc, config.sample_rate);
-            normalize_loudness(
-                &mut left_proc,
-                &mut right_proc,
-                current.integrated_lufs,
-                target_lufs,
-                true_peak_dbtp,
-            );
-        }
-    }
-
-    on_progress(ExportProgress {
-        phase: ExportPhase::Processing,
-        progress: 0.66,
-    });
-
-    // Dither
-    if options.dither != crate::options::DitherType::None {
-        let mut state = DitherState::new(options.dither);
-        apply_dither(
-            &mut left_proc,
-            &mut right_proc,
-            options.bit_depth.bits(),
-            &mut state,
-        );
-    }
+    let (left_proc, right_proc) = process_audio(left, right, options, config.sample_rate)?;
 
     on_progress(ExportProgress {
         phase: ExportPhase::Processing,
@@ -190,12 +67,7 @@ pub fn export_wav_with_progress(
     });
 
     let result = if options.mono {
-        let mono: Vec<f32> = left_proc
-            .iter()
-            .zip(right_proc.iter())
-            .map(|(l, r)| (l + r) * 0.5)
-            .collect();
-        encode_wav_mono_file(&mono, Path::new(path), &config)
+        encode_wav_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
     } else {
         encode_wav_file(&left_proc, &right_proc, Path::new(path), &config)
     };
@@ -208,7 +80,6 @@ pub fn export_wav_with_progress(
     result
 }
 
-/// Encode stereo audio to WAV file.
 fn encode_wav_file(left: &[f32], right: &[f32], path: &Path, config: &WavConfig) -> Result<()> {
     if left.len() != right.len() {
         return Err(ExportError::InvalidData(
@@ -229,7 +100,6 @@ fn encode_wav_file(left: &[f32], right: &[f32], path: &Path, config: &WavConfig)
     Ok(())
 }
 
-/// Encode mono audio to WAV file.
 fn encode_wav_mono_file(samples: &[f32], path: &Path, config: &WavConfig) -> Result<()> {
     let spec = WavSpec {
         channels: 1,
@@ -253,7 +123,6 @@ fn encode_wav_mono_file(samples: &[f32], path: &Path, config: &WavConfig) -> Res
     Ok(())
 }
 
-/// Create hound WavSpec from our config
 fn create_wav_spec(config: &WavConfig) -> WavSpec {
     let (bits_per_sample, sample_format) = match config.bit_depth {
         BitDepth::Int16 => (16, SampleFormat::Int),
@@ -269,7 +138,6 @@ fn create_wav_spec(config: &WavConfig) -> WavSpec {
     }
 }
 
-/// Write interleaved stereo samples to the writer
 fn write_samples<W: Write + Seek>(
     writer: &mut WavWriter<W>,
     left: &[f32],
@@ -316,7 +184,6 @@ fn write_samples<W: Write + Seek>(
     Ok(())
 }
 
-/// Write mono samples to the writer
 fn write_mono_samples<W: Write + Seek>(
     writer: &mut WavWriter<W>,
     samples: &[f32],
@@ -351,18 +218,14 @@ fn write_mono_samples<W: Write + Seek>(
     Ok(())
 }
 
-/// Convert float sample to 16-bit integer with clipping
 #[inline]
 fn float_to_i16(sample: f32) -> i16 {
-    let clamped = sample.clamp(-1.0, 1.0);
-    (clamped * 32767.0) as i16
+    (sample.clamp(-1.0, 1.0) * 32767.0) as i16
 }
 
-/// Convert float sample to 24-bit integer (stored as i32) with clipping
 #[inline]
 fn float_to_i24(sample: f32) -> i32 {
-    let clamped = sample.clamp(-1.0, 1.0);
-    (clamped * 8388607.0) as i32
+    (sample.clamp(-1.0, 1.0) * 8388607.0) as i32
 }
 
 #[cfg(test)]

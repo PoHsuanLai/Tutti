@@ -8,14 +8,12 @@ use crate::{
     PitchDetector, PitchResult, Transient, TransientDetector, WaveformBlock, WaveformSummary,
 };
 use arc_swap::ArcSwap;
+use core::sync::atomic::{AtomicBool, Ordering};
 use ringbuf::{
     traits::{Consumer, Observer},
     HeapCons,
 };
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 
 /// Shared state between the analysis thread and `AnalysisHandle`.
 ///
@@ -110,8 +108,7 @@ pub fn run_analysis_thread(
         let to_read = available.min(drain_buf.len());
         let read = consumer.pop_slice(&mut drain_buf[..to_read]);
 
-        for i in 0..read {
-            let (l, r) = drain_buf[i];
+        for &(l, r) in &drain_buf[..read] {
             let mono = (l + r) * 0.5;
 
             // Append to sliding window

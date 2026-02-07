@@ -17,11 +17,12 @@
 //! dsp.spatial().vbap("panner", ChannelLayout::stereo());
 //! ```
 
-use crate::{
-    AudioUnit, BinauralPannerNode, ChannelLayout, LfoNode, LfoShape, SidechainCompressor,
-    SidechainGate, SpatialPannerNode, StereoSidechainCompressor, StereoSidechainGate,
-};
-use tutti_core::{get_param_or, NodeRegistry};
+use crate::{AudioUnit, LfoNode, LfoShape};
+#[cfg(feature = "spatial")]
+use crate::{BinauralPannerNode, ChannelLayout, SpatialPannerNode};
+#[cfg(feature = "dynamics")]
+use crate::{SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate};
+use tutti_core::NodeRegistry;
 
 /// Main DSP handle for registering DSP nodes
 ///
@@ -70,43 +71,47 @@ impl<'a> DspHandle<'a> {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
-        self.registry.register(&name, move |params| {
-            let freq = get_param_or(params, "frequency", frequency);
+        self.registry.register_simple(&name, move |p| {
+            let freq: f32 = p.get_or("frequency", frequency);
             let mut lfo = LfoNode::new(shape, freq);
             AudioUnit::set_sample_rate(&mut lfo, sample_rate);
 
-            if let Some(depth) = params.get("depth").and_then(|v| v.as_f32()) {
+            if let Some(depth) = p.try_get::<f32>("depth") {
                 lfo.set_depth(depth);
             }
-            if let Some(phase) = params.get("phase_offset").and_then(|v| v.as_f32()) {
+            if let Some(phase) = p.try_get::<f32>("phase_offset") {
                 lfo.set_phase_offset(phase);
             }
 
-            Ok(Box::new(lfo) as Box<dyn AudioUnit>)
+            lfo
         });
 
         self
     }
 
     /// Get sidechain dynamics handle (compressor, gate)
+    #[cfg(feature = "dynamics")]
     pub fn sidechain(&self) -> SidechainHandle<'a> {
         SidechainHandle::new(self.registry, self.sample_rate)
     }
 
     /// Get spatial audio handle (VBAP, binaural)
+    #[cfg(feature = "spatial")]
     pub fn spatial(&self) -> SpatialHandle<'a> {
         SpatialHandle::new(self.registry, self.sample_rate)
     }
 }
 
 /// Sidechain dynamics handle for compressors and gates
+#[cfg(feature = "dynamics")]
 pub struct SidechainHandle<'a> {
     registry: &'a NodeRegistry,
     sample_rate: f64,
 }
 
+#[cfg(feature = "dynamics")]
 impl<'a> SidechainHandle<'a> {
-    pub fn new(registry: &'a NodeRegistry, sample_rate: f64) -> Self {
+    pub(crate) fn new(registry: &'a NodeRegistry, sample_rate: f64) -> Self {
         Self {
             registry,
             sample_rate,
@@ -127,10 +132,10 @@ impl<'a> SidechainHandle<'a> {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
-        self.registry.register(&name, move |_params| {
+        self.registry.register_static(&name, move || {
             let mut comp = SidechainCompressor::new(threshold_db, ratio, attack_sec, release_sec);
             AudioUnit::set_sample_rate(&mut comp, sample_rate);
-            Ok(Box::new(comp) as Box<dyn AudioUnit>)
+            comp
         });
 
         self
@@ -150,10 +155,10 @@ impl<'a> SidechainHandle<'a> {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
-        self.registry.register(&name, move |_params| {
+        self.registry.register_static(&name, move || {
             let mut gate = SidechainGate::new(threshold_db, attack_sec, hold_sec, release_sec);
             AudioUnit::set_sample_rate(&mut gate, sample_rate);
-            Ok(Box::new(gate) as Box<dyn AudioUnit>)
+            gate
         });
 
         self
@@ -173,11 +178,11 @@ impl<'a> SidechainHandle<'a> {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
-        self.registry.register(&name, move |_params| {
+        self.registry.register_static(&name, move || {
             let mut comp =
                 StereoSidechainCompressor::new(threshold_db, ratio, attack_sec, release_sec);
             AudioUnit::set_sample_rate(&mut comp, sample_rate);
-            Ok(Box::new(comp) as Box<dyn AudioUnit>)
+            comp
         });
 
         self
@@ -197,11 +202,11 @@ impl<'a> SidechainHandle<'a> {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
-        self.registry.register(&name, move |_params| {
+        self.registry.register_static(&name, move || {
             let mut gate =
                 StereoSidechainGate::new(threshold_db, attack_sec, hold_sec, release_sec);
             AudioUnit::set_sample_rate(&mut gate, sample_rate);
-            Ok(Box::new(gate) as Box<dyn AudioUnit>)
+            gate
         });
 
         self
@@ -209,13 +214,15 @@ impl<'a> SidechainHandle<'a> {
 }
 
 /// Spatial audio handle for VBAP and binaural panners
+#[cfg(feature = "spatial")]
 pub struct SpatialHandle<'a> {
     registry: &'a NodeRegistry,
     sample_rate: f64,
 }
 
+#[cfg(feature = "spatial")]
 impl<'a> SpatialHandle<'a> {
-    pub fn new(registry: &'a NodeRegistry, sample_rate: f64) -> Self {
+    pub(crate) fn new(registry: &'a NodeRegistry, sample_rate: f64) -> Self {
         Self {
             registry,
             sample_rate,
@@ -229,7 +236,9 @@ impl<'a> SpatialHandle<'a> {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
+        // Note: Using register() because panner creation can fail
         self.registry.register(&name, move |params| {
+            let p = tutti_core::Params::new(params);
             let mut panner = match layout {
                 ChannelLayout {
                     left: 0,
@@ -269,12 +278,11 @@ impl<'a> SpatialHandle<'a> {
 
             AudioUnit::set_sample_rate(&mut panner, sample_rate);
 
-            if let Some(azimuth) = params.get("azimuth").and_then(|v| v.as_f32()) {
-                if let Some(elevation) = params.get("elevation").and_then(|v| v.as_f32()) {
-                    panner.set_position(azimuth, elevation);
-                }
+            if let Some(azimuth) = p.try_get::<f32>("azimuth") {
+                let elevation: f32 = p.get_or("elevation", 0.0);
+                panner.set_position(azimuth, elevation);
             }
-            if let Some(spread) = params.get("spread").and_then(|v| v.as_f32()) {
+            if let Some(spread) = p.try_get::<f32>("spread") {
                 panner.set_spread(spread);
             }
 
@@ -291,16 +299,15 @@ impl<'a> SpatialHandle<'a> {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
-        self.registry.register(&name, move |params| {
+        self.registry.register_simple(&name, move |p| {
             let panner = BinauralPannerNode::new(sample_rate as f32);
 
-            if let Some(azimuth) = params.get("azimuth").and_then(|v| v.as_f32()) {
-                if let Some(elevation) = params.get("elevation").and_then(|v| v.as_f32()) {
-                    panner.set_position(azimuth, elevation);
-                }
+            if let Some(azimuth) = p.try_get::<f32>("azimuth") {
+                let elevation: f32 = p.get_or("elevation", 0.0);
+                panner.set_position(azimuth, elevation);
             }
 
-            Ok(Box::new(panner) as Box<dyn AudioUnit>)
+            panner
         });
 
         self

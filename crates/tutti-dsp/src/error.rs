@@ -18,11 +18,13 @@ pub enum Error {
     InvalidParameter(String),
 
     /// VBAP spatial audio error
+    #[cfg(feature = "spatial")]
     #[error("VBAP error: {0}")]
     VBAPError(String),
 }
 
 // Convert VBAP errors to our error type
+#[cfg(feature = "spatial")]
 impl From<vbap::VBAPError> for Error {
     fn from(err: vbap::VBAPError) -> Self {
         Error::VBAPError(err.to_string())
@@ -30,4 +32,4 @@ impl From<vbap::VBAPError> for Error {
 }
 
 /// Result type for DSP operations
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = core::result::Result<T, Error>;

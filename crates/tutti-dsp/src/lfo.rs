@@ -1,6 +1,6 @@
 //! Low Frequency Oscillator (LFO) node.
 
-use std::sync::Arc;
+use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use tutti_core::{
     dsp::{Signal, DEFAULT_SR},
@@ -23,7 +23,7 @@ impl LfoShape {
     #[inline]
     pub(crate) fn evaluate(&self, phase: f32) -> f32 {
         match self {
-            LfoShape::Sine => (phase * std::f32::consts::TAU).sin(),
+            LfoShape::Sine => (phase * core::f32::consts::TAU).sin(),
             LfoShape::Triangle => {
                 let p = phase * 4.0;
                 if p < 1.0 {
@@ -291,11 +291,11 @@ impl AudioUnit for LfoNode {
         LFO_NODE_ID
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
         self
     }
 

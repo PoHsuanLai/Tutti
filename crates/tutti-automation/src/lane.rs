@@ -1,12 +1,15 @@
 //! AutomationLane AudioUnit node.
 
 use audio_automation::AutomationEnvelope;
-use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, TransportHandle};
+use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, TransportHandle, TransportReader};
 
 /// An automation lane that outputs control signals based on transport position.
 ///
 /// Reads the current beat position from the transport and evaluates
 /// the envelope to produce a control signal output.
+///
+/// The lane is generic over `R: TransportReader`, allowing it to work with
+/// either a live `TransportHandle` or an `ExportTimeline` for offline rendering.
 ///
 /// # Example
 ///
@@ -19,15 +22,18 @@ use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, TransportHandle};
 ///
 /// let lane = AutomationLane::new(envelope, transport_handle);
 /// ```
-pub struct AutomationLane<T> {
+pub struct AutomationLane<T, R: TransportReader = TransportHandle> {
     envelope: AutomationEnvelope<T>,
-    transport: TransportHandle,
+    transport: R,
     last_value: f32,
 }
 
-impl<T> AutomationLane<T> {
-    /// Create a new automation lane.
-    pub fn new(envelope: AutomationEnvelope<T>, transport: TransportHandle) -> Self {
+/// Type alias for automation lane with live transport.
+pub type LiveAutomationLane<T> = AutomationLane<T, TransportHandle>;
+
+impl<T, R: TransportReader> AutomationLane<T, R> {
+    /// Create a new automation lane with the given transport reader.
+    pub fn new(envelope: AutomationEnvelope<T>, transport: R) -> Self {
         Self {
             envelope,
             transport,
@@ -119,7 +125,9 @@ impl<T> AutomationLane<T> {
     }
 }
 
-impl<T: Clone + Send + Sync + 'static> AudioUnit for AutomationLane<T> {
+impl<T: Clone + Send + Sync + 'static, R: TransportReader + Clone + 'static> AudioUnit
+    for AutomationLane<T, R>
+{
     fn inputs(&self) -> usize {
         0 // Generator - no audio input
     }
@@ -169,7 +177,7 @@ impl<T: Clone + Send + Sync + 'static> AudioUnit for AutomationLane<T> {
     }
 }
 
-impl<T: Clone> Clone for AutomationLane<T> {
+impl<T: Clone, R: TransportReader + Clone> Clone for AutomationLane<T, R> {
     fn clone(&self) -> Self {
         Self {
             envelope: self.envelope.clone(),
@@ -221,11 +229,19 @@ mod tests {
         // Beat 10 should wrap to beat 6 (10 - 4 = 6 % 4 = 2, then 4 + 2 = 6)
         let beat: f64 = 10.0;
         let wrapped = loop_start + ((beat - loop_start) % loop_len);
-        assert!((wrapped - 6.0).abs() < 0.001, "Expected 6.0, got {}", wrapped);
+        assert!(
+            (wrapped - 6.0).abs() < 0.001,
+            "Expected 6.0, got {}",
+            wrapped
+        );
 
         // At beat 6 (midpoint of loop), value should be interpolated
         let value = envelope.get_value_at(wrapped).unwrap();
-        assert!(value > 0.5 && value < 1.0, "Expected value between 0.5-1.0 at beat 6, got {}", value);
+        assert!(
+            value > 0.5 && value < 1.0,
+            "Expected value between 0.5-1.0 at beat 6, got {}",
+            value
+        );
     }
 
     #[test]
@@ -242,7 +258,11 @@ mod tests {
         } else {
             loop_start + ((beat - loop_start) % loop_len)
         };
-        assert!((wrapped - 4.0).abs() < 0.001, "Expected 4.0, got {}", wrapped);
+        assert!(
+            (wrapped - 4.0).abs() < 0.001,
+            "Expected 4.0, got {}",
+            wrapped
+        );
 
         // Value at beat 4 is 1.0
         let value = envelope.get_value_at(4.0).unwrap();
@@ -259,7 +279,11 @@ mod tests {
         // Beat 20 should wrap multiple times: 20 - 4 = 16, 16 % 4 = 0, 4 + 0 = 4
         let beat: f64 = 20.0;
         let wrapped = loop_start + ((beat - loop_start) % loop_len);
-        assert!((wrapped - 4.0).abs() < 0.001, "Expected 4.0, got {}", wrapped);
+        assert!(
+            (wrapped - 4.0).abs() < 0.001,
+            "Expected 4.0, got {}",
+            wrapped
+        );
     }
 
     #[test]
@@ -268,6 +292,10 @@ mod tests {
 
         // Before loop start, value should come directly from envelope
         let value = envelope.get_value_at(2.0).unwrap();
-        assert!((value - 0.5).abs() < 0.01, "Expected 0.5 at beat 2, got {}", value);
+        assert!(
+            (value - 0.5).abs() < 0.01,
+            "Expected 0.5 at beat 2, got {}",
+            value
+        );
     }
 }

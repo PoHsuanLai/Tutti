@@ -1,5 +1,5 @@
 use crate::Result;
-use std::sync::Arc;
+use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use vbap::VBAPanner;
 
@@ -72,7 +72,7 @@ impl SpatialPanner {
     }
 
     /// Get number of output channels
-    pub fn num_channels(&self) -> usize {
+    pub(crate) fn num_channels(&self) -> usize {
         self.panner.num_speakers()
     }
 
@@ -87,7 +87,7 @@ impl SpatialPanner {
     }
 
     /// Set spread factor (0.0 = point source, 1.0 = diffuse)
-    pub fn set_spread(&mut self, spread: f32) {
+    pub(crate) fn set_spread(&mut self, spread: f32) {
         self.spread = spread.clamp(0.0, 1.0);
     }
 
@@ -95,7 +95,7 @@ impl SpatialPanner {
     ///
     /// Returns a vector of gains, one per speaker channel.
     /// Updates smoothed position values on each call.
-    pub fn compute_gains(&mut self) -> Vec<f32> {
+    pub(crate) fn compute_gains(&mut self) -> Vec<f32> {
         let target_azimuth = self.azimuth_target.get();
         let target_elevation = self.elevation_target.get();
 
@@ -127,7 +127,7 @@ impl SpatialPanner {
     }
 
     /// Process mono into pre-allocated output buffer
-    pub fn process_mono_into(&mut self, sample: f32, output: &mut [f32]) {
+    pub(crate) fn process_mono_into(&mut self, sample: f32, output: &mut [f32]) {
         let gains = self.compute_gains();
         for (out, gain) in output.iter_mut().zip(gains.iter()) {
             *out = sample * gain;
@@ -144,7 +144,7 @@ impl SpatialPanner {
     /// * `right` - Right channel sample
     /// * `width` - Stereo width (0.0 = mono, 1.0 = full stereo, >1.0 = exaggerated)
     /// * `output` - Multichannel output buffer
-    pub fn process_stereo_into(&mut self, left: f32, right: f32, width: f32, output: &mut [f32]) {
+    pub(crate) fn process_stereo_into(&mut self, left: f32, right: f32, width: f32, output: &mut [f32]) {
         let width = width.max(0.0); // Clamp to non-negative
 
         if width < 0.001 {

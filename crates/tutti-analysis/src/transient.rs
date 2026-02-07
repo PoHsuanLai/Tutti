@@ -133,7 +133,7 @@ impl TransientDetector {
     fn create_hann_window(size: usize) -> Vec<f32> {
         (0..size)
             .map(|i| {
-                let angle = 2.0 * std::f32::consts::PI * i as f32 / (size - 1) as f32;
+                let angle = 2.0 * core::f32::consts::PI * i as f32 / (size - 1) as f32;
                 0.5 * (1.0 - angle.cos())
             })
             .collect()

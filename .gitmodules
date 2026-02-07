@@ -10,3 +10,6 @@
 [submodule "crates/clap-host"]
 	path = crates/clap-host
 	url = https://github.com/PoHsuanLai/clap-host.git
+[submodule "crates/audio-automation"]
+	path = crates/audio-automation
+	url = https://github.com/PoHsuanLai/audio-automation.git

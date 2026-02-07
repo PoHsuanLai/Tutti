@@ -1,20 +1,12 @@
 //! Analysis handle for convenient API access
 
+use crate::live::LiveAnalysisState;
+use crate::ThumbnailCache;
 use crate::{
     CorrelationMeter, DetectionMethod, PitchDetector, PitchResult, StereoAnalysis,
     StereoWaveformSummary, Transient, TransientDetector, WaveformSummary,
 };
-
-#[cfg(feature = "cache")]
-use crate::ThumbnailCache;
-
-#[cfg(feature = "live")]
-use crate::live::LiveAnalysisState;
-
-use std::sync::Arc;
-
-#[cfg(feature = "cache")]
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 /// Handle for audio analysis tools
 ///
@@ -25,9 +17,7 @@ use std::sync::Mutex;
 /// the `live_*()` methods return results computed from the running audio graph.
 pub struct AnalysisHandle {
     sample_rate: f64,
-    #[cfg(feature = "live")]
     live: Option<Arc<LiveAnalysisState>>,
-    #[cfg(feature = "cache")]
     thumbnail_cache: Arc<Mutex<ThumbnailCache>>,
 }
 
@@ -36,28 +26,21 @@ impl AnalysisHandle {
     pub fn new(sample_rate: f64) -> Self {
         Self {
             sample_rate,
-            #[cfg(feature = "live")]
             live: None,
-            #[cfg(feature = "cache")]
             thumbnail_cache: Arc::new(Mutex::new(ThumbnailCache::new(1024))),
         }
     }
 
     /// Create an analysis handle with live state attached
-    #[cfg(feature = "live")]
     pub fn with_live(sample_rate: f64, live: Arc<LiveAnalysisState>) -> Self {
         Self {
             sample_rate,
             live: Some(live),
-            #[cfg(feature = "cache")]
             thumbnail_cache: Arc::new(Mutex::new(ThumbnailCache::new(1024))),
         }
     }
 
-    // === Live analysis readers (lock-free) ===
-
     /// Whether live analysis is active.
-    #[cfg(feature = "live")]
     pub fn is_live(&self) -> bool {
         self.live.is_some()
     }
@@ -65,7 +48,6 @@ impl AnalysisHandle {
     /// Get the latest pitch detection from the live audio stream.
     ///
     /// Returns `PitchResult::default()` if live analysis is not enabled.
-    #[cfg(feature = "live")]
     pub fn live_pitch(&self) -> Arc<PitchResult> {
         match &self.live {
             Some(state) => state.pitch.load_full(),
@@ -76,7 +58,6 @@ impl AnalysisHandle {
     /// Get recent transient detections from the live audio stream.
     ///
     /// Returns an empty vec if live analysis is not enabled.
-    #[cfg(feature = "live")]
     pub fn live_transients(&self) -> Arc<Vec<Transient>> {
         match &self.live {
             Some(state) => state.transients.load_full(),
@@ -87,15 +68,12 @@ impl AnalysisHandle {
     /// Get the rolling waveform summary from the live audio stream.
     ///
     /// Returns the last ~2 seconds of waveform blocks for visualization.
-    #[cfg(feature = "live")]
     pub fn live_waveform(&self) -> Arc<WaveformSummary> {
         match &self.live {
             Some(state) => state.waveform.load_full(),
             None => Arc::new(WaveformSummary::new(512)),
         }
     }
-
-    // === Offline analysis (bring your own samples) ===
 
     /// Detect transients using default method (spectral flux)
     pub fn detect_transients(&self, samples: &[f32]) -> Vec<Transient> {
@@ -165,7 +143,6 @@ impl AnalysisHandle {
     ///
     /// This uses the thumbnail cache to avoid recomputing summaries.
     /// Creates 8 zoom levels starting at 512 samples/block.
-    #[cfg(feature = "cache")]
     pub fn cached_multi_resolution_summary(
         &self,
         audio_id: u64,
@@ -180,7 +157,6 @@ impl AnalysisHandle {
     }
 
     /// Clear waveform thumbnail cache
-    #[cfg(feature = "cache")]
     pub fn clear_cache(&self) {
         self.thumbnail_cache.lock().unwrap().clear();
     }

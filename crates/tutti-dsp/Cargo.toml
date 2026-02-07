@@ -6,22 +6,21 @@ description = "Real-time DSP building blocks for Tutti audio engine - LFO, envel
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/PoHsuanLai/Tutti"
 
+[features]
+default = []  # Minimal: just LFO (no external deps)
+dynamics = []  # Compressors, gates (no external deps)
+spatial = ["dep:vbap"]  # VBAP, binaural panning
+full = ["dynamics", "spatial"]
+
 [dependencies]
 # AudioUnit trait and DSP primitives from tutti-core
 tutti-core = { path = "../tutti-core", default-features = false }
 
-# Spatial audio VBAP library (always included)
-vbap = "0.1"
+# Spatial audio VBAP library (optional)
+vbap = { version = "0.1", optional = true }
 
 # Error handling
 thiserror = "2"
 
-# Serialization (optional)
-serde = { version = "1", features = ["derive"], optional = true }
-
 [dev-dependencies]
 approx = "0.5"
-
-[features]
-default = []
-serialization = ["serde"]

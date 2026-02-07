@@ -43,25 +43,23 @@
 //! - `wav` (default): WAV encoding
 //! - `flac` (default): FLAC encoding
 
-// Error types
 mod error;
 pub use error::{ExportError, Result};
 
-// Export builder
 mod export_builder;
 pub use export_builder::{ExportBuilder, ExportPhase, ExportProgress};
 
-// Options
+// Re-export ExportContext and ExportConfig from tutti-core
+pub use tutti_core::{ExportConfig, ExportContext};
+
 mod options;
 pub use options::{
     AudioFormat, BitDepth, DitherType, ExportOptions, FlacOptions, NormalizationMode,
 };
 
-// DSP utilities
 pub(crate) mod dsp;
 pub use dsp::ResampleQuality;
 
-// Format encoders
 pub(crate) mod format;
 
 /// Export audio to a file (format detected from extension).

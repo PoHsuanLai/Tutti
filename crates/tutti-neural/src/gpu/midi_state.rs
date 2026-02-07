@@ -1,54 +1,21 @@
-//! Per-voice MIDI state accumulator
-//!
-//! Tracks cumulative MIDI state (note, velocity, pitch bend, CCs, pressure)
-//! and converts it to a feature vector for neural inference.
-//!
-//! This is intentionally decoupled from the inference engine — nodes own
-//! their `MidiState` and pass feature vectors to the engine.
+//! Per-voice MIDI state accumulator for neural inference.
 
-/// Number of features produced by `MidiState::to_features()`
 pub const MIDI_FEATURE_COUNT: usize = 12;
 
-/// Per-voice MIDI state
+/// Per-voice MIDI state converted to feature vectors for inference.
 ///
-/// Accumulates MIDI events into a coherent state snapshot.
-/// Call `apply()` for each incoming event, then `to_features()`
-/// to get the feature vector for inference.
-///
-/// ## Feature layout
-/// ```text
-/// [0]  pitch_hz           - f0 with pitch bend applied (Hz)
-/// [1]  loudness           - velocity * expression [0, 1]
-/// [2]  pitch_bend         - normalized bend [-1, 1]
-/// [3]  mod_wheel          - CC1 [0, 1]
-/// [4]  brightness         - CC74 / MPE slide [0, 1]
-/// [5]  expression         - CC11 [0, 1]
-/// [6]  channel_pressure   - aftertouch [0, 1]
-/// [7]  sustain            - CC64 on/off (0 or 1)
-/// [8]  note_number        - raw MIDI note [0, 127]
-/// [9]  velocity_raw       - raw velocity normalized [0, 1]
-/// [10] bend_range         - semitones (default 2)
-/// [11] reserved
-/// ```
+/// Feature layout: `[pitch_hz, loudness, pitch_bend, mod_wheel, brightness,
+/// expression, channel_pressure, sustain, note_number, velocity_raw, bend_range, reserved]`
 #[derive(Debug, Clone)]
 pub struct MidiState {
-    /// Current MIDI note number (0-127), None if no note active
     pub note: Option<u8>,
-    /// Current velocity (0-127)
     pub velocity: u8,
-    /// Pitch bend normalized to [-1.0, 1.0]
     pub pitch_bend: f32,
-    /// Pitch bend range in semitones (default: 2)
     pub pitch_bend_range: f32,
-    /// CC1: Mod wheel [0.0, 1.0]
     pub mod_wheel: f32,
-    /// CC74: Brightness / MPE slide [0.0, 1.0]
     pub brightness: f32,
-    /// CC11: Expression [0.0, 1.0]
     pub expression: f32,
-    /// Channel pressure (aftertouch) [0.0, 1.0]
     pub channel_pressure: f32,
-    /// CC64: Sustain pedal
     pub sustain: bool,
 }
 
@@ -69,11 +36,7 @@ impl Default for MidiState {
 }
 
 impl MidiState {
-    /// Update state from a MIDI event.
-    ///
-    /// Returns `true` if the event should trigger new inference
-    /// (note on/off). Returns `false` for continuous controllers
-    /// (CC, pitch bend, pressure) which only update state.
+    /// Returns true if the event should trigger new inference (note on/off).
     #[cfg(feature = "midi")]
     pub fn apply(&mut self, event: &tutti_core::midi::MidiEvent) -> bool {
         use tutti_core::midi::ChannelVoiceMsg;
@@ -89,7 +52,6 @@ impl MidiState {
                 true
             }
             ChannelVoiceMsg::PitchBend { bend } => {
-                // midi_msg: 14-bit unsigned (0–16383), center = 8192
                 self.pitch_bend = (bend as f32 - 8192.0) / 8192.0;
                 false
             }
@@ -126,19 +88,16 @@ impl MidiState {
         }
     }
 
-    /// Pitch in Hz, with pitch bend applied.
     pub fn pitch_hz(&self) -> f32 {
         let note = self.note.unwrap_or(60) as f32;
         let bent = note + self.pitch_bend * self.pitch_bend_range;
         440.0 * 2.0_f32.powf((bent - 69.0) / 12.0)
     }
 
-    /// Loudness combining velocity and expression.
     pub fn loudness(&self) -> f32 {
         (self.velocity as f32 / 127.0) * self.expression
     }
 
-    /// Convert current state to a fixed-size feature vector.
     pub fn to_features(&self) -> [f32; MIDI_FEATURE_COUNT] {
         [
             self.pitch_hz(),
@@ -152,7 +111,7 @@ impl MidiState {
             self.note.unwrap_or(0) as f32,
             self.velocity as f32 / 127.0,
             self.pitch_bend_range,
-            0.0, // reserved
+            0.0,
         ]
     }
 }
@@ -177,14 +136,12 @@ mod tests {
         let event = MidiEvent::note_on_builder(69, 100)
             .channel(0)
             .offset(0)
-            .build(); // A4
-        assert!(state.apply(&event)); // should trigger inference
+            .build();
+        assert!(state.apply(&event));
 
         assert_eq!(state.note, Some(69));
         assert_eq!(state.velocity, 100);
-        // A4 = 440 Hz (no bend)
         assert!((state.pitch_hz() - 440.0).abs() < 0.1);
-        // loudness = (100/127) * 1.0 expression
         assert!((state.loudness() - 100.0 / 127.0).abs() < 0.01);
     }
 
@@ -202,7 +159,6 @@ mod tests {
         assert!(triggered);
         assert_eq!(state.velocity, 0);
         assert_eq!(state.loudness(), 0.0);
-        // note is still remembered (for release phase)
         assert_eq!(state.note, Some(60));
     }
 
@@ -214,18 +170,15 @@ mod tests {
                 .channel(0)
                 .offset(0)
                 .build(),
-        ); // A4
+        );
 
-        // Bend fully up: bend=16383 → normalized=1.0 → +2 semitones (default range)
         let bend_event = MidiEvent::bend_builder(16383).channel(0).offset(0).build();
         let triggered = state.apply(&bend_event);
-        assert!(!triggered); // pitch bend doesn't trigger inference
+        assert!(!triggered);
 
         assert!((state.pitch_bend - 1.0).abs() < 0.01);
-        // A4 + 2 semitones = B4 ≈ 493.88 Hz
         assert!((state.pitch_hz() - 493.88).abs() < 1.0);
 
-        // Bend center: bend=8192 → normalized=0.0
         state.apply(&MidiEvent::bend_builder(8192).channel(0).offset(0).build());
         assert!(state.pitch_bend.abs() < 0.01);
         assert!((state.pitch_hz() - 440.0).abs() < 0.1);
@@ -251,7 +204,6 @@ mod tests {
                 .build(),
         );
 
-        // Expression at 50%
         state.apply(&MidiEvent::cc_builder(11, 64).channel(0).offset(0).build());
         let expected = (100.0 / 127.0) * (64.0 / 127.0);
         assert!((state.loudness() - expected).abs() < 0.01);
@@ -261,11 +213,9 @@ mod tests {
     fn test_cc_sustain() {
         let mut state = MidiState::default();
 
-        // Sustain on (CC64 >= 64)
         state.apply(&MidiEvent::cc_builder(64, 127).channel(0).offset(0).build());
         assert!(state.sustain);
 
-        // Sustain off (CC64 < 64)
         state.apply(&MidiEvent::cc_builder(64, 0).channel(0).offset(0).build());
         assert!(!state.sustain);
     }
@@ -295,13 +245,9 @@ mod tests {
         let features = state.to_features();
         assert_eq!(features.len(), MIDI_FEATURE_COUNT);
 
-        // [0] pitch_hz — C4 ≈ 261.63
         assert!((features[0] - 261.63).abs() < 1.0);
-        // [1] loudness
         assert!(features[1] > 0.0);
-        // [8] note number
         assert_eq!(features[8], 60.0);
-        // [9] velocity normalized
         assert!((features[9] - 100.0 / 127.0).abs() < 0.01);
     }
 }

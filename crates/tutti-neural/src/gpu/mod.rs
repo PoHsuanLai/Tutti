@@ -13,6 +13,4 @@ pub use effect_queue::{shared_effect_queue, SharedEffectAudioQueue};
 #[cfg(feature = "midi")]
 pub use midi_state::{MidiState, MIDI_FEATURE_COUNT};
 pub use queue::ControlParams;
-
-// Re-export from tutti-core (canonical definitions)
 pub use tutti_core::NeuralModelId;

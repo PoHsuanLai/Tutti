@@ -1,5 +1,6 @@
 //! FLAC format encoder.
 
+use crate::dsp::{process_audio, stereo_to_mono};
 use crate::error::{ExportError, Result};
 use crate::export_builder::{ExportPhase, ExportProgress};
 use crate::options::{BitDepth, ExportOptions};
@@ -13,7 +14,6 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-/// FLAC encoder config.
 #[derive(Debug, Clone)]
 struct FlacConfig {
     sample_rate: u32,
@@ -33,14 +33,12 @@ impl Default for FlacConfig {
     }
 }
 
-/// Export stereo audio to FLAC file.
-pub fn export_flac(path: &str, left: &[f32], right: &[f32], options: &ExportOptions) -> Result<()> {
-    use crate::dsp::{
-        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
-        DitherState,
-    };
-    use crate::options::NormalizationMode;
-
+pub(crate) fn export_flac(
+    path: &str,
+    left: &[f32],
+    right: &[f32],
+    options: &ExportOptions,
+) -> Result<()> {
     let config = FlacConfig {
         sample_rate: options.output_sample_rate(),
         bit_depth: options.bit_depth,
@@ -48,82 +46,22 @@ pub fn export_flac(path: &str, left: &[f32], right: &[f32], options: &ExportOpti
         ..Default::default()
     };
 
-    let mut left_proc = left.to_vec();
-    let mut right_proc = right.to_vec();
-
-    // Resample if needed
-    if let Some(target_rate) = options.sample_rate {
-        if target_rate != options.source_sample_rate {
-            let (l, r) = resample_stereo(
-                &left_proc,
-                &right_proc,
-                options.source_sample_rate,
-                target_rate,
-                options.resample_quality,
-            )?;
-            left_proc = l;
-            right_proc = r;
-        }
-    }
-
-    // Normalize
-    match options.normalization {
-        NormalizationMode::None => {}
-        NormalizationMode::Peak(target_db) => {
-            normalize_peak(&mut left_proc, &mut right_proc, target_db);
-        }
-        NormalizationMode::Loudness {
-            target_lufs,
-            true_peak_dbtp,
-        } => {
-            let current = analyze_loudness(&left_proc, &right_proc, config.sample_rate);
-            normalize_loudness(
-                &mut left_proc,
-                &mut right_proc,
-                current.integrated_lufs,
-                target_lufs,
-                true_peak_dbtp,
-            );
-        }
-    }
-
-    // Dither
-    if options.dither != crate::options::DitherType::None {
-        let mut state = DitherState::new(options.dither);
-        apply_dither(
-            &mut left_proc,
-            &mut right_proc,
-            options.bit_depth.bits(),
-            &mut state,
-        );
-    }
+    let (left_proc, right_proc) = process_audio(left, right, options, config.sample_rate)?;
 
     if options.mono {
-        let mono: Vec<f32> = left_proc
-            .iter()
-            .zip(right_proc.iter())
-            .map(|(l, r)| (l + r) * 0.5)
-            .collect();
-        encode_flac_mono_file(&mono, Path::new(path), &config)
+        encode_flac_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
     } else {
         encode_flac_file(&left_proc, &right_proc, Path::new(path), &config)
     }
 }
 
-/// Export stereo audio to FLAC file with progress callback.
-pub fn export_flac_with_progress(
+pub(crate) fn export_flac_with_progress(
     path: &str,
     left: &[f32],
     right: &[f32],
     options: &ExportOptions,
     on_progress: impl Fn(ExportProgress),
 ) -> Result<()> {
-    use crate::dsp::{
-        analyze_loudness, apply_dither, normalize_loudness, normalize_peak, resample_stereo,
-        DitherState,
-    };
-    use crate::options::NormalizationMode;
-
     on_progress(ExportProgress {
         phase: ExportPhase::Processing,
         progress: 0.0,
@@ -136,65 +74,7 @@ pub fn export_flac_with_progress(
         ..Default::default()
     };
 
-    let mut left_proc = left.to_vec();
-    let mut right_proc = right.to_vec();
-
-    // Resample if needed
-    if let Some(target_rate) = options.sample_rate {
-        if target_rate != options.source_sample_rate {
-            let (l, r) = resample_stereo(
-                &left_proc,
-                &right_proc,
-                options.source_sample_rate,
-                target_rate,
-                options.resample_quality,
-            )?;
-            left_proc = l;
-            right_proc = r;
-        }
-    }
-
-    on_progress(ExportProgress {
-        phase: ExportPhase::Processing,
-        progress: 0.33,
-    });
-
-    // Normalize
-    match options.normalization {
-        NormalizationMode::None => {}
-        NormalizationMode::Peak(target_db) => {
-            normalize_peak(&mut left_proc, &mut right_proc, target_db);
-        }
-        NormalizationMode::Loudness {
-            target_lufs,
-            true_peak_dbtp,
-        } => {
-            let current = analyze_loudness(&left_proc, &right_proc, config.sample_rate);
-            normalize_loudness(
-                &mut left_proc,
-                &mut right_proc,
-                current.integrated_lufs,
-                target_lufs,
-                true_peak_dbtp,
-            );
-        }
-    }
-
-    on_progress(ExportProgress {
-        phase: ExportPhase::Processing,
-        progress: 0.66,
-    });
-
-    // Dither
-    if options.dither != crate::options::DitherType::None {
-        let mut state = DitherState::new(options.dither);
-        apply_dither(
-            &mut left_proc,
-            &mut right_proc,
-            options.bit_depth.bits(),
-            &mut state,
-        );
-    }
+    let (left_proc, right_proc) = process_audio(left, right, options, config.sample_rate)?;
 
     on_progress(ExportProgress {
         phase: ExportPhase::Processing,
@@ -207,12 +87,7 @@ pub fn export_flac_with_progress(
     });
 
     let result = if options.mono {
-        let mono: Vec<f32> = left_proc
-            .iter()
-            .zip(right_proc.iter())
-            .map(|(l, r)| (l + r) * 0.5)
-            .collect();
-        encode_flac_mono_file(&mono, Path::new(path), &config)
+        encode_flac_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
     } else {
         encode_flac_file(&left_proc, &right_proc, Path::new(path), &config)
     };

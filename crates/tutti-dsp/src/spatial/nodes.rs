@@ -25,7 +25,7 @@
 //! ```
 
 use crate::{AudioUnit, Result};
-use std::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, Ordering};
 use tutti_core::{BufferMut, BufferRef, SignalFrame};
 
 use super::binaural_panner::BinauralPanner;
@@ -292,11 +292,11 @@ impl AudioUnit for SpatialPannerNode {
         0x5041_4E00 | (self.num_outputs as u64) // "PAN\0" + channels
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
         self
     }
 
@@ -311,7 +311,7 @@ impl AudioUnit for SpatialPannerNode {
     }
 
     fn footprint(&self) -> usize {
-        std::mem::size_of::<Self>()
+        core::mem::size_of::<Self>()
     }
 }
 
@@ -488,11 +488,11 @@ impl AudioUnit for BinauralPannerNode {
         0x4249_4E00 // "BIN\0" - Binaural
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
         self
     }
 
@@ -505,7 +505,7 @@ impl AudioUnit for BinauralPannerNode {
     }
 
     fn footprint(&self) -> usize {
-        std::mem::size_of::<Self>()
+        core::mem::size_of::<Self>()
     }
 }
 

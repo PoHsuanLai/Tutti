@@ -1,8 +1,5 @@
-//! Export options.
-
 use crate::dsp::ResampleQuality;
 
-/// Audio format.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AudioFormat {
     #[default]
@@ -11,7 +8,6 @@ pub enum AudioFormat {
 }
 
 impl AudioFormat {
-    /// File extension (without dot).
     pub fn extension(&self) -> &'static str {
         match self {
             AudioFormat::Wav => "wav",
@@ -20,7 +16,6 @@ impl AudioFormat {
     }
 }
 
-/// Bit depth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BitDepth {
     Int16,
@@ -30,7 +25,6 @@ pub enum BitDepth {
 }
 
 impl BitDepth {
-    /// Bits per sample.
     pub fn bits(&self) -> u16 {
         match self {
             BitDepth::Int16 => 16,
@@ -40,7 +34,6 @@ impl BitDepth {
     }
 }
 
-/// Dithering algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DitherType {
     None,
@@ -50,7 +43,6 @@ pub enum DitherType {
     NoiseShaped,
 }
 
-/// Normalization mode.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum NormalizationMode {
     #[default]
@@ -66,7 +58,7 @@ pub enum NormalizationMode {
 
 impl NormalizationMode {
     /// Loudness normalization with default true peak limit (-1.0 dBTP).
-    pub fn lufs(target_lufs: f64) -> Self {
+    pub const fn lufs(target_lufs: f64) -> Self {
         Self::Loudness {
             target_lufs,
             true_peak_dbtp: -1.0,
@@ -74,10 +66,8 @@ impl NormalizationMode {
     }
 }
 
-/// FLAC encoding options.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FlacOptions {
-    /// Compression level (0-8).
     pub compression_level: u8,
 }
 
@@ -89,26 +79,17 @@ impl Default for FlacOptions {
     }
 }
 
-/// Export options.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExportOptions {
-    /// Audio format.
     pub format: AudioFormat,
-    /// Bit depth.
     pub bit_depth: BitDepth,
     /// Target sample rate (None = keep original).
     pub sample_rate: Option<u32>,
-    /// Source sample rate.
     pub source_sample_rate: u32,
-    /// Normalization mode.
     pub normalization: NormalizationMode,
-    /// Dithering type.
     pub dither: DitherType,
-    /// Resampling quality.
     pub resample_quality: ResampleQuality,
-    /// Export as mono.
     pub mono: bool,
-    /// FLAC options.
     pub flac: FlacOptions,
 }
 
@@ -132,12 +113,5 @@ impl ExportOptions {
     /// Effective output sample rate.
     pub fn output_sample_rate(&self) -> u32 {
         self.sample_rate.unwrap_or(self.source_sample_rate)
-    }
-
-    /// Whether resampling is needed.
-    pub fn needs_resampling(&self) -> bool {
-        self.sample_rate
-            .map(|r| r != self.source_sample_rate)
-            .unwrap_or(false)
     }
 }

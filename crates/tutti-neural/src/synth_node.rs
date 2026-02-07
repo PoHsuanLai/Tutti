@@ -1,11 +1,4 @@
 //! Neural synth AudioUnit — MIDI → tensor → ControlParams → audio.
-//!
-//! Zero inputs, stereo output. No processing latency (params arrive async).
-//!
-//! ## RT Safety
-//!
-//! Uses pre-allocated Arc buffers to avoid heap allocation in the audio callback.
-//! The feature vector is small (12 floats), so we use a simple buffer pool.
 
 use crate::engine::{submit_request, ResponseChannel, TensorRequest};
 use crate::gpu::{ControlParams, MidiState, NeuralModelId, MIDI_FEATURE_COUNT};
@@ -14,10 +7,6 @@ use std::sync::Arc;
 use tutti_core::midi::{MidiEvent, MidiRegistry};
 use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
 
-/// Pool of pre-allocated Arc<[f32]> buffers for RT-safe tensor submission.
-///
-/// For synth nodes, the feature vector is small (MIDI_FEATURE_COUNT = 12 floats).
-/// We use a small pool since MIDI events are sparse compared to audio buffers.
 const SYNTH_POOL_SIZE: usize = 4;
 
 struct SynthBufferPool {
@@ -27,7 +16,6 @@ struct SynthBufferPool {
 
 impl SynthBufferPool {
     fn new() -> Self {
-        // Pre-allocate buffers for MIDI feature vectors
         let buffers = std::array::from_fn(|_| Some(Arc::from(vec![0.0f32; MIDI_FEATURE_COUNT])));
         Self {
             buffers,
@@ -35,7 +23,6 @@ impl SynthBufferPool {
         }
     }
 
-    /// Get a buffer and fill it with the given data. RT-safe (no allocation).
     #[inline]
     fn get_and_fill(&mut self, data: &[f32; MIDI_FEATURE_COUNT]) -> Option<Arc<[f32]>> {
         for _ in 0..SYNTH_POOL_SIZE {
@@ -62,16 +49,8 @@ impl SynthBufferPool {
 
 /// Neural synthesizer AudioUnit.
 ///
-/// Receives ControlParams from the inference engine via crossbeam_channel.
-/// Each MIDI event that triggers inference submits a TensorRequest with
-/// a cloned Sender so the engine can push results back.
-///
-/// MIDI events are polled from the [`MidiRegistry`] during audio processing
-/// (pull-based, same pattern as `SoundFontUnit`).
-///
-/// ## RT Safety
-///
-/// Uses `SynthBufferPool` to avoid heap allocation when submitting requests.
+/// Zero inputs, stereo output. Polls MIDI from [`MidiRegistry`], submits
+/// inference requests, receives ControlParams asynchronously.
 pub struct NeuralSynthNode {
     model_id: NeuralModelId,
     param_tx: Sender<ControlParams>,
@@ -84,7 +63,6 @@ pub struct NeuralSynthNode {
     request_tx: Sender<TensorRequest>,
     midi_registry: Option<MidiRegistry>,
     midi_buffer: Vec<MidiEvent>,
-    /// Pre-allocated buffer pool for RT-safe tensor submission
     buffer_pool: SynthBufferPool,
 }
 
@@ -116,16 +94,11 @@ impl NeuralSynthNode {
         }
     }
 
-    /// Set the MIDI registry for pull-based MIDI event delivery.
     pub fn with_midi_registry(mut self, registry: MidiRegistry) -> Self {
         self.midi_registry = Some(registry);
         self
     }
 
-    /// Poll MIDI events from the registry and process them.
-    ///
-    /// Called at the start of `tick()` and `process()` to receive MIDI events
-    /// that were queued via `engine.queue_midi()`.
     fn poll_midi_events(&mut self) {
         let registry = match &self.midi_registry {
             Some(r) => r,
@@ -143,12 +116,8 @@ impl NeuralSynthNode {
         }
     }
 
-    /// Submit an inference request with current MIDI state.
-    ///
-    /// RT-safe: Uses pre-allocated buffer pool, no heap allocation.
     fn submit_inference_request(&mut self) {
         let features = self.midi_state.to_features();
-        // Get a pre-allocated buffer from the pool (RT-safe)
         if let Some(arc_buffer) = self.buffer_pool.get_and_fill(&features) {
             let _ = submit_request(
                 &self.request_tx,
@@ -163,10 +132,8 @@ impl NeuralSynthNode {
                 },
             );
         }
-        // If pool exhausted, drop this request (RT-safe behavior)
     }
 
-    /// Drain the param channel, keeping only the latest.
     fn update_params(&mut self) {
         while let Ok(params) = self.param_rx.try_recv() {
             self.current_params = params;
@@ -290,7 +257,6 @@ impl Clone for NeuralSynthNode {
             request_tx: self.request_tx.clone(),
             midi_registry: self.midi_registry.clone(),
             midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
-            // Each clone gets its own buffer pool (pre-allocated at clone time, not RT)
             buffer_pool: SynthBufferPool::new(),
         }
     }

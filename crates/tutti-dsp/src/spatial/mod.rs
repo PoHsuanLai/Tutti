@@ -62,8 +62,3 @@ mod vbap_panner;
 
 // Only export AudioUnit nodes - raw panners are internal
 pub use nodes::{BinauralPannerNode, SpatialPannerNode};
-
-// Re-export vbap types for advanced usage (custom speaker configurations)
-// Note: Most users should use SpatialPannerNode's preset constructors instead
-#[allow(unused_imports)]
-pub use vbap::{SpeakerConfig, SpeakerConfigBuilder, VBAPanner};

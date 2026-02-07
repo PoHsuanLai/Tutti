@@ -29,7 +29,7 @@ pub enum ExportError {
 }
 
 /// Result alias.
-pub type Result<T> = std::result::Result<T, ExportError>;
+pub type Result<T> = core::result::Result<T, ExportError>;
 
 #[cfg(feature = "wav")]
 impl From<hound::Error> for ExportError {

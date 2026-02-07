@@ -7,17 +7,10 @@
 //! - **Transient detection**: Onset/beat detection using spectral flux and other methods
 //! - **Pitch detection**: Monophonic pitch tracking using the YIN algorithm
 //! - **Stereo correlation**: Phase correlation, stereo width, and balance analysis
+//! - **Live analysis**: Real-time analysis state with lock-free updates
+//! - **Thumbnail cache**: LRU cache for waveform thumbnails
 //!
 //! All functions operate on raw `&[f32]` sample buffers - no framework dependencies.
-//!
-//! ## TODO: SIMD Optimization
-//!
-//! The following hot paths could benefit from SIMD (via `wide` crate):
-//!
-//! - `correlation::analyze_stereo()` - 5 parallel accumulators (L², R², L*R, M², S²)
-//! - `pitch::compute_difference()` - autocorrelation dot product inner loop
-//! - `waveform::compute_summary()` - min/max/sum_sq accumulation
-//! - `waveform::compute_stereo_summary()` - dual-channel min/max/rms
 //!
 //! ## Example
 //!
@@ -50,32 +43,23 @@
 //! let analysis = meter.process(left, right);
 //! ```
 
+pub mod cache;
 pub mod correlation;
+pub mod live;
 pub mod pitch;
 pub mod transient;
 pub mod waveform;
-
-#[cfg(feature = "cache")]
-pub mod cache;
-
-#[cfg(feature = "live")]
-pub mod live;
 
 // Fluent API handle
 mod handle;
 
 // Re-export main types at crate root for convenience
+pub use cache::ThumbnailCache;
 pub use correlation::{CorrelationMeter, StereoAnalysis};
+pub use handle::AnalysisHandle;
+pub use live::{run_analysis_thread, LiveAnalysisState};
 pub use pitch::{
     freq_to_midi, median_filter, midi_to_freq, viterbi_smooth, PitchDetector, PitchResult,
 };
 pub use transient::{DetectionMethod, Transient, TransientDetector};
 pub use waveform::{MultiResolutionSummary, StereoWaveformSummary, WaveformBlock, WaveformSummary};
-
-#[cfg(feature = "cache")]
-pub use cache::ThumbnailCache;
-
-#[cfg(feature = "live")]
-pub use live::LiveAnalysisState;
-
-pub use handle::AnalysisHandle;

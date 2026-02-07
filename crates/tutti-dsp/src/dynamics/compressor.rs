@@ -1,6 +1,6 @@
 //! Sidechain compressor (mono)
 
-use std::sync::Arc;
+use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use tutti_core::{dsp::DEFAULT_SR, AudioUnit, BufferMut, BufferRef, SignalFrame};
 
@@ -239,11 +239,11 @@ impl AudioUnit for SidechainCompressor {
         SIDECHAIN_COMPRESSOR_ID
     }
 
-    fn as_any(&self) -> &dyn std::any::Any {
+    fn as_any(&self) -> &dyn core::any::Any {
         self
     }
 
-    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
         self
     }
 

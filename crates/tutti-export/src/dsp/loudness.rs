@@ -1,18 +1,8 @@
 //! Loudness normalization utilities.
-//!
-//! Analysis functions are provided by tutti-core. This module provides
-//! normalization functions that modify audio in-place.
 
 use tutti_core::analyze_true_peak;
 
 /// Apply loudness normalization (EBU R128).
-///
-/// # Arguments
-/// * `left` - Left channel (modified in place)
-/// * `right` - Right channel (modified in place)
-/// * `current_lufs` - Current integrated loudness
-/// * `target_lufs` - Target integrated loudness
-/// * `true_peak_limit` - True peak ceiling in dBTP
 pub fn normalize_loudness(
     left: &mut [f32],
     right: &mut [f32],
@@ -23,7 +13,6 @@ pub fn normalize_loudness(
     let gain_db = target_lufs - current_lufs;
     let mut gain = 10.0_f64.powf(gain_db / 20.0) as f32;
 
-    // Check if gain would exceed true peak limit
     let current_peak = analyze_true_peak(left, right);
     let new_peak = current_peak + gain_db;
 
@@ -39,11 +28,6 @@ pub fn normalize_loudness(
 }
 
 /// Normalize audio to target peak level.
-///
-/// # Arguments
-/// * `left` - Left channel (modified in place)
-/// * `right` - Right channel (modified in place)
-/// * `target_db` - Target peak level in dB (e.g., -0.1 for near-full-scale)
 pub fn normalize_peak(left: &mut [f32], right: &mut [f32], target_db: f64) {
     let current_peak = analyze_true_peak(left, right);
     let gain_db = target_db - current_peak;
