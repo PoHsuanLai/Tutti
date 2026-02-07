@@ -327,3 +327,29 @@ impl TransportHandle {
         &self.click_state
     }
 }
+
+impl super::TransportReader for TransportHandle {
+    fn current_beat(&self) -> f64 {
+        self.transport.get_current_beat()
+    }
+
+    fn is_loop_enabled(&self) -> bool {
+        self.transport.is_loop_enabled()
+    }
+
+    fn get_loop_range(&self) -> Option<(f64, f64)> {
+        self.transport.get_loop_range()
+    }
+
+    fn is_playing(&self) -> bool {
+        matches!(self.transport.motion_state(), MotionState::Rolling)
+    }
+
+    fn is_recording(&self) -> bool {
+        self.transport.is_recording()
+    }
+
+    fn is_in_preroll(&self) -> bool {
+        self.transport.is_in_preroll()
+    }
+}
