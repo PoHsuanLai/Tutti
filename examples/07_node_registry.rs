@@ -1,9 +1,13 @@
-//! Example: Node Registry for Dynamic Node Creation
+//! # 07 - Node Registry
 //!
-//! Demonstrates creating audio nodes from string identifiers and parameters
-//! using the engine's built-in registry.
+//! Create DSP nodes directly in the audio graph.
+//!
+//! **Concepts:** `graph()`, `chain!` macro, direct node creation
+//!
+//! ```bash
+//! cargo run --example 07_node_registry
+//! ```
 
-use std::thread;
 use std::time::Duration;
 use tutti::prelude::*;
 
@@ -13,63 +17,18 @@ fn main() -> tutti::Result<()> {
         .outputs(2)
         .build()?;
 
-    // Register custom DSP nodes
-    engine.add_node("sine", |params| {
-        use tutti::dsp::*;
-        let freq: f32 = get_param_or(params, "frequency", 440.0);
-        Ok(Box::new(sine_hz::<f32>(freq)))
-    });
+    // Create nodes directly in the graph
+    let sine_id = engine.graph(|net| net.add(sine_hz::<f32>(440.0)).id());
+    let filter_id = engine.graph(|net| net.add(lowpass_hz::<f32>(2000.0, 1.0)).id());
+    let reverb_id = engine.graph(|net| net.add(reverb_stereo(0.7, 2.0, 0.5)).id());
 
-    engine.add_node("lowpass", |params| {
-        use tutti::dsp::*;
-        let cutoff: f32 = get_param_or(params, "cutoff", 2000.0);
-        let q: f32 = get_param_or(params, "q", 1.0);
-        Ok(Box::new(lowpass_hz::<f32>(cutoff, q)))
-    });
-
-    engine.add_node("mul", |params| {
-        use tutti::dsp::*;
-        let value: f32 = get_param_or(params, "value", 1.0);
-        Ok(Box::new(dc(value)))
-    });
-
-    engine.add_node("reverb_stereo", |params| {
-        use tutti::dsp::*;
-        let room_size: f64 = get_param_or(params, "room_size", 0.5);
-        let time: f64 = get_param_or(params, "time", 2.0);
-        let diffusion: f64 = get_param_or(params, "diffusion", 0.5);
-        Ok(Box::new(reverb_stereo(room_size, time, diffusion)))
-    });
-
-    engine.add_node("custom_oscillator", |params| {
-        use tutti::dsp::*;
-        let freq: f32 = get_param_or(params, "frequency", 440.0);
-        let detune: f32 = get_param_or(params, "detune", 5.0);
-        Ok(Box::new(
-            sine_hz::<f32>(freq) * 0.5 + sine_hz::<f32>(freq + detune) * 0.5,
-        ))
-    });
-
-    // Instantiate nodes (creates instances and returns NodeIds)
-    let sine_id = engine.instance("sine", &params! { "frequency" => 440.0 })?;
-    let filter_id = engine.instance("lowpass", &params! { "cutoff" => 2000.0 })?;
-    let gain_id = engine.instance("mul", &params! { "value" => 0.3 })?;
-    let reverb_id = engine.instance(
-        "reverb_stereo",
-        &params! {
-            "room_size" => 0.7,
-            "time" => 3.0
-        },
-    )?;
-
-    // Build audio graph
     engine.graph(|net| {
-        chain!(net, sine_id, filter_id, gain_id, reverb_id => output);
+        chain!(net, sine_id, filter_id, reverb_id => output);
     });
 
     engine.transport().play();
-    thread::sleep(Duration::from_secs(5));
-    engine.transport().stop();
+    println!("Playing: sine → lowpass → reverb...");
+    std::thread::sleep(Duration::from_secs(5));
 
     Ok(())
 }

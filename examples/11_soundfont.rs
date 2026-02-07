@@ -1,94 +1,68 @@
-//! SoundFont Example
+//! # 11 - SoundFont
 //!
-//! Demonstrates loading and playing SoundFont (.sf2) instruments with MIDI.
+//! Load and play SoundFont (.sf2) instruments with MIDI.
+//!
+//! **Concepts:** `engine.sf2()`, `note_on`, `note_off`, SoundFont presets
+//!
+//! ```bash
+//! cargo run --example 11_soundfont --features soundfont
+//! ```
 
-use std::thread;
 use std::time::Duration;
 use tutti::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== SoundFont Example ===\n");
-
+fn main() -> tutti::Result<()> {
     let soundfont_path = std::env::var("SOUNDFONT_PATH")
         .unwrap_or_else(|_| "assets/soundfonts/TimGM6mb.sf2".to_string());
 
     if !std::path::Path::new(&soundfont_path).exists() {
-        eprintln!("Error: SoundFont file not found");
-        eprintln!("\nRun: cd assets/soundfonts && ./download-timgm6mb.sh");
+        println!("SoundFont not found: {}", soundfont_path);
+        println!("Set SOUNDFONT_PATH or run: cd assets/soundfonts && ./download-timgm6mb.sh");
         return Ok(());
     }
-
-    println!("Loading SoundFont: {}", soundfont_path);
 
     let engine = TuttiEngine::builder()
         .sample_rate(44100.0)
         .outputs(2)
         .build()?;
 
-    // Load SoundFont
-    engine.load_sf2("piano", &soundfont_path)?;
-    println!("✓ SoundFont loaded\n");
-
-    // Create synth instance
-    let synth = engine.instance(
-        "piano",
-        &params! {
-            "preset" => 0,  // GM Piano
-            "bank" => 0,
-        },
-    )?;
-
-    // Connect to output
-    engine.graph(|net| {
-        net.pipe_output(synth);
-    });
+    // New fluent API: engine.sf2(path).preset(n).build() returns SoundFontUnit
+    let piano = engine.sf2(&soundfont_path).preset(0).build()?;
+    let synth = engine.graph(|net| net.add(piano).to_master());
 
     engine.transport().play();
+    println!("Playing melody...");
 
-    // Play a melody
-    println!("Playing melody...\n");
+    // Melody using Note enum
     let melody = [
-        (60, 500),  // C4
-        (62, 500),  // D4
-        (64, 500),  // E4
-        (65, 500),  // F4
-        (67, 500),  // G4
-        (69, 500),  // A4
-        (67, 500),  // G4
-        (64, 500),  // E4
-        (60, 1000), // C4
+        (Note::C4, 500),
+        (Note::D4, 500),
+        (Note::E4, 500),
+        (Note::F4, 500),
+        (Note::G4, 500),
+        (Note::A4, 500),
+        (Note::G4, 500),
+        (Note::E4, 500),
+        (Note::C4, 1000),
     ];
 
-    for (note, duration_ms) in melody.iter() {
-        println!("  Note: {}", note);
-
-        // Send Note On
-        engine.note_on(synth, 0, *note as u8, 100);
-
-        // Hold note
-        thread::sleep(Duration::from_millis(*duration_ms - 50));
-
-        // Send Note Off
-        engine.note_off(synth, 0, *note as u8);
-
-        thread::sleep(Duration::from_millis(50));
+    for (note, duration_ms) in melody {
+        engine.note_on(synth, note, 100);
+        std::thread::sleep(Duration::from_millis(duration_ms - 50));
+        engine.note_off(synth, note);
+        std::thread::sleep(Duration::from_millis(50));
     }
-
-    println!("\nPlaying C Major chord...");
 
     // Play chord
-    for note in [60, 64, 67] {
-        engine.note_on(synth, 0, note, 100);
+    let chord = [Note::C4, Note::E4, Note::G4];
+    for note in chord {
+        engine.note_on(synth, note, 100);
     }
-    thread::sleep(Duration::from_secs(2));
-
-    // Release chord
-    for note in [60, 64, 67] {
-        engine.note_off(synth, 0, note);
+    std::thread::sleep(Duration::from_secs(2));
+    for note in chord {
+        engine.note_off(synth, note);
     }
-    thread::sleep(Duration::from_millis(500));
-
-    println!("\n✓ Example complete");
+    std::thread::sleep(Duration::from_millis(500));
 
     Ok(())
 }

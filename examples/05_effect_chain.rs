@@ -1,40 +1,34 @@
-//! Effect chain example: Process audio through multiple effects
+//! # 05 - Effect Chain
 //!
-//! Demonstrates: FunDSP effect nodes, audio graph routing
+//! Process audio through multiple effects: oscillator → filter → reverb.
 //!
-//! Run with: cargo run --example effect_chain
+//! **Concepts:** Effect nodes, audio graph routing, signal flow
+//!
+//! ```bash
+//! cargo run --example 05_effect_chain
+//! ```
 
+use std::time::Duration;
 use tutti::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
     engine.graph(|net| {
-        // Create a sawtooth wave at 110Hz (A2)
-        let saw = net.add(Box::new(saw_hz(110.0) * 0.3));
-
-        // Add a lowpass filter at 800Hz
-        let filtered = net.add(Box::new(lowpole_hz::<f64>(800.0)));
-
-        // Convert mono to stereo for the reverb
+        let saw = net.add(saw_hz(110.0) * 0.3).id();
+        let filter = net.add(lowpole_hz::<f64>(800.0)).id();
         let stereo = net.add_split();
+        let reverb = net.add(reverb_stereo(10.0, 2.0, 0.5)).id();
 
-        // Add reverb (simple FDN reverb)
-        let reverb = net.add(Box::new(reverb_stereo(10.0, 2.0, 0.5)));
-
-        // Chain everything together
-        net.pipe(saw, filtered);
-        net.pipe(filtered, stereo);
+        net.pipe(saw, filter);
+        net.pipe(filter, stereo);
         net.pipe_all(stereo, reverb);
         net.pipe_output(reverb);
     });
 
     engine.transport().play();
+    println!("Playing: saw → lowpass → reverb...");
+    std::thread::sleep(Duration::from_secs(5));
 
-    println!("Playing sawtooth -> lowpass filter -> reverb");
-    println!("Press Ctrl+C to exit.");
-
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+    Ok(())
 }

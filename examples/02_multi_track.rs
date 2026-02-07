@@ -1,42 +1,32 @@
-//! Multi-track mixer example: Mix multiple audio sources with independent volume control
+//! # 02 - Multi-Track Mixing
 //!
-//! Demonstrates: Multiple audio nodes, volume control, mixing
+//! Mix multiple audio sources with independent volume control.
 //!
-//! Run with: cargo run --example multi_track
+//! **Concepts:** Multiple nodes, volume control, `mix!` macro
+//!
+//! ```bash
+//! cargo run --example 02_multi_track
+//! ```
 
+use std::time::Duration;
 use tutti::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
     engine.graph(|net| {
-        // Track 1: Bass (sine wave at 110Hz)
-        let bass = net.add(Box::new(sine_hz::<f64>(110.0) * 0.3));
+        let bass = net.add(sine_hz::<f64>(110.0) * 0.3).id();
+        let melody = net.add(sine_hz::<f64>(440.0) * 0.2).id();
+        let harmony = net.add(sine_hz::<f64>(550.0) * 0.15).id();
+        let perc = net.add(pink::<f64>() * 0.1).id();
 
-        // Track 2: Melody (sine wave at 440Hz)
-        let melody = net.add(Box::new(sine_hz::<f64>(440.0) * 0.2));
-
-        // Track 3: Harmony (sine wave at 550Hz)
-        let harmony = net.add(Box::new(sine_hz::<f64>(550.0) * 0.15));
-
-        // Track 4: Percussion (pink noise burst)
-        let perc = net.add(Box::new(pink::<f64>() * 0.1));
-
-        // Mix all tracks together using mix! macro
         let mixed = mix!(net, bass, melody, harmony, perc);
         net.pipe_output(mixed);
     });
 
     engine.transport().play();
+    println!("Playing multi-track mix...");
+    std::thread::sleep(Duration::from_secs(5));
 
-    println!("Playing multi-track mix:");
-    println!("  Track 1: Bass (110Hz)");
-    println!("  Track 2: Melody (440Hz)");
-    println!("  Track 3: Harmony (550Hz)");
-    println!("  Track 4: Percussion (pink noise)");
-    println!("Press Ctrl+C to exit.");
-
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+    Ok(())
 }

@@ -1,26 +1,26 @@
-//! Basic example: Generate a 440Hz sine wave and play it through the default audio device.
+//! # 01 - Hello Sine
 //!
-//! Run with: cargo run --example simple_sine
+//! Generate a 440Hz sine wave and play it through the default audio device.
+//!
+//! **Concepts:** Engine setup, audio graph basics, transport
+//!
+//! ```bash
+//! cargo run --example 01_hello_sine
+//! ```
 
+use std::time::Duration;
 use tutti::prelude::*;
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create the audio engine with default settings
+fn main() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
-    // Build a simple audio graph with a 440Hz sine wave
     engine.graph(|net| {
-        let sine = net.add(Box::new(sine_hz::<f64>(440.0) * 0.5));
-        net.pipe_output(sine);
+        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
     });
 
-    // Start playback
     engine.transport().play();
+    println!("Playing 440Hz sine...");
+    std::thread::sleep(Duration::from_secs(3));
 
-    println!("Playing 440Hz sine wave. Press Ctrl+C to exit.");
-
-    // Keep the program running
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-    }
+    Ok(())
 }
