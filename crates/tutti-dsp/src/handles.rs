@@ -56,17 +56,7 @@ impl<'a> DspHandle<'a> {
         self.registry.list_types()
     }
 
-    /// Register an LFO (Low Frequency Oscillator) node
-    ///
-    /// # Arguments
-    /// * `name` - Unique identifier for this node type
-    /// * `shape` - Waveform shape (Sine, Triangle, Saw, Square, Random)
-    /// * `frequency` - Default frequency in Hz
-    ///
-    /// # Instance Parameters
-    /// - `frequency` (f32) - Override frequency
-    /// - `depth` (f32) - Modulation depth (0.0 to 1.0)
-    /// - `phase_offset` (f32) - Phase offset (0.0 to 1.0)
+    /// Register an LFO node
     pub fn lfo(&self, name: impl Into<String>, shape: LfoShape, frequency: f32) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;
@@ -230,13 +220,10 @@ impl<'a> SpatialHandle<'a> {
     }
 
     /// Register a VBAP spatial panner
-    ///
-    /// Instance parameters: azimuth, elevation, spread
     pub fn vbap(&self, name: impl Into<String>, layout: ChannelLayout) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;
 
-        // Note: Using register() because panner creation can fail
         self.registry.register(&name, move |params| {
             let p = tutti_core::Params::new(params);
             let mut panner = match layout {
@@ -292,9 +279,7 @@ impl<'a> SpatialHandle<'a> {
         self
     }
 
-    /// Register a binaural panner (ITD/ILD model for headphones)
-    ///
-    /// Instance parameters: azimuth, elevation
+    /// Register a binaural panner for headphone 3D audio
     pub fn binaural(&self, name: impl Into<String>) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;

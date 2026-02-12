@@ -4,7 +4,7 @@
 #[inline]
 pub(crate) fn amplitude_to_db(amp: f32) -> f32 {
     if amp <= 0.0 {
-        -96.0 // Floor
+        -96.0
     } else {
         20.0 * amp.log10()
     }

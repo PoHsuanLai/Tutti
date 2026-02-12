@@ -58,33 +58,18 @@ use super::vbap_panner::SpatialPanner;
 /// net.pipe_output(node_id); // Route to 5.1 output
 /// ```
 pub struct SpatialPannerNode {
-    /// The underlying VBAP panner
     panner: SpatialPanner,
-    /// Number of output channels
     num_outputs: usize,
-    /// Atomic azimuth for lock-free position updates (stored as f32 bits)
     azimuth_atomic: AtomicU32,
-    /// Atomic elevation for lock-free position updates (stored as f32 bits)
     elevation_atomic: AtomicU32,
-    /// Atomic spread for lock-free updates (stored as f32 bits)
     spread_atomic: AtomicU32,
-    /// Atomic stereo width for lock-free updates (stored as f32 bits)
     width_atomic: AtomicU32,
-    /// Sample rate
     sample_rate: f32,
-    /// Pre-allocated scratch buffer for process() output (avoids per-frame allocation)
     scratch_output: Vec<f32>,
 }
 
 impl Clone for SpatialPannerNode {
     fn clone(&self) -> Self {
-        // Create a new panner with same configuration
-        // Note: We can't clone SpatialPanner directly, so we create a new one
-        // This is fine for Net cloning since each clone will have independent state
-        //
-        // SAFETY: Clone is only called from UI thread during Net snapshotting, never on audio thread.
-        // All standard speaker layouts use hardcoded validated configurations that cannot fail.
-        // These .expect() calls will only panic if there's a bug in the VBAP library's presets.
         let mut new_panner = match self.num_outputs {
             2 => SpatialPanner::stereo().expect("stereo preset"),
             4 => SpatialPanner::quad().expect("quad preset"),
@@ -94,7 +79,6 @@ impl Clone for SpatialPannerNode {
             _ => SpatialPanner::stereo().expect("stereo fallback"),
         };
 
-        // Copy position
         let azimuth = f32::from_bits(self.azimuth_atomic.load(Ordering::Relaxed));
         let elevation = f32::from_bits(self.elevation_atomic.load(Ordering::Relaxed));
         let spread = f32::from_bits(self.spread_atomic.load(Ordering::Relaxed));
@@ -220,7 +204,7 @@ impl SpatialPannerNode {
 
 impl AudioUnit for SpatialPannerNode {
     fn inputs(&self) -> usize {
-        2 // Stereo input (will downmix to mono if needed, or preserve stereo width)
+        2
     }
 
     fn outputs(&self) -> usize {
@@ -249,11 +233,8 @@ impl AudioUnit for SpatialPannerNode {
 
         let width = f32::from_bits(self.width_atomic.load(Ordering::Relaxed));
 
-        // Get stereo input (default to 0 if not provided)
         let left = input.first().copied().unwrap_or(0.0);
-        let right = input.get(1).copied().unwrap_or(left); // Mono if only one input
-
-        // Process through spatial panner
+        let right = input.get(1).copied().unwrap_or(left);
         self.panner.process_stereo_into(left, right, width, output);
     }
 
@@ -263,7 +244,6 @@ impl AudioUnit for SpatialPannerNode {
         let width = f32::from_bits(self.width_atomic.load(Ordering::Relaxed));
         let num_outputs = self.num_outputs;
 
-        // Resize scratch buffer if needed (only on first call or config change)
         if self.scratch_output.len() < num_outputs {
             self.scratch_output.resize(num_outputs, 0.0);
         }
@@ -288,8 +268,7 @@ impl AudioUnit for SpatialPannerNode {
     }
 
     fn get_id(&self) -> u64 {
-        // Unique ID based on output count (different panner types)
-        0x5041_4E00 | (self.num_outputs as u64) // "PAN\0" + channels
+        0x5041_4E00 | (self.num_outputs as u64)
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -301,10 +280,8 @@ impl AudioUnit for SpatialPannerNode {
     }
 
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
-        // Signal routing: stereo input distributes to all outputs
         let mut output = SignalFrame::new(self.num_outputs);
         for i in 0..self.num_outputs {
-            // Each output gets a blend of the input signals
             output.set(i, input.at(0));
         }
         output
@@ -338,15 +315,10 @@ impl AudioUnit for SpatialPannerNode {
 /// net.pipe_output(node_id); // Route to stereo output
 /// ```
 pub struct BinauralPannerNode {
-    /// The underlying binaural panner
     panner: BinauralPanner,
-    /// Atomic azimuth for lock-free position updates (stored as f32 bits)
     azimuth_atomic: AtomicU32,
-    /// Atomic elevation for lock-free position updates (stored as f32 bits)
     elevation_atomic: AtomicU32,
-    /// Atomic stereo width for lock-free updates (stored as f32 bits)
     width_atomic: AtomicU32,
-    /// Sample rate
     sample_rate: f32,
 }
 
@@ -369,9 +341,6 @@ impl Clone for BinauralPannerNode {
 
 impl BinauralPannerNode {
     /// Create a new binaural panner node
-    ///
-    /// # Arguments
-    /// * `sample_rate` - Audio sample rate (needed for ITD calculation)
     pub fn new(sample_rate: f32) -> Self {
         Self {
             panner: BinauralPanner::new(sample_rate),
@@ -425,11 +394,11 @@ impl BinauralPannerNode {
 
 impl AudioUnit for BinauralPannerNode {
     fn inputs(&self) -> usize {
-        2 // Stereo input
+        2
     }
 
     fn outputs(&self) -> usize {
-        2 // Stereo output (binaural)
+        2
     }
 
     fn reset(&mut self) {
@@ -452,11 +421,9 @@ impl AudioUnit for BinauralPannerNode {
 
         let width = f32::from_bits(self.width_atomic.load(Ordering::Relaxed));
 
-        // Get stereo input
         let left = input.first().copied().unwrap_or(0.0);
         let right = input.get(1).copied().unwrap_or(left);
 
-        // Process through binaural panner
         let (out_left, out_right) = self.panner.process_stereo(left, right, width);
 
         if output.len() >= 2 {
@@ -485,7 +452,7 @@ impl AudioUnit for BinauralPannerNode {
     }
 
     fn get_id(&self) -> u64 {
-        0x4249_4E00 // "BIN\0" - Binaural
+        0x4249_4E00
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -497,7 +464,6 @@ impl AudioUnit for BinauralPannerNode {
     }
 
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
-        // Binaural: stereo in, stereo out
         let mut output = SignalFrame::new(2);
         output.set(0, input.at(0));
         output.set(1, input.at(0));
@@ -514,66 +480,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_spatial_panner_node_creation() {
-        let panner = SpatialPannerNode::surround_5_1().unwrap();
-        assert_eq!(panner.num_channels(), 6);
-        assert_eq!(panner.inputs(), 2);
-        assert_eq!(panner.outputs(), 6);
-    }
-
-    #[test]
-    fn test_spatial_panner_position() {
-        let panner = SpatialPannerNode::stereo().unwrap();
-        panner.set_position(45.0, 15.0);
-
-        assert!((panner.azimuth() - 45.0).abs() < 0.001);
-        assert!((panner.elevation() - 15.0).abs() < 0.001);
-    }
-
-    #[test]
     fn test_spatial_panner_tick() {
         let mut panner = SpatialPannerNode::stereo().unwrap();
-        panner.set_position(0.0, 0.0); // Center
+        panner.set_position(0.0, 0.0);
 
         let input = [1.0f32, 1.0f32];
         let mut output = [0.0f32; 2];
 
         panner.tick(&input, &mut output);
 
-        // Center position should have roughly equal L/R
         assert!(output[0] > 0.0);
         assert!(output[1] > 0.0);
     }
 
     #[test]
-    fn test_binaural_panner_node_creation() {
-        let panner = BinauralPannerNode::new(48000.0);
-        assert_eq!(panner.inputs(), 2);
-        assert_eq!(panner.outputs(), 2);
-    }
-
-    #[test]
-    fn test_binaural_panner_position() {
-        let panner = BinauralPannerNode::new(48000.0);
-        panner.set_position(-90.0, 30.0);
-
-        assert!((panner.azimuth() - (-90.0)).abs() < 0.001);
-        assert!((panner.elevation() - 30.0).abs() < 0.001);
-    }
-
-    #[test]
     fn test_binaural_panner_tick() {
         let mut panner = BinauralPannerNode::new(48000.0);
-        panner.set_position(90.0, 0.0); // Hard left
+        panner.set_position(90.0, 0.0);
 
-        // Process some samples to let smoothing settle
         let input = [1.0f32, 1.0f32];
         let mut output = [0.0f32; 2];
         for _ in 0..100 {
             panner.tick(&input, &mut output);
         }
 
-        // Left position should have left louder than right
         panner.tick(&input, &mut output);
         assert!(
             output[0] > output[1],

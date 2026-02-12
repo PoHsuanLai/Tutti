@@ -206,12 +206,12 @@ impl AudioUnit for LfoNode {
     fn inputs(&self) -> usize {
         match self.mode {
             LfoMode::FreeRunning => 0,
-            LfoMode::BeatSynced => 1, // Beat position input
+            LfoMode::BeatSynced => 1,
         }
     }
 
     fn outputs(&self) -> usize {
-        1 // LFO value output
+        1
     }
 
     fn reset(&mut self) {
@@ -229,7 +229,6 @@ impl AudioUnit for LfoNode {
 
         let phase = match self.mode {
             LfoMode::FreeRunning => {
-                // Advance internal phase
                 let freq = self.frequency.get();
                 self.phase += freq / self.sample_rate as f32;
                 if self.phase >= 1.0 {
@@ -238,7 +237,6 @@ impl AudioUnit for LfoNode {
                 (self.phase + phase_offset) % 1.0
             }
             LfoMode::BeatSynced => {
-                // Calculate phase from beat position
                 let beat = input[0];
                 let beats_per_cycle = self.frequency.get();
                 if beats_per_cycle > 0.0 {
@@ -287,8 +285,7 @@ impl AudioUnit for LfoNode {
     }
 
     fn get_id(&self) -> u64 {
-        const LFO_NODE_ID: u64 = 0x_4C46_4F5F_4E4F_4445; // "LFO_NODE"
-        LFO_NODE_ID
+        0x_4C46_4F5F_4E4F_4445
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -315,7 +312,6 @@ impl AudioUnit for LfoNode {
                 output.set(0, Signal::Value(value as f64));
             }
         } else {
-            // Free-running: output current value
             let phase_offset = self.phase_offset.get();
             let value = self.shape.evaluate(self.phase + phase_offset) * self.depth.get();
             output.set(0, Signal::Value(value as f64));
@@ -350,23 +346,18 @@ mod tests {
 
     #[test]
     fn test_lfo_shapes() {
-        // Sine at phase 0.25 (quarter cycle) should be ~1.0
         let sine_val = LfoShape::Sine.evaluate(0.25);
         assert!((sine_val - 1.0).abs() < 0.01);
 
-        // Square at phase 0.25 should be 1.0
         let square_val = LfoShape::Square.evaluate(0.25);
         assert_eq!(square_val, 1.0);
 
-        // Square at phase 0.75 should be -1.0
         let square_val2 = LfoShape::Square.evaluate(0.75);
         assert_eq!(square_val2, -1.0);
 
-        // Triangle at phase 0.25 should be 1.0
         let tri_val = LfoShape::Triangle.evaluate(0.25);
         assert!((tri_val - 1.0).abs() < 0.01);
 
-        // Sawtooth at phase 0.5 should be 0.0
         let saw_val = LfoShape::Sawtooth.evaluate(0.5);
         assert!((saw_val - 0.0).abs() < 0.01);
     }
@@ -374,11 +365,10 @@ mod tests {
     #[test]
     fn test_free_running_lfo() {
         let mut lfo = LfoNode::new(LfoShape::Sine, 1.0);
-        lfo.set_sample_rate(100.0); // 100 Hz for easy calculation
+        lfo.set_sample_rate(100.0);
 
         let mut output = [0.0f32];
 
-        // After 25 samples at 1 Hz and 100 Hz sample rate, should be at 0.25 phase (sine = 1.0)
         for _ in 0..25 {
             lfo.tick(&[], &mut output);
         }
@@ -392,11 +382,10 @@ mod tests {
 
     #[test]
     fn test_beat_synced_lfo() {
-        let mut lfo = LfoNode::new_beat_synced(LfoShape::Sine, 4.0); // 4 beats per cycle
+        let mut lfo = LfoNode::new_beat_synced(LfoShape::Sine, 4.0);
 
         let mut output = [0.0f32];
 
-        // At beat 1.0, phase = 1.0/4.0 = 0.25 (sine = 1.0)
         lfo.tick(&[1.0], &mut output);
         assert!(
             (output[0] - 1.0).abs() < 0.01,
@@ -404,7 +393,6 @@ mod tests {
             output[0]
         );
 
-        // At beat 2.0, phase = 2.0/4.0 = 0.5 (sine = 0.0)
         lfo.tick(&[2.0], &mut output);
         assert!(
             (output[0] - 0.0).abs() < 0.01,
@@ -421,7 +409,6 @@ mod tests {
         let mut output = [0.0f32];
         lfo.tick(&[], &mut output);
 
-        // Square at phase 0 should output 0.5 (depth-scaled 1.0)
         assert!((output[0] - 0.5).abs() < 0.01);
     }
 
@@ -429,12 +416,11 @@ mod tests {
     fn test_phase_offset() {
         let mut lfo = LfoNode::new(LfoShape::Sine, 1.0);
         lfo.set_sample_rate(100.0);
-        lfo.set_phase_offset(0.25); // Start at peak
+        lfo.set_phase_offset(0.25);
 
         let mut output = [0.0f32];
         lfo.tick(&[], &mut output);
 
-        // With 0.25 offset, should start near 1.0 (sine peak)
         assert!(
             (output[0] - 1.0).abs() < 0.1,
             "Expected ~1.0, got {}",
@@ -443,22 +429,50 @@ mod tests {
     }
 
     #[test]
+    fn test_sawtooth_down_shape() {
+        let val_start = LfoShape::SawtoothDown.evaluate(0.0);
+        assert!((val_start - 1.0).abs() < 0.01);
+
+        let val_mid = LfoShape::SawtoothDown.evaluate(0.5);
+        assert!((val_mid - 0.0).abs() < 0.01);
+
+        let val_end = LfoShape::SawtoothDown.evaluate(1.0);
+        assert!((val_end - (-1.0)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_lfo_reset() {
+        let mut lfo = LfoNode::new(LfoShape::Sine, 1.0);
+        lfo.set_sample_rate(100.0);
+
+        let mut output = [0.0f32];
+        for _ in 0..50 {
+            lfo.tick(&[], &mut output);
+        }
+
+        lfo.reset();
+
+        let mut output_after = [0.0f32];
+        lfo.tick(&[], &mut output_after);
+        assert!(
+            output_after[0].abs() < 0.1,
+            "After reset, LFO should start near zero"
+        );
+    }
+
+    #[test]
     fn test_random_produces_different_values() {
-        // 1 Hz LFO at 100 Hz sample rate = phase advances by 0.01 per tick
-        // So 100 ticks = 1 cycle
         let mut lfo = LfoNode::new(LfoShape::Random, 1.0);
         lfo.set_sample_rate(100.0);
 
         let mut values = Vec::new();
         let mut output = [0.0f32];
 
-        // Generate several cycles worth (5 cycles = 500 samples)
         for _ in 0..500 {
             lfo.tick(&[], &mut output);
             values.push(output[0]);
         }
 
-        // Should have at least some different values (one per cycle = 5)
         let unique: std::collections::HashSet<u32> =
             values.iter().map(|v| (v * 1000.0) as u32).collect();
 

@@ -48,17 +48,13 @@
 //! - **Surround sound**: Use `SpatialPannerNode` for 5.1/7.1/Atmos speaker setups
 //! - **Headphones 3D**: Use `BinauralPannerNode` for immersive headphone audio
 
-// Export common types
 pub mod types;
 pub use types::ChannelLayout;
 
-// Internal utilities
 mod utils;
 
-// Spatial panner implementations (internal)
 mod binaural_panner;
 mod nodes;
 mod vbap_panner;
 
-// Only export AudioUnit nodes - raw panners are internal
 pub use nodes::{BinauralPannerNode, SpatialPannerNode};

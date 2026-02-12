@@ -11,25 +11,18 @@ use super::utils::{ExponentialSmoother, DEFAULT_POSITION_SMOOTH_TIME};
 /// **Internal implementation detail** - users should use `SpatialPannerNode` instead.
 pub(crate) struct SpatialPanner {
     panner: VBAPanner,
-    /// Target azimuth position in degrees (-180 to 180)
     azimuth_target: Arc<AtomicFloat>,
-    /// Target elevation position in degrees (-90 to 90)
     elevation_target: Arc<AtomicFloat>,
-    /// Azimuth smoother
     azimuth_smoother: ExponentialSmoother,
-    /// Elevation smoother
     elevation_smoother: ExponentialSmoother,
-    /// Spread factor (0.0 = point source, 1.0 = diffuse)
     spread: f32,
-    /// Sample rate for smoothing (stored for potential runtime changes)
     #[allow(dead_code)]
     sample_rate: f32,
 }
 
 impl SpatialPanner {
-    /// Helper to create panner with default smoothing
     fn new_with_layout(panner: VBAPanner) -> Self {
-        let sample_rate = 48000.0; // Default sample rate, can be updated later
+        let sample_rate = 48000.0;
         Self {
             panner,
             azimuth_target: Arc::new(AtomicFloat::new(0.0)),
@@ -107,13 +100,11 @@ impl SpatialPanner {
             .compute_gains(smoothed_azimuth as f64, smoothed_elevation as f64);
         let mut gains: Vec<f32> = gains_f64.iter().map(|&g| g as f32).collect();
 
-        // Apply spread: blend toward equal power across all speakers
         if self.spread > 0.0 {
             let equal_gain = 1.0 / (self.num_channels() as f32).sqrt();
             for gain in &mut gains {
                 *gain = *gain * (1.0 - self.spread) + equal_gain * self.spread;
             }
-            // Renormalize to maintain energy
             let sum_sq: f32 = gains.iter().map(|g| g * g).sum();
             if sum_sq > 0.0 {
                 let norm = 1.0 / sum_sq.sqrt();
@@ -135,20 +126,10 @@ impl SpatialPanner {
     }
 
     /// Process stereo into multichannel with width preservation
-    ///
-    /// Uses stereo width parameter to blend between mono (width=0.0) and full stereo (width=1.0).
-    /// Creates phantom image by panning L/R to slightly different positions.
-    ///
-    /// # Arguments
-    /// * `left` - Left channel sample
-    /// * `right` - Right channel sample
-    /// * `width` - Stereo width (0.0 = mono, 1.0 = full stereo, >1.0 = exaggerated)
-    /// * `output` - Multichannel output buffer
     pub(crate) fn process_stereo_into(&mut self, left: f32, right: f32, width: f32, output: &mut [f32]) {
-        let width = width.max(0.0); // Clamp to non-negative
+        let width = width.max(0.0);
 
         if width < 0.001 {
-            // Effectively mono - just downmix
             let mono = (left + right) * 0.5;
             self.process_mono_into(mono, output);
         } else {
@@ -158,23 +139,18 @@ impl SpatialPanner {
             let smoothed_azimuth = self.azimuth_smoother.process(target_azimuth);
             let smoothed_elevation = self.elevation_smoother.process(target_elevation);
 
-            // Stereo upmixing: pan L/R to offset positions
-            // Width of ±15° gives good stereo imaging in surround
             let angle_offset = 15.0 * width;
 
-            // Compute gains for left source (slightly left of center position)
             let az_left = smoothed_azimuth + angle_offset;
             let gains_left = self
                 .panner
                 .compute_gains(az_left as f64, smoothed_elevation as f64);
 
-            // Compute gains for right source (slightly right of center position)
             let az_right = smoothed_azimuth - angle_offset;
             let gains_right = self
                 .panner
                 .compute_gains(az_right as f64, smoothed_elevation as f64);
 
-            // Mix both into output
             for (i, out) in output.iter_mut().enumerate() {
                 let gain_l = gains_left.get(i).copied().unwrap_or(0.0) as f32;
                 let gain_r = gains_right.get(i).copied().unwrap_or(0.0) as f32;

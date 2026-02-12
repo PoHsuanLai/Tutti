@@ -23,7 +23,6 @@ pub enum Error {
     VBAPError(String),
 }
 
-// Convert VBAP errors to our error type
 #[cfg(feature = "spatial")]
 impl From<vbap::VBAPError> for Error {
     fn from(err: vbap::VBAPError) -> Self {

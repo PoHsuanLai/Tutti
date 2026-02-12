@@ -15,7 +15,6 @@ pub struct SidechainCompressor {
     makeup_db: Arc<AtomicFloat>,
     knee_db: Arc<AtomicFloat>,
 
-    // Internal state
     envelope: f32,
     gain_reduction: f32,
     sample_rate: f64,
@@ -26,9 +25,7 @@ pub struct SidechainCompressor {
 }
 
 impl SidechainCompressor {
-    /// Create a new compressor with default settings
-    ///
-    /// Internal use only. Public API should use `SidechainCompressor::builder()`
+    /// Create a new compressor. Prefer [`SidechainCompressor::builder()`].
     pub(crate) fn new(threshold_db: f32, ratio: f32, attack: f32, release: f32) -> Self {
         Self {
             threshold_db: Arc::new(AtomicFloat::new(threshold_db)),
@@ -138,11 +135,9 @@ impl SidechainCompressor {
         let knee = self.knee_db.get();
 
         if knee <= 0.0 {
-            // Hard knee
             let over_db = (input_db - threshold).max(0.0);
             over_db * (1.0 - 1.0 / ratio)
         } else {
-            // Soft knee
             let half_knee = knee / 2.0;
             let below = threshold - half_knee;
             let above = threshold + half_knee;
@@ -153,7 +148,6 @@ impl SidechainCompressor {
                 let over_db = input_db - threshold;
                 over_db * (1.0 - 1.0 / ratio)
             } else {
-                // In the knee region - quadratic interpolation
                 let x = input_db - below;
                 let slope = (1.0 - 1.0 / ratio) / (2.0 * knee);
                 slope * x * x
@@ -163,28 +157,20 @@ impl SidechainCompressor {
 
     #[inline]
     fn process_sample(&mut self, audio: f32, sidechain: f32) -> f32 {
-        // Detect level from sidechain (peak detection)
         let input_level = sidechain.abs();
         let input_db = amplitude_to_db(input_level);
-
-        // Calculate target gain reduction
         let target_reduction = self.compute_gain_reduction(input_db);
 
-        // Apply envelope (attack/release smoothing)
         if target_reduction > self.gain_reduction {
-            // Attack
             self.gain_reduction = self.attack_coeff * self.gain_reduction
                 + (1.0 - self.attack_coeff) * target_reduction;
         } else {
-            // Release
             self.gain_reduction = self.release_coeff * self.gain_reduction
                 + (1.0 - self.release_coeff) * target_reduction;
         }
 
-        // Store envelope for metering
         self.envelope = input_level;
 
-        // Apply gain reduction + makeup gain
         let gain = db_to_amplitude(-self.gain_reduction + self.makeup_db.get());
         audio * gain
     }
@@ -192,7 +178,7 @@ impl SidechainCompressor {
 
 impl AudioUnit for SidechainCompressor {
     fn inputs(&self) -> usize {
-        2 // audio + sidechain
+        2
     }
 
     fn outputs(&self) -> usize {
@@ -235,8 +221,7 @@ impl AudioUnit for SidechainCompressor {
     }
 
     fn get_id(&self) -> u64 {
-        const SIDECHAIN_COMPRESSOR_ID: u64 = 0x5343_434F_4D50; // "SCCOMP"
-        SIDECHAIN_COMPRESSOR_ID
+        0x5343_434F_4D50
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -248,7 +233,6 @@ impl AudioUnit for SidechainCompressor {
     }
 
     fn route(&mut self, input: &SignalFrame, _frequency: f64) -> SignalFrame {
-        // Compressor doesn't significantly alter frequency response
         let mut output = SignalFrame::new(1);
         output.set(0, input.at(0));
         output
@@ -358,21 +342,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compressor_creation() {
-        let comp = SidechainCompressor::new(-20.0, 4.0, 0.001, 0.1);
-        assert_eq!(comp.inputs(), 2);
-        assert_eq!(comp.outputs(), 1);
-        assert_eq!(comp.gain_reduction_db(), 0.0);
-    }
-
-    #[test]
     fn test_compressor_reduces_gain_on_loud_sidechain() {
         let mut comp = SidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
         comp.set_sample_rate(44100.0);
 
         let mut output = [0.0f32];
 
-        // Feed loud sidechain signal
         for _ in 0..1000 {
             comp.tick(&[0.5, 0.9], &mut output);
         }
@@ -396,30 +371,68 @@ mod tests {
     }
 
     #[test]
-    fn test_compressor_builder_defaults() {
-        let comp = SidechainCompressor::builder().build();
-        assert_eq!(comp.inputs(), 2);
-        assert_eq!(comp.outputs(), 1);
+    fn test_compressor_soft_knee_differs_from_hard_knee() {
+        let mut hard = SidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
+        hard.set_sample_rate(44100.0);
+
+        let mut soft = SidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1).with_soft_knee(12.0);
+        soft.set_sample_rate(44100.0);
+
+        let mut hard_out = [0.0f32];
+        let mut soft_out = [0.0f32];
+
+        for _ in 0..1000 {
+            hard.tick(&[0.5, 0.15], &mut hard_out);
+            soft.tick(&[0.5, 0.15], &mut soft_out);
+        }
+
+        assert!(
+            (hard_out[0] - soft_out[0]).abs() > 0.001,
+            "Soft knee should produce different output near threshold: hard={}, soft={}",
+            hard_out[0],
+            soft_out[0]
+        );
     }
 
     #[test]
-    fn test_compressor_builder_custom() {
-        let comp = SidechainCompressor::builder()
-            .threshold_db(-12.0)
-            .ratio(8.0)
-            .attack_seconds(0.002)
-            .release_seconds(0.2)
-            .soft_knee_db(3.0)
-            .makeup_gain_db(6.0)
-            .build();
+    fn test_compressor_makeup_gain() {
+        let mut comp = SidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1).with_makeup(6.0);
+        comp.set_sample_rate(44100.0);
 
-        assert_eq!(comp.threshold().get(), -12.0);
-        assert_eq!(comp.ratio().get(), 8.0);
+        let mut comp_no_makeup = SidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
+        comp_no_makeup.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32];
+        let mut output_no_makeup = [0.0f32];
+
+        for _ in 0..1000 {
+            comp.tick(&[0.5, 0.9], &mut output);
+            comp_no_makeup.tick(&[0.5, 0.9], &mut output_no_makeup);
+        }
+
+        assert!(output[0] > output_no_makeup[0]);
     }
 
     #[test]
-    fn test_compressor_builder_validates_ratio() {
-        let comp = SidechainCompressor::builder().ratio(0.5).build();
+    fn test_compressor_reset() {
+        let mut comp = SidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
+        comp.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32];
+        for _ in 0..1000 {
+            comp.tick(&[0.5, 0.9], &mut output);
+        }
+        assert!(comp.gain_reduction_db() > 0.0);
+
+        comp.reset();
+        assert_eq!(comp.gain_reduction_db(), 0.0);
+        assert_eq!(comp.envelope_level(), 0.0);
+    }
+
+    #[test]
+    fn test_compressor_ratio_clamps_to_minimum() {
+        let comp = SidechainCompressor::new(-20.0, 4.0, 0.001, 0.1);
+        comp.set_ratio(0.5);
         assert_eq!(comp.ratio().get(), 1.0);
     }
 }

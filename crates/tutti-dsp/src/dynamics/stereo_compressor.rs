@@ -139,7 +139,7 @@ impl StereoSidechainCompressor {
 
 impl AudioUnit for StereoSidechainCompressor {
     fn inputs(&self) -> usize {
-        4 // L audio, R audio, L sidechain, R sidechain
+        4
     }
 
     fn outputs(&self) -> usize {
@@ -166,7 +166,6 @@ impl AudioUnit for StereoSidechainCompressor {
         let sc_l = if input.len() > 2 { input[2] } else { audio_l };
         let sc_r = if input.len() > 3 { input[3] } else { sc_l };
 
-        // Link detection: use max of both sidechain channels
         let sc_level = sc_l.abs().max(sc_r.abs());
         let input_db = amplitude_to_db(sc_level);
 
@@ -229,8 +228,7 @@ impl AudioUnit for StereoSidechainCompressor {
     }
 
     fn get_id(&self) -> u64 {
-        const STEREO_SC_COMP_ID: u64 = 0x5353_4343_4F4D; // "SSCCOM"
-        STEREO_SC_COMP_ID
+        0x5353_4343_4F4D
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -278,7 +276,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_stereo_compressor() {
+    fn test_stereo_compressor_reduces_on_loud_sidechain() {
         let mut comp = StereoSidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
         comp.set_sample_rate(44100.0);
 
@@ -288,8 +286,79 @@ mod tests {
             comp.tick(&[0.5, 0.5, 0.9, 0.9], &mut output);
         }
 
-        // Both channels should be equally compressed
         assert!((output[0] - output[1]).abs() < 0.001);
         assert!(output[0] < 0.5);
+    }
+
+    #[test]
+    fn test_stereo_compressor_no_reduction_below_threshold() {
+        let mut comp = StereoSidechainCompressor::new(-10.0, 4.0, 0.001, 0.1);
+        comp.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32; 2];
+
+        for _ in 0..1000 {
+            comp.tick(&[0.5, 0.5, 0.1, 0.1], &mut output);
+        }
+
+        assert!(comp.gain_reduction_db() < 1.0);
+    }
+
+    #[test]
+    fn test_stereo_compressor_soft_knee_differs_from_hard_knee() {
+        let mut hard = StereoSidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
+        hard.set_sample_rate(44100.0);
+
+        let mut soft = StereoSidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1).with_soft_knee(12.0);
+        soft.set_sample_rate(44100.0);
+
+        let mut hard_out = [0.0f32; 2];
+        let mut soft_out = [0.0f32; 2];
+
+        for _ in 0..1000 {
+            hard.tick(&[0.5, 0.5, 0.15, 0.15], &mut hard_out);
+            soft.tick(&[0.5, 0.5, 0.15, 0.15], &mut soft_out);
+        }
+
+        assert!(
+            (hard_out[0] - soft_out[0]).abs() > 0.001,
+            "Soft knee should produce different output near threshold: hard={}, soft={}",
+            hard_out[0],
+            soft_out[0]
+        );
+    }
+
+    #[test]
+    fn test_stereo_compressor_makeup_gain() {
+        let mut comp = StereoSidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1).with_makeup(6.0);
+        comp.set_sample_rate(44100.0);
+
+        let mut comp_no_makeup = StereoSidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
+        comp_no_makeup.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32; 2];
+        let mut output_no_makeup = [0.0f32; 2];
+
+        for _ in 0..1000 {
+            comp.tick(&[0.5, 0.5, 0.9, 0.9], &mut output);
+            comp_no_makeup.tick(&[0.5, 0.5, 0.9, 0.9], &mut output_no_makeup);
+        }
+
+        assert!(output[0] > output_no_makeup[0]);
+    }
+
+    #[test]
+    fn test_stereo_compressor_reset() {
+        let mut comp = StereoSidechainCompressor::new(-20.0, 4.0, 0.0001, 0.1);
+        comp.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32; 2];
+        for _ in 0..1000 {
+            comp.tick(&[0.5, 0.5, 0.9, 0.9], &mut output);
+        }
+        assert!(comp.gain_reduction_db() > 0.0);
+
+        comp.reset();
+        assert_eq!(comp.gain_reduction_db(), 0.0);
     }
 }

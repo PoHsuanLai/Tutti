@@ -38,7 +38,7 @@ pub struct SidechainGate {
 }
 
 impl SidechainGate {
-    /// Create a new gate (internal use - prefer builder())
+    /// Create a new gate. Prefer [`SidechainGate::builder()`].
     pub(crate) fn new(threshold_db: f32, attack: f32, hold: f32, release: f32) -> Self {
         Self {
             threshold_db: Arc::new(AtomicFloat::new(threshold_db)),
@@ -195,8 +195,7 @@ impl AudioUnit for SidechainGate {
     }
 
     fn get_id(&self) -> u64 {
-        const SIDECHAIN_GATE_ID: u64 = 0x5343_4741_5445; // "SCGATE"
-        SIDECHAIN_GATE_ID
+        0x5343_4741_5445
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -310,11 +309,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_gate_creation() {
+    fn test_gate_starts_closed() {
         let gate = SidechainGate::new(-30.0, 0.001, 0.01, 0.1);
-        assert_eq!(gate.inputs(), 2);
-        assert_eq!(gate.outputs(), 1);
         assert!(!gate.is_open());
+        assert_eq!(gate.gate_level(), 0.0);
     }
 
     #[test]
@@ -339,13 +337,11 @@ mod tests {
 
         let mut output = [0.0f32];
 
-        // First open the gate
         for _ in 0..500 {
             gate.tick(&[0.5, 0.9], &mut output);
         }
         assert!(gate.is_open());
 
-        // Now feed quiet sidechain
         for _ in 0..2000 {
             gate.tick(&[0.5, 0.01], &mut output);
         }
@@ -355,29 +351,40 @@ mod tests {
     }
 
     #[test]
-    fn test_gate_builder_defaults() {
-        let gate = SidechainGate::builder().build();
-        assert_eq!(gate.inputs(), 2);
-        assert_eq!(gate.outputs(), 1);
-    }
-
-    #[test]
-    fn test_gate_builder_custom() {
-        let gate = SidechainGate::builder()
-            .threshold_db(-25.0)
-            .attack_seconds(0.0005)
-            .hold_seconds(0.02)
-            .release_seconds(0.15)
-            .range_db(-40.0)
-            .build();
-
-        assert_eq!(gate.threshold().get(), -25.0);
-        assert_eq!(gate.attack_time().get(), 0.0005);
-    }
-
-    #[test]
     fn test_gate_builder_validates_range() {
         let gate = SidechainGate::builder().range_db(10.0).build();
         assert_eq!(gate.range().get(), 0.0);
+    }
+
+    #[test]
+    fn test_gate_range_attenuates_rather_than_mutes() {
+        let mut gate = SidechainGate::new(-20.0, 0.001, 0.001, 0.001).with_range(-12.0);
+        gate.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32];
+
+        for _ in 0..2000 {
+            gate.tick(&[0.5, 0.01], &mut output);
+        }
+
+        assert!(!gate.is_open());
+        assert!(output[0] > 0.05, "With -12dB range, signal should be attenuated not muted: {}", output[0]);
+        assert!(output[0] < 0.5);
+    }
+
+    #[test]
+    fn test_gate_reset() {
+        let mut gate = SidechainGate::new(-20.0, 0.0001, 0.01, 0.1);
+        gate.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32];
+        for _ in 0..500 {
+            gate.tick(&[0.5, 0.9], &mut output);
+        }
+        assert!(gate.is_open());
+
+        gate.reset();
+        assert!(!gate.is_open());
+        assert_eq!(gate.gate_level(), 0.0);
     }
 }

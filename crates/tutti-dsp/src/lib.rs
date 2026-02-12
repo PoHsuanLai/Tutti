@@ -62,18 +62,14 @@
 //!     .build();
 //! ```
 
-// Re-export AudioUnit trait from tutti-core
 pub use tutti_core::AudioUnit;
 
-// Error types
 mod error;
 pub use error::{Error, Result};
 
-// LFO is always available (no external deps)
 mod lfo;
 pub use lfo::{LfoMode, LfoNode, LfoShape};
 
-// Dynamics: compressors and gates (no external deps)
 #[cfg(feature = "dynamics")]
 mod dynamics;
 #[cfg(feature = "dynamics")]
@@ -82,13 +78,11 @@ pub use dynamics::{
     StereoSidechainCompressor, StereoSidechainGate,
 };
 
-// Spatial audio: VBAP and binaural (requires vbap crate)
 #[cfg(feature = "spatial")]
 mod spatial;
 #[cfg(feature = "spatial")]
 pub use spatial::{BinauralPannerNode, ChannelLayout, SpatialPannerNode};
 
-// Fluent API handles
 mod handles;
 pub use handles::DspHandle;
 #[cfg(feature = "dynamics")]

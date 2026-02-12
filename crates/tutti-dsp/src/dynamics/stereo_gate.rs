@@ -203,8 +203,7 @@ impl AudioUnit for StereoSidechainGate {
     }
 
     fn get_id(&self) -> u64 {
-        const STEREO_SC_GATE_ID: u64 = 0x5353_4347_4154; // "SSCGAT"
-        STEREO_SC_GATE_ID
+        0x5353_4347_4154
     }
 
     fn as_any(&self) -> &dyn core::any::Any {
@@ -224,6 +223,90 @@ impl AudioUnit for StereoSidechainGate {
 
     fn footprint(&self) -> usize {
         core::mem::size_of::<Self>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_stereo_gate_starts_closed() {
+        let gate = StereoSidechainGate::new(-30.0, 0.001, 0.01, 0.1);
+        assert!(!gate.is_open());
+        assert_eq!(gate.gate_level(), 0.0);
+    }
+
+    #[test]
+    fn test_stereo_gate_opens_on_loud_sidechain() {
+        let mut gate = StereoSidechainGate::new(-20.0, 0.0001, 0.01, 0.1);
+        gate.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32; 2];
+
+        for _ in 0..500 {
+            gate.tick(&[0.5, 0.4, 0.9, 0.9], &mut output);
+        }
+
+        assert!(gate.is_open());
+        assert!(output[0] > 0.3);
+        assert!(output[1] > 0.2);
+    }
+
+    #[test]
+    fn test_stereo_gate_closes_on_quiet_sidechain() {
+        let mut gate = StereoSidechainGate::new(-20.0, 0.001, 0.001, 0.001).with_range(-60.0);
+        gate.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32; 2];
+
+        for _ in 0..500 {
+            gate.tick(&[0.5, 0.5, 0.9, 0.9], &mut output);
+        }
+        assert!(gate.is_open());
+
+        for _ in 0..2000 {
+            gate.tick(&[0.5, 0.5, 0.01, 0.01], &mut output);
+        }
+
+        assert!(!gate.is_open());
+        assert!(output[0] < 0.1);
+        assert!(output[1] < 0.1);
+    }
+
+    #[test]
+    fn test_stereo_gate_stereo_linking() {
+        let mut gate = StereoSidechainGate::new(-20.0, 0.0001, 0.01, 0.1);
+        gate.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32; 2];
+
+        for _ in 0..500 {
+            gate.tick(&[0.8, 0.3, 0.9, 0.9], &mut output);
+        }
+
+        let ratio = output[1] / output[0];
+        assert!(
+            (ratio - 0.3 / 0.8).abs() < 0.15,
+            "Both channels should have same gate gain, ratio: {}",
+            ratio
+        );
+    }
+
+    #[test]
+    fn test_stereo_gate_reset() {
+        let mut gate = StereoSidechainGate::new(-20.0, 0.0001, 0.01, 0.1);
+        gate.set_sample_rate(44100.0);
+
+        let mut output = [0.0f32; 2];
+        for _ in 0..500 {
+            gate.tick(&[0.5, 0.5, 0.9, 0.9], &mut output);
+        }
+        assert!(gate.is_open());
+
+        gate.reset();
+        assert!(!gate.is_open());
+        assert_eq!(gate.gate_level(), 0.0);
     }
 }
 
