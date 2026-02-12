@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/PoHsuanLai/Tutti"
 
 [features]
-default = []
+default = ["midi"]
 
 # MIDI support (for SoundFont MIDI input)
 midi = ["tutti-core/midi"]

@@ -1,79 +1,47 @@
-//! Polyphonic voice allocator with multiple stealing strategies.
-//!
-//! Manages voice allocation for polyphonic synthesizers:
-//! - Stealing strategies: oldest, quietest, highest/lowest note
-//! - Mono and legato modes
-//! - Sustain and sostenuto pedal handling
-//!
-//! All methods are RT-safe (no allocations after construction).
+//! Polyphonic voice allocator with stealing strategies, mono/legato modes,
+//! and sustain/sostenuto pedal handling. RT-safe after construction.
 
-/// Unique identifier for a voice instance.
 pub type VoiceId = u64;
 
-/// Voice allocation strategy when no idle voices are available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AllocationStrategy {
-    /// Steal the oldest playing voice (most common)
     #[default]
     Oldest,
-    /// Steal the quietest voice (lowest envelope level)
     Quietest,
-    /// Steal the highest pitched voice
     HighestNote,
-    /// Steal the lowest pitched voice
     LowestNote,
-    /// Steal the most recent voice
     Newest,
-    /// Never steal - drop new notes if no voices available
     NoSteal,
 }
 
-/// Voice playing mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VoiceMode {
-    /// Polyphonic - multiple simultaneous voices
     #[default]
     Poly,
-    /// Monophonic - one voice, always retrigger envelope
     Mono,
-    /// Legato - one voice, glide between notes without retriggering
     Legato,
 }
 
-/// State of a single voice slot (internal).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum VoiceState {
-    /// Voice is idle and available for allocation
     #[default]
     Idle,
-    /// Voice is actively playing (attack/decay/sustain)
     Active,
-    /// Voice is in release phase
     Releasing,
-    /// Voice was stolen but still fading out
     Stolen,
 }
 
-/// Information about an allocated voice slot (internal).
 #[derive(Debug, Clone)]
 pub(crate) struct VoiceSlot {
-    /// Unique voice identifier
     pub voice_id: VoiceId,
-    /// MIDI note number that triggered this voice (0-127)
     pub note: u8,
-    /// MIDI channel (0-15)
     pub channel: u8,
-    /// Velocity (0.0-1.0, normalized)
     pub velocity: f32,
-    /// Current envelope level (0.0-1.0) for quietest stealing
     pub envelope_level: f32,
-    /// When this voice started (sample count)
     pub start_time: u64,
-    /// Current voice state
     pub state: VoiceState,
-    /// True if sustain pedal is holding this voice
+    pub key_held: bool,
     pub sustained: bool,
-    /// True if sostenuto pedal is holding this voice
     pub sostenuto_held: bool,
 }
 
@@ -87,23 +55,18 @@ impl Default for VoiceSlot {
             envelope_level: 0.0,
             start_time: 0,
             state: VoiceState::Idle,
+            key_held: false,
             sustained: false,
             sostenuto_held: false,
         }
     }
 }
 
-/// Configuration for the voice allocator.
 #[derive(Debug, Clone)]
 pub struct VoiceAllocatorConfig {
-    /// Maximum number of simultaneous voices
     pub max_voices: usize,
-    /// Strategy for stealing voices when none are idle
     pub strategy: AllocationStrategy,
-    /// Voice playing mode (poly/mono/legato)
     pub mode: VoiceMode,
-    /// Time in samples to crossfade when stealing (default: 64 samples ~1.5ms)
-    pub steal_crossfade_samples: usize,
 }
 
 impl Default for VoiceAllocatorConfig {
@@ -112,60 +75,30 @@ impl Default for VoiceAllocatorConfig {
             max_voices: 16,
             strategy: AllocationStrategy::Oldest,
             mode: VoiceMode::Poly,
-            steal_crossfade_samples: 64,
         }
     }
 }
 
-/// Result of attempting to allocate a voice.
 #[derive(Debug, Clone)]
 pub enum AllocationResult {
-    /// New voice successfully allocated
-    Allocated {
-        voice_id: VoiceId,
-        slot_index: usize,
-    },
-    /// Existing voice was stolen to make room
-    Stolen {
-        voice_id: VoiceId,
-        slot_index: usize,
-        stolen_voice_id: VoiceId,
-    },
-    /// Legato transition - update existing voice without retriggering
-    LegatoRetrigger {
-        voice_id: VoiceId,
-        slot_index: usize,
-    },
-    /// No voice available (NoSteal strategy or error)
+    Allocated { slot_index: usize },
+    Stolen { slot_index: usize },
+    LegatoRetrigger { slot_index: usize },
     Unavailable,
 }
 
-/// Polyphonic voice allocator.
-///
-/// Manages voice allocation, stealing, and pedal handling for synthesizers.
-/// All methods are RT-safe (no allocations after construction).
 pub struct VoiceAllocator {
     config: VoiceAllocatorConfig,
     slots: Vec<VoiceSlot>,
     next_voice_id: VoiceId,
     current_time: u64,
-
-    /// Active note tracking: note (0-127) -> slot index
-    /// Fixed-size array avoids HashMap allocations
     note_to_slot: [Option<usize>; 128],
-
-    /// Sustain pedal state per channel (0-15)
     sustain_pedal: [bool; 16],
-
-    /// Sostenuto pedal state per channel (0-15)
     sostenuto_pedal: [bool; 16],
-
-    /// Last note for legato mode
     legato_last_note: Option<u8>,
 }
 
 impl VoiceAllocator {
-    /// Create a new voice allocator with the given configuration.
     pub fn new(config: VoiceAllocatorConfig) -> Self {
         let slots = (0..config.max_voices)
             .map(|_| VoiceSlot::default())
@@ -183,47 +116,29 @@ impl VoiceAllocator {
         }
     }
 
-    /// Allocate a voice for a new note.
-    ///
-    /// RT-safe: no heap allocations.
-    ///
-    /// # Arguments
-    /// * `note` - MIDI note number (0-127)
-    /// * `channel` - MIDI channel (0-15)
-    /// * `velocity` - Note velocity (0.0-1.0)
     pub fn allocate(&mut self, note: u8, channel: u8, velocity: f32) -> AllocationResult {
-        // Mono/Legato mode handling
         if self.config.mode != VoiceMode::Poly {
             return self.allocate_mono_legato(note, channel, velocity);
         }
 
-        // If this note is already playing, release it first
         if let Some(existing_slot) = self.note_to_slot[note as usize] {
             self.slots[existing_slot].state = VoiceState::Releasing;
             self.note_to_slot[note as usize] = None;
         }
 
-        // Find an idle slot
         if let Some(slot_index) = self.find_idle_slot() {
             return self.activate_slot(slot_index, note, channel, velocity);
         }
 
-        // Find a slot to steal based on strategy
         if self.config.strategy == AllocationStrategy::NoSteal {
             return AllocationResult::Unavailable;
         }
 
         if let Some(slot_index) = self.find_slot_to_steal() {
-            let stolen_voice_id = self.slots[slot_index].voice_id;
             let old_note = self.slots[slot_index].note;
-
-            // Clear old note mapping
             self.note_to_slot[old_note as usize] = None;
-
-            // Mark as stolen (caller should crossfade)
             self.slots[slot_index].state = VoiceState::Stolen;
 
-            // Activate new voice in this slot
             let voice_id = self.next_voice_id;
             self.next_voice_id += 1;
 
@@ -235,36 +150,29 @@ impl VoiceAllocator {
                 envelope_level: 0.0,
                 start_time: self.current_time,
                 state: VoiceState::Active,
+                key_held: true,
                 sustained: false,
-                sostenuto_held: self.sostenuto_pedal[channel as usize],
+                sostenuto_held: false,
             };
 
             self.note_to_slot[note as usize] = Some(slot_index);
 
-            AllocationResult::Stolen {
-                voice_id,
-                slot_index,
-                stolen_voice_id,
-            }
+            AllocationResult::Stolen { slot_index }
         } else {
             AllocationResult::Unavailable
         }
     }
 
-    /// Release a voice by note number.
-    ///
-    /// RT-safe: no heap allocations.
     pub fn release(&mut self, note: u8, channel: u8) {
         if let Some(slot_index) = self.note_to_slot[note as usize] {
             let slot = &mut self.slots[slot_index];
 
             if slot.channel == channel && slot.state == VoiceState::Active {
-                // Check if sustain pedal is holding
+                slot.key_held = false;
                 if self.sustain_pedal[channel as usize] {
                     slot.sustained = true;
                 } else if slot.sostenuto_held {
-                    // Sostenuto holds notes that were down when pedal was pressed
-                    // Don't release yet
+                    // Sostenuto holds — don't release yet
                 } else {
                     slot.state = VoiceState::Releasing;
                     self.note_to_slot[note as usize] = None;
@@ -272,19 +180,15 @@ impl VoiceAllocator {
             }
         }
 
-        // Update legato tracking
         if self.config.mode == VoiceMode::Legato && self.legato_last_note == Some(note) {
             self.legato_last_note = None;
         }
     }
 
-    /// Mark a voice as finished (call when envelope reaches zero).
-    ///
-    /// This frees the slot for reuse.
+    /// Call when envelope reaches zero to free the slot for reuse.
     pub fn voice_finished(&mut self, voice_id: VoiceId) {
         for (i, slot) in self.slots.iter_mut().enumerate() {
             if slot.voice_id == voice_id {
-                // Clear note mapping if still pointing to this slot
                 if self.note_to_slot[slot.note as usize] == Some(i) {
                     self.note_to_slot[slot.note as usize] = None;
                 }
@@ -294,7 +198,7 @@ impl VoiceAllocator {
         }
     }
 
-    /// Handle sustain pedal (CC 64).
+    /// CC 64.
     pub fn sustain_pedal(&mut self, channel: u8, on: bool) {
         if channel >= 16 {
             return;
@@ -303,26 +207,23 @@ impl VoiceAllocator {
         self.sustain_pedal[channel as usize] = on;
 
         if !on {
-            // Release all sustained notes on this channel
+            // Release sustained notes (unless key is still held or sostenuto holds)
             for slot in &mut self.slots {
                 if slot.channel == channel && slot.sustained {
                     slot.sustained = false;
-                    if slot.state == VoiceState::Active && !slot.sostenuto_held {
+                    if slot.state == VoiceState::Active
+                        && !slot.sostenuto_held
+                        && !slot.key_held
+                    {
                         slot.state = VoiceState::Releasing;
+                        self.note_to_slot[slot.note as usize] = None;
                     }
-                }
-            }
-
-            // Clear note mappings for released notes
-            for slot in &self.slots {
-                if slot.channel == channel && slot.state == VoiceState::Releasing {
-                    self.note_to_slot[slot.note as usize] = None;
                 }
             }
         }
     }
 
-    /// Handle sostenuto pedal (CC 66).
+    /// CC 66.
     pub fn sostenuto_pedal(&mut self, channel: u8, on: bool) {
         if channel >= 16 {
             return;
@@ -331,44 +232,38 @@ impl VoiceAllocator {
         self.sostenuto_pedal[channel as usize] = on;
 
         if on {
-            // Mark currently active notes as sostenuto held
             for slot in &mut self.slots {
                 if slot.channel == channel && slot.state == VoiceState::Active {
                     slot.sostenuto_held = true;
                 }
             }
         } else {
-            // Release sostenuto held notes (if not also sustained)
-            for (i, slot) in self.slots.iter_mut().enumerate() {
+            // Release sostenuto held notes (if key is no longer held and not sustained)
+            for slot in self.slots.iter_mut() {
                 if slot.channel == channel && slot.sostenuto_held {
                     slot.sostenuto_held = false;
-                    if slot.state == VoiceState::Active && !slot.sustained {
-                        // Check if key is still held
-                        if self.note_to_slot[slot.note as usize] != Some(i) {
-                            slot.state = VoiceState::Releasing;
-                        }
+                    if slot.state == VoiceState::Active && !slot.sustained && !slot.key_held {
+                        slot.state = VoiceState::Releasing;
+                        self.note_to_slot[slot.note as usize] = None;
                     }
                 }
             }
         }
     }
 
-    /// Update envelope level for a voice (for quietest stealing).
-    pub fn update_envelope_level(&mut self, voice_id: VoiceId, level: f32) {
-        for slot in &mut self.slots {
-            if slot.voice_id == voice_id {
-                slot.envelope_level = level;
-                break;
-            }
+    /// Used by quietest-voice stealing strategy.
+    pub fn update_envelope_level(&mut self, slot_index: usize, level: f32) {
+        if slot_index < self.slots.len() {
+            self.slots[slot_index].envelope_level = level;
         }
     }
 
-    /// Advance time counter (call each audio buffer).
+    /// Call once per audio buffer.
     pub fn advance_time(&mut self, samples: u64) {
         self.current_time = self.current_time.wrapping_add(samples);
     }
 
-    /// Get the number of active voices.
+    #[cfg(test)]
     pub fn active_count(&self) -> usize {
         self.slots
             .iter()
@@ -376,17 +271,10 @@ impl VoiceAllocator {
             .count()
     }
 
-    /// Get maximum voice count.
-    pub fn max_voices(&self) -> usize {
-        self.config.max_voices
-    }
-
-    /// Iterate over all voice slots (internal).
     pub(crate) fn slots(&self) -> &[VoiceSlot] {
         &self.slots
     }
 
-    /// Reset all voices to idle.
     pub fn reset(&mut self) {
         for slot in &mut self.slots {
             *slot = VoiceSlot::default();
@@ -397,14 +285,12 @@ impl VoiceAllocator {
         self.legato_last_note = None;
     }
 
-    /// All notes off for a channel.
     pub fn all_notes_off(&mut self, channel: u8) {
         for slot in self.slots.iter_mut() {
             if slot.channel == channel && slot.state == VoiceState::Active {
                 slot.state = VoiceState::Releasing;
                 self.note_to_slot[slot.note as usize] = None;
             }
-            // Also clear sustained/sostenuto
             if slot.channel == channel {
                 slot.sustained = false;
                 slot.sostenuto_held = false;
@@ -412,7 +298,7 @@ impl VoiceAllocator {
         }
     }
 
-    /// All sound off for a channel (immediate silence).
+    /// Immediate silence, unlike `all_notes_off` which allows release tails.
     pub fn all_sound_off(&mut self, channel: u8) {
         for slot in &mut self.slots {
             if slot.channel == channel {
@@ -421,7 +307,6 @@ impl VoiceAllocator {
                 slot.sostenuto_held = false;
             }
         }
-        // Clear note mappings
         for i in 0..128 {
             if let Some(slot_idx) = self.note_to_slot[i] {
                 if self.slots[slot_idx].channel == channel {
@@ -492,20 +377,17 @@ impl VoiceAllocator {
             envelope_level: 0.0,
             start_time: self.current_time,
             state: VoiceState::Active,
+            key_held: true,
             sustained: false,
-            sostenuto_held: self.sostenuto_pedal[channel as usize],
+            sostenuto_held: false,
         };
 
         self.note_to_slot[note as usize] = Some(slot_index);
 
-        AllocationResult::Allocated {
-            voice_id,
-            slot_index,
-        }
+        AllocationResult::Allocated { slot_index }
     }
 
     fn allocate_mono_legato(&mut self, note: u8, channel: u8, velocity: f32) -> AllocationResult {
-        // Find existing active voice on this channel
         let active_slot = self
             .slots
             .iter()
@@ -514,28 +396,17 @@ impl VoiceAllocator {
         match (self.config.mode, active_slot, self.legato_last_note) {
             (VoiceMode::Legato, Some(slot_index), Some(_)) => {
                 // Legato: update note without retriggering envelope
-                let voice_id = self.slots[slot_index].voice_id;
                 let old_note = self.slots[slot_index].note;
-
-                // Clear old note mapping
                 self.note_to_slot[old_note as usize] = None;
-
-                // Update slot
                 self.slots[slot_index].note = note;
                 self.slots[slot_index].velocity = velocity;
-
-                // Set new note mapping
                 self.note_to_slot[note as usize] = Some(slot_index);
                 self.legato_last_note = Some(note);
 
-                AllocationResult::LegatoRetrigger {
-                    voice_id,
-                    slot_index,
-                }
+                AllocationResult::LegatoRetrigger { slot_index }
             }
             _ => {
-                // Mono mode or first legato note: allocate to slot 0
-                // Release any existing voice first
+                // Mono or first legato note: always use slot 0
                 if let Some(slot_index) = active_slot {
                     let old_note = self.slots[slot_index].note;
                     self.note_to_slot[old_note as usize] = None;
@@ -580,7 +451,7 @@ mod tests {
         let result = alloc.allocate(60, 0, 0.8);
         assert!(matches!(
             result,
-            AllocationResult::Allocated { slot_index: 0, .. }
+            AllocationResult::Allocated { slot_index: 0 }
         ));
         assert_eq!(alloc.active_count(), 1);
 
@@ -588,7 +459,7 @@ mod tests {
         let result = alloc.allocate(64, 0, 0.7);
         assert!(matches!(
             result,
-            AllocationResult::Allocated { slot_index: 1, .. }
+            AllocationResult::Allocated { slot_index: 1 }
         ));
         assert_eq!(alloc.active_count(), 2);
     }
@@ -612,7 +483,7 @@ mod tests {
         let result = alloc.allocate(67, 0, 0.9);
         assert!(matches!(
             result,
-            AllocationResult::Stolen { slot_index: 0, .. }
+            AllocationResult::Stolen { slot_index: 0 }
         ));
     }
 
@@ -665,7 +536,7 @@ mod tests {
         let result1 = alloc.allocate(60, 0, 0.8);
         assert!(matches!(
             result1,
-            AllocationResult::Allocated { slot_index: 0, .. }
+            AllocationResult::Allocated { slot_index: 0 }
         ));
         assert_eq!(alloc.active_count(), 1);
         assert_eq!(alloc.slots[0].note, 60);
@@ -674,7 +545,7 @@ mod tests {
         let result2 = alloc.allocate(64, 0, 0.7);
         assert!(matches!(
             result2,
-            AllocationResult::Allocated { slot_index: 0, .. }
+            AllocationResult::Allocated { slot_index: 0 }
         ));
         assert_eq!(alloc.active_count(), 1);
         assert_eq!(alloc.slots[0].note, 64);
@@ -721,5 +592,266 @@ mod tests {
         // Third note should fail
         let result = alloc.allocate(67, 0, 0.9);
         assert!(matches!(result, AllocationResult::Unavailable));
+    }
+
+    #[test]
+    fn test_voice_stealing_quietest() {
+        let config = VoiceAllocatorConfig {
+            max_voices: 2,
+            strategy: AllocationStrategy::Quietest,
+            ..Default::default()
+        };
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Allocate two voices
+        let result1 = alloc.allocate(60, 0, 0.8);
+        let slot_1 = match result1 {
+            AllocationResult::Allocated { slot_index } => slot_index,
+            _ => panic!("Expected allocation"),
+        };
+
+        let result2 = alloc.allocate(64, 0, 0.7);
+        let slot_2 = match result2 {
+            AllocationResult::Allocated { slot_index } => slot_index,
+            _ => panic!("Expected allocation"),
+        };
+
+        // Set envelope levels - slot 0 is quieter
+        alloc.update_envelope_level(slot_1, 0.2);
+        alloc.update_envelope_level(slot_2, 0.8);
+
+        // Third note should steal the quietest (slot 0, note 60)
+        let result = alloc.allocate(67, 0, 0.9);
+        match result {
+            AllocationResult::Stolen { slot_index } => {
+                assert_eq!(slot_index, 0);
+            }
+            _ => panic!("Expected stealing, got {:?}", result),
+        }
+    }
+
+    #[test]
+    fn test_voice_stealing_highest_note() {
+        let config = VoiceAllocatorConfig {
+            max_voices: 2,
+            strategy: AllocationStrategy::HighestNote,
+            ..Default::default()
+        };
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Allocate C4 (60) and G4 (67)
+        alloc.allocate(60, 0, 0.8); // slot 0
+        alloc.allocate(67, 0, 0.8); // slot 1 - higher note
+
+        // Third note should steal the highest (G4 = 67)
+        let result = alloc.allocate(72, 0, 0.9);
+        match result {
+            AllocationResult::Stolen { slot_index } => {
+                assert_eq!(slot_index, 1, "Should steal slot with highest note (67)");
+            }
+            _ => panic!("Expected stealing"),
+        }
+    }
+
+    #[test]
+    fn test_voice_stealing_lowest_note() {
+        let config = VoiceAllocatorConfig {
+            max_voices: 2,
+            strategy: AllocationStrategy::LowestNote,
+            ..Default::default()
+        };
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Allocate C4 (60) and G4 (67)
+        alloc.allocate(60, 0, 0.8); // slot 0 - lower note
+        alloc.allocate(67, 0, 0.8); // slot 1
+
+        // Third note should steal the lowest (C4 = 60)
+        let result = alloc.allocate(72, 0, 0.9);
+        match result {
+            AllocationResult::Stolen { slot_index } => {
+                assert_eq!(slot_index, 0, "Should steal slot with lowest note (60)");
+            }
+            _ => panic!("Expected stealing"),
+        }
+    }
+
+    #[test]
+    fn test_voice_stealing_newest() {
+        let config = VoiceAllocatorConfig {
+            max_voices: 2,
+            strategy: AllocationStrategy::Newest,
+            ..Default::default()
+        };
+        let mut alloc = VoiceAllocator::new(config);
+
+        alloc.allocate(60, 0, 0.8); // slot 0 - older
+        alloc.advance_time(100);
+        alloc.allocate(64, 0, 0.7); // slot 1 - newer
+        alloc.advance_time(100);
+
+        // Third note should steal the newest (note 64 in slot 1)
+        let result = alloc.allocate(67, 0, 0.9);
+        match result {
+            AllocationResult::Stolen { slot_index } => {
+                assert_eq!(slot_index, 1, "Should steal newest voice");
+            }
+            _ => panic!("Expected stealing"),
+        }
+    }
+
+    #[test]
+    fn test_sostenuto_pedal() {
+        let config = VoiceAllocatorConfig::default();
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Play note, then press sostenuto
+        alloc.allocate(60, 0, 0.8);
+        alloc.sostenuto_pedal(0, true);
+
+        // Release key - should be held by sostenuto
+        alloc.release(60, 0);
+        assert_eq!(alloc.slots[0].state, VoiceState::Active);
+        assert!(alloc.slots[0].sostenuto_held);
+
+        // New note played AFTER sostenuto down should NOT be held
+        alloc.allocate(64, 0, 0.7);
+        assert!(!alloc.slots[1].sostenuto_held, "New notes should not be sostenuto-held");
+        alloc.release(64, 0);
+        assert_eq!(alloc.slots[1].state, VoiceState::Releasing, "New note should release normally");
+
+        // Original note still held
+        assert_eq!(alloc.slots[0].state, VoiceState::Active);
+
+        // Sostenuto off should release the held note (key was released)
+        alloc.sostenuto_pedal(0, false);
+        assert!(!alloc.slots[0].sostenuto_held);
+        assert_eq!(alloc.slots[0].state, VoiceState::Releasing);
+    }
+
+    #[test]
+    fn test_sostenuto_key_still_held() {
+        let config = VoiceAllocatorConfig::default();
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Play note, then press sostenuto
+        alloc.allocate(60, 0, 0.8);
+        alloc.sostenuto_pedal(0, true);
+
+        // DON'T release key — sostenuto off should NOT release
+        alloc.sostenuto_pedal(0, false);
+        assert_eq!(alloc.slots[0].state, VoiceState::Active);
+        assert!(!alloc.slots[0].sostenuto_held);
+        assert!(alloc.slots[0].key_held);
+    }
+
+    #[test]
+    fn test_all_notes_off() {
+        let config = VoiceAllocatorConfig::default();
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Play notes on channel 0 and 1
+        alloc.allocate(60, 0, 0.8);
+        alloc.allocate(64, 0, 0.7);
+        alloc.allocate(67, 1, 0.9);
+
+        assert_eq!(alloc.active_count(), 3);
+
+        // All notes off on channel 0 only
+        alloc.all_notes_off(0);
+
+        // Channel 0 notes should be releasing
+        assert_eq!(alloc.slots[0].state, VoiceState::Releasing);
+        assert_eq!(alloc.slots[1].state, VoiceState::Releasing);
+        // Channel 1 note still active
+        assert_eq!(alloc.slots[2].state, VoiceState::Active);
+    }
+
+    #[test]
+    fn test_all_sound_off() {
+        let config = VoiceAllocatorConfig::default();
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Play notes
+        alloc.allocate(60, 0, 0.8);
+        alloc.allocate(64, 0, 0.7);
+
+        // All sound off - immediate silence
+        alloc.all_sound_off(0);
+
+        // Should be immediately idle (no release phase)
+        assert_eq!(alloc.slots[0].state, VoiceState::Idle);
+        assert_eq!(alloc.slots[1].state, VoiceState::Idle);
+        assert_eq!(alloc.active_count(), 0);
+    }
+
+    #[test]
+    fn test_reset() {
+        let config = VoiceAllocatorConfig::default();
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Play notes with pedals
+        alloc.allocate(60, 0, 0.8);
+        alloc.allocate(64, 0, 0.7);
+        alloc.sustain_pedal(0, true);
+        alloc.sostenuto_pedal(0, true);
+
+        assert_eq!(alloc.active_count(), 2);
+
+        // Reset everything
+        alloc.reset();
+
+        assert_eq!(alloc.active_count(), 0);
+        // Pedals should be cleared
+        alloc.allocate(60, 0, 0.8);
+        alloc.release(60, 0);
+        // Without sustain, should go to releasing
+        assert_eq!(alloc.slots[0].state, VoiceState::Releasing);
+    }
+
+    #[test]
+    fn test_retrigger_same_note() {
+        let config = VoiceAllocatorConfig::default();
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Play same note twice
+        alloc.allocate(60, 0, 0.8);
+        assert_eq!(alloc.slots[0].state, VoiceState::Active);
+
+        // Same note again should release old and allocate new
+        let result = alloc.allocate(60, 0, 0.9);
+        match result {
+            AllocationResult::Allocated { slot_index } => {
+                // Old voice should be releasing, new one allocated
+                assert!(slot_index == 0 || slot_index == 1);
+            }
+            _ => panic!("Expected new allocation"),
+        }
+    }
+
+    #[test]
+    fn test_prefer_stealing_releasing_voices() {
+        let config = VoiceAllocatorConfig {
+            max_voices: 2,
+            strategy: AllocationStrategy::Oldest,
+            ..Default::default()
+        };
+        let mut alloc = VoiceAllocator::new(config);
+
+        // Allocate and release one voice
+        alloc.allocate(60, 0, 0.8);
+        alloc.advance_time(100);
+        alloc.allocate(64, 0, 0.7);
+        alloc.advance_time(100);
+        alloc.release(60, 0); // Now slot 0 is releasing
+
+        // New note should prefer the releasing voice over active
+        let result = alloc.allocate(67, 0, 0.9);
+        match result {
+            AllocationResult::Stolen { slot_index } => {
+                assert_eq!(slot_index, 0, "Should prefer stealing releasing voice");
+            }
+            _ => panic!("Expected stealing"),
+        }
     }
 }

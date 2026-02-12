@@ -1,7 +1,4 @@
 //! Fluent builder API for creating synthesizers.
-//!
-//! Combines tutti-synth building blocks with FunDSP primitives into
-//! complete polyphonic synthesizers.
 
 #[cfg(feature = "midi")]
 mod polysynth;
@@ -11,27 +8,18 @@ mod voice;
 #[cfg(feature = "midi")]
 pub use polysynth::PolySynth;
 
-use crate::{
-    AllocationStrategy, ModulationMatrixConfig, PortamentoConfig, Tuning, UnisonConfig, VoiceMode,
-};
+use crate::{AllocationStrategy, PortamentoConfig, Tuning, UnisonConfig, VoiceMode};
 
-/// Oscillator types wrapping FunDSP oscillators.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum OscillatorType {
-    /// Sine wave oscillator
     Sine,
-    /// Sawtooth wave oscillator (band-limited)
     #[default]
     Saw,
-    /// Square/pulse wave oscillator with configurable pulse width
     Square { pulse_width: f32 },
-    /// Triangle wave oscillator
     Triangle,
-    /// White noise generator
     Noise,
 }
 
-/// SVF (State Variable Filter) modes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SvfMode {
     #[default]
@@ -41,45 +29,20 @@ pub enum SvfMode {
     Notch,
 }
 
-/// Biquad filter modes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum BiquadMode {
-    #[default]
-    Lowpass,
-    Highpass,
-    Bandpass,
-    Peak,
-    Notch,
-}
-
-/// Filter types wrapping FunDSP filters.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum FilterType {
-    /// Moog ladder filter (4-pole lowpass with resonance)
     Moog { cutoff: f32, resonance: f32 },
-    /// State Variable Filter with selectable mode
     Svf { cutoff: f32, q: f32, mode: SvfMode },
-    /// Biquad filter with selectable mode
-    Biquad {
-        cutoff: f32,
-        q: f32,
-        mode: BiquadMode,
-    },
-    /// No filter (bypass)
     #[default]
     None,
 }
 
-/// ADSR envelope configuration.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EnvelopeConfig {
-    /// Attack time in seconds
     pub attack: f32,
-    /// Decay time in seconds
     pub decay: f32,
-    /// Sustain level (0.0 - 1.0)
+    /// 0.0 - 1.0
     pub sustain: f32,
-    /// Release time in seconds
     pub release: f32,
 }
 
@@ -95,7 +58,6 @@ impl Default for EnvelopeConfig {
 }
 
 impl EnvelopeConfig {
-    /// Create a new envelope configuration.
     pub fn new(attack: f32, decay: f32, sustain: f32, release: f32) -> Self {
         Self {
             attack,
@@ -121,31 +83,47 @@ impl EnvelopeConfig {
     }
 }
 
-/// Complete synth configuration.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FilterModConfig {
+    /// Mod wheel (CC1) to filter cutoff depth (0.0-1.0, default: 0.0)
+    /// At 1.0, mod wheel fully open doubles the cutoff frequency.
+    pub mod_wheel_depth: f32,
+    /// Velocity to filter cutoff depth (0.0-1.0, default: 0.0)
+    /// At 1.0, velocity 0 halves cutoff, velocity 127 uses full cutoff.
+    pub velocity_depth: f32,
+    /// LFO rate in Hz (default: 0.0 = disabled)
+    pub lfo_rate: f32,
+    /// LFO to filter cutoff depth (0.0-1.0, default: 0.0)
+    /// At 1.0, LFO sweeps cutoff by ±50%.
+    pub lfo_depth: f32,
+}
+
+impl Default for FilterModConfig {
+    fn default() -> Self {
+        Self {
+            mod_wheel_depth: 0.0,
+            velocity_depth: 0.0,
+            lfo_rate: 0.0,
+            lfo_depth: 0.0,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SynthConfig {
-    /// Sample rate in Hz
     pub sample_rate: f64,
-    /// Maximum number of voices
     pub max_voices: usize,
-    /// Voice mode (poly/mono/legato)
     pub voice_mode: VoiceMode,
-    /// Oscillator type
     pub oscillator: OscillatorType,
-    /// Filter type
     pub filter: FilterType,
-    /// ADSR envelope
     pub envelope: EnvelopeConfig,
-    /// Portamento configuration (optional)
     pub portamento: Option<PortamentoConfig>,
-    /// Unison configuration (optional)
     pub unison: Option<UnisonConfig>,
-    /// Voice stealing strategy
     pub allocation_strategy: AllocationStrategy,
-    /// Tuning system
     pub tuning: Tuning,
-    /// Modulation matrix configuration (optional)
-    pub modulation: Option<ModulationMatrixConfig>,
+    /// In semitones (default: 2.0)
+    pub pitch_bend_range: f32,
+    pub filter_mod: FilterModConfig,
 }
 
 impl Default for SynthConfig {
@@ -161,19 +139,18 @@ impl Default for SynthConfig {
             unison: None,
             allocation_strategy: AllocationStrategy::Oldest,
             tuning: Tuning::equal_temperament(),
-            modulation: None,
+            pitch_bend_range: 2.0,
+            filter_mod: FilterModConfig::default(),
         }
     }
 }
 
-/// Fluent builder for creating synthesizers.
 #[derive(Debug, Clone)]
 pub struct SynthBuilder {
     config: SynthConfig,
 }
 
 impl SynthBuilder {
-    /// Create a new synth builder with the given sample rate.
     pub fn new(sample_rate: f64) -> Self {
         Self {
             config: SynthConfig {
@@ -183,88 +160,105 @@ impl SynthBuilder {
         }
     }
 
-    /// Set polyphonic mode with the specified number of voices.
     pub fn poly(mut self, voices: usize) -> Self {
         self.config.max_voices = voices;
         self.config.voice_mode = VoiceMode::Poly;
         self
     }
 
-    /// Set monophonic mode (single voice).
     pub fn mono(mut self) -> Self {
         self.config.max_voices = 1;
         self.config.voice_mode = VoiceMode::Mono;
         self
     }
 
-    /// Set legato mode (monophonic with pitch glide on overlapping notes).
     pub fn legato(mut self) -> Self {
         self.config.max_voices = 1;
         self.config.voice_mode = VoiceMode::Legato;
         self
     }
 
-    /// Set the oscillator type.
     pub fn oscillator(mut self, osc: OscillatorType) -> Self {
         self.config.oscillator = osc;
         self
     }
 
-    /// Set the filter type.
     pub fn filter(mut self, filter: FilterType) -> Self {
         self.config.filter = filter;
         self
     }
 
-    /// Set ADSR envelope parameters.
     pub fn envelope(mut self, attack: f32, decay: f32, sustain: f32, release: f32) -> Self {
         self.config.envelope = EnvelopeConfig::new(attack, decay, sustain, release);
         self
     }
 
-    /// Set envelope from a preset configuration.
     pub fn envelope_config(mut self, config: EnvelopeConfig) -> Self {
         self.config.envelope = config;
         self
     }
 
-    /// Enable portamento with the given configuration.
     pub fn portamento(mut self, config: PortamentoConfig) -> Self {
         self.config.portamento = Some(config);
         self
     }
 
-    /// Enable unison with the given configuration.
     pub fn unison(mut self, config: UnisonConfig) -> Self {
         self.config.unison = Some(config);
         self
     }
 
-    /// Set the voice stealing strategy.
     pub fn voice_stealing(mut self, strategy: AllocationStrategy) -> Self {
         self.config.allocation_strategy = strategy;
         self
     }
 
-    /// Set the tuning system.
     pub fn tuning(mut self, tuning: Tuning) -> Self {
         self.config.tuning = tuning;
         self
     }
 
-    /// Enable modulation matrix with the given configuration.
-    pub fn modulation(mut self, config: ModulationMatrixConfig) -> Self {
-        self.config.modulation = Some(config);
+    pub fn pitch_bend_range(mut self, semitones: f32) -> Self {
+        self.config.pitch_bend_range = semitones;
         self
     }
 
-    /// Build the synthesizer.
+    /// Set mod wheel (CC1) to filter cutoff modulation depth.
+    ///
+    /// At depth 1.0, mod wheel fully up doubles the filter cutoff.
+    /// Default: 0.0 (disabled).
+    pub fn mod_wheel_to_filter(mut self, depth: f32) -> Self {
+        self.config.filter_mod.mod_wheel_depth = depth.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Set velocity to filter cutoff modulation depth.
+    ///
+    /// At depth 1.0, velocity 0 halves cutoff, velocity 127 uses full cutoff.
+    /// Default: 0.0 (disabled).
+    pub fn velocity_to_filter(mut self, depth: f32) -> Self {
+        self.config.filter_mod.velocity_depth = depth.clamp(0.0, 1.0);
+        self
+    }
+
+    /// Set LFO modulation of filter cutoff.
+    ///
+    /// - `rate`: LFO frequency in Hz (e.g., 2.0 for 2Hz wobble)
+    /// - `depth`: Modulation depth 0.0-1.0 (at 1.0, LFO sweeps cutoff ±50%)
+    ///
+    /// Default: disabled (rate=0, depth=0).
+    pub fn lfo_to_filter(mut self, rate: f32, depth: f32) -> Self {
+        self.config.filter_mod.lfo_rate = rate.max(0.0);
+        self.config.filter_mod.lfo_depth = depth.clamp(0.0, 1.0);
+        self
+    }
+
     #[cfg(feature = "midi")]
     pub fn build(self) -> crate::Result<PolySynth> {
         PolySynth::from_config(self.config)
     }
 
-    /// Get the current configuration (for inspection).
+    #[cfg(test)]
     pub fn config(&self) -> &SynthConfig {
         &self.config
     }

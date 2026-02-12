@@ -1,11 +1,5 @@
 //! Portamento (pitch glide) for synthesizers.
-//!
-//! Smooth pitch transitions between notes with configurable glide time,
-//! curve shape (linear/exponential/logarithmic), and legato-only mode.
-//!
-//! All methods are RT-safe.
 
-/// Portamento/glide mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PortamentoMode {
     /// Always glide between notes
@@ -17,7 +11,6 @@ pub enum PortamentoMode {
     Off,
 }
 
-/// Portamento curve shape.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PortamentoCurve {
     /// Linear interpolation
@@ -29,14 +22,11 @@ pub enum PortamentoCurve {
     Logarithmic,
 }
 
-/// Configuration for portamento.
 #[derive(Debug, Clone)]
 pub struct PortamentoConfig {
-    /// Glide mode
     pub mode: PortamentoMode,
-    /// Curve shape
     pub curve: PortamentoCurve,
-    /// Glide time in seconds
+    /// In seconds
     pub time: f32,
     /// If true, glide time is constant regardless of interval.
     /// If false, larger intervals take proportionally longer.
@@ -54,29 +44,20 @@ impl Default for PortamentoConfig {
     }
 }
 
-/// Per-voice portamento state.
-///
-/// Handles smooth pitch glide between notes.
-/// All methods are RT-safe.
 #[derive(Debug, Clone)]
 pub struct Portamento {
     config: PortamentoConfig,
-    /// Starting frequency in Hz
     start_freq: f32,
-    /// Target frequency in Hz
     target_freq: f32,
-    /// Current frequency in Hz
     current_freq: f32,
-    /// Progress (0.0 to 1.0)
+    /// 0.0 to 1.0
     progress: f32,
-    /// Glide rate per sample
+    /// Per sample
     rate: f32,
-    /// Sample rate
     sample_rate: f32,
 }
 
 impl Portamento {
-    /// Create a new portamento processor.
     pub fn new(config: PortamentoConfig, sample_rate: f32) -> Self {
         Self {
             config,
@@ -89,11 +70,6 @@ impl Portamento {
         }
     }
 
-    /// Set the target frequency.
-    ///
-    /// # Arguments
-    /// * `freq` - Target frequency in Hz
-    /// * `is_legato` - True if this is a legato transition (overlapping notes)
     pub fn set_target(&mut self, freq: f32, is_legato: bool) {
         let should_glide = match self.config.mode {
             PortamentoMode::Off => false,
@@ -102,11 +78,9 @@ impl Portamento {
         };
 
         if should_glide && self.config.time > 0.0 {
-            // Start glide from current position
             self.start_freq = self.current_freq;
             self.target_freq = freq;
 
-            // Calculate glide time
             let glide_time = if self.config.constant_time {
                 self.config.time
             } else {
@@ -115,7 +89,6 @@ impl Portamento {
                 self.config.time * (interval / 1.0).max(0.1) // At least 10% of base time
             };
 
-            // Calculate rate
             let glide_samples = glide_time * self.sample_rate;
             self.rate = if glide_samples > 0.0 {
                 1.0 / glide_samples
@@ -124,7 +97,6 @@ impl Portamento {
             };
             self.progress = 0.0;
         } else {
-            // No glide: jump immediately
             self.start_freq = freq;
             self.target_freq = freq;
             self.current_freq = freq;
@@ -132,9 +104,6 @@ impl Portamento {
         }
     }
 
-    /// Process one sample and return current frequency.
-    ///
-    /// RT-safe.
     #[inline]
     pub fn tick(&mut self) -> f32 {
         if self.progress >= 1.0 {
@@ -144,7 +113,6 @@ impl Portamento {
         self.progress += self.rate;
         self.progress = self.progress.min(1.0);
 
-        // Apply curve shape
         let t = match self.config.curve {
             PortamentoCurve::Linear => self.progress,
             PortamentoCurve::Exponential => self.progress * self.progress,
@@ -159,31 +127,16 @@ impl Portamento {
         self.current_freq
     }
 
-    /// Get current frequency without advancing.
     #[inline]
     pub fn current(&self) -> f32 {
         self.current_freq
     }
 
-    /// Get target frequency.
     #[inline]
-    pub fn target(&self) -> f32 {
-        self.target_freq
+    pub fn is_gliding(&self) -> bool {
+        self.progress < 1.0
     }
 
-    /// Check if glide is complete.
-    #[inline]
-    pub fn is_complete(&self) -> bool {
-        self.progress >= 1.0
-    }
-
-    /// Get glide progress (0.0 to 1.0).
-    #[inline]
-    pub fn progress(&self) -> f32 {
-        self.progress
-    }
-
-    /// Reset to a specific frequency (no glide).
     pub fn reset(&mut self, freq: f32) {
         self.start_freq = freq;
         self.target_freq = freq;
@@ -191,29 +144,8 @@ impl Portamento {
         self.progress = 1.0;
     }
 
-    /// Update configuration.
-    pub fn set_config(&mut self, config: PortamentoConfig) {
-        self.config = config;
-    }
-
-    /// Get current configuration.
-    pub fn config(&self) -> &PortamentoConfig {
-        &self.config
-    }
-
-    /// Set sample rate.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
         self.sample_rate = sample_rate;
-    }
-
-    /// Set glide time.
-    pub fn set_time(&mut self, time: f32) {
-        self.config.time = time;
-    }
-
-    /// Set glide mode.
-    pub fn set_mode(&mut self, mode: PortamentoMode) {
-        self.config.mode = mode;
     }
 }
 
@@ -231,7 +163,7 @@ mod tests {
 
         porta.set_target(880.0, false);
         assert!((porta.tick() - 880.0).abs() < 0.01);
-        assert!(porta.is_complete());
+        assert!(!porta.is_gliding());
     }
 
     #[test]
@@ -250,8 +182,8 @@ mod tests {
         let first = porta.tick();
         assert!(first < 500.0);
 
-        // Run until complete
-        while !porta.is_complete() {
+        // Run until glide finishes
+        while porta.is_gliding() {
             porta.tick();
         }
 
@@ -272,12 +204,12 @@ mod tests {
 
         // Non-legato should not glide
         porta.set_target(880.0, false);
-        assert!(porta.is_complete());
+        assert!(!porta.is_gliding());
         assert!((porta.current() - 880.0).abs() < 0.01);
 
         // Legato should glide
         porta.set_target(440.0, true);
-        assert!(!porta.is_complete());
+        assert!(porta.is_gliding());
     }
 
     #[test]
@@ -299,7 +231,7 @@ mod tests {
             porta.set_target(880.0, false);
 
             // Run to completion
-            while !porta.is_complete() {
+            while porta.is_gliding() {
                 porta.tick();
             }
 

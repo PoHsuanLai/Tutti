@@ -1,21 +1,15 @@
-//! Unison engine for synthesizers.
-//!
-//! Provides voice detuning and stereo spread for thicker "super saw" sounds.
-//! Pre-computes all voice parameters for RT-safe per-sample lookup.
+//! Unison engine: voice detuning and stereo spread.
 
-/// Maximum unison voices supported.
-pub const MAX_UNISON_VOICES: usize = 16;
+const MAX_UNISON_VOICES: usize = 16;
 
-/// Unison configuration.
 #[derive(Debug, Clone)]
 pub struct UnisonConfig {
-    /// Number of unison voices (1-16)
+    /// 1-16
     pub voice_count: u8,
-    /// Detune spread in cents (total spread, not per-voice)
+    /// Total spread in cents (not per-voice)
     pub detune_cents: f32,
-    /// Stereo spread (0.0 = mono, 1.0 = full stereo)
+    /// 0.0 = mono, 1.0 = full stereo
     pub stereo_spread: f32,
-    /// Randomize phase on note-on
     pub phase_randomize: bool,
 }
 
@@ -30,88 +24,27 @@ impl Default for UnisonConfig {
     }
 }
 
-impl UnisonConfig {
-    /// Create a new unison configuration builder.
-    pub fn builder() -> UnisonConfigBuilder {
-        UnisonConfigBuilder::default()
-    }
-}
-
-/// Builder for [`UnisonConfig`].
-#[derive(Debug, Clone, Default)]
-pub struct UnisonConfigBuilder {
-    voice_count: Option<u8>,
-    detune_cents: Option<f32>,
-    stereo_spread: Option<f32>,
-    phase_randomize: Option<bool>,
-}
-
-impl UnisonConfigBuilder {
-    /// Set the number of unison voices (1-16).
-    pub fn voices(mut self, count: u8) -> Self {
-        self.voice_count = Some(count.clamp(1, MAX_UNISON_VOICES as u8));
-        self
-    }
-
-    /// Set the detune spread in cents.
-    pub fn detune(mut self, cents: f32) -> Self {
-        self.detune_cents = Some(cents.max(0.0));
-        self
-    }
-
-    /// Set the stereo spread (0.0 = mono, 1.0 = full stereo).
-    pub fn spread(mut self, spread: f32) -> Self {
-        self.stereo_spread = Some(spread.clamp(0.0, 1.0));
-        self
-    }
-
-    /// Enable phase randomization on note-on.
-    pub fn randomize_phase(mut self) -> Self {
-        self.phase_randomize = Some(true);
-        self
-    }
-
-    /// Build the unison configuration.
-    pub fn build(self) -> UnisonConfig {
-        UnisonConfig {
-            voice_count: self.voice_count.unwrap_or(1),
-            detune_cents: self.detune_cents.unwrap_or(0.0),
-            stereo_spread: self.stereo_spread.unwrap_or(0.0),
-            phase_randomize: self.phase_randomize.unwrap_or(false),
-        }
-    }
-}
-
-/// Pre-computed parameters for a single unison voice.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnisonVoiceParams {
-    /// Frequency multiplier (1.0 = center pitch)
+    /// 1.0 = center pitch
     pub freq_ratio: f32,
-    /// Pan position (-1.0 = left, 1.0 = right)
+    /// -1.0 = left, 1.0 = right
     pub pan: f32,
-    /// Phase offset (0.0 to 1.0)
+    /// 0.0 to 1.0
     pub phase_offset: f32,
-    /// Amplitude (equal-power scaled)
     pub amplitude: f32,
 }
 
-/// Unison engine for detuned voice stacking.
-///
-/// Pre-computes frequency ratios, pan positions, and amplitudes
-/// for efficient RT-safe per-sample use.
 #[cfg(any(feature = "midi", test))]
 #[derive(Debug, Clone)]
 pub struct UnisonEngine {
     config: UnisonConfig,
-    /// Pre-computed voice parameters
     voices: [UnisonVoiceParams; MAX_UNISON_VOICES],
-    /// Simple RNG state for phase randomization
     rng_state: u32,
 }
 
 #[cfg(any(feature = "midi", test))]
 impl UnisonEngine {
-    /// Create a new unison engine.
     pub fn new(config: UnisonConfig) -> Self {
         let mut engine = Self {
             config,
@@ -122,16 +55,10 @@ impl UnisonEngine {
         engine
     }
 
-    /// Recompute all voice parameters based on current config.
-    ///
-    /// Call this when config changes.
     pub fn recompute_params(&mut self) {
         let count = (self.config.voice_count as usize).clamp(1, MAX_UNISON_VOICES);
 
-        // Equal-power amplitude scaling
         let amplitude = 1.0 / (count as f32).sqrt();
-
-        // Detune spread in semitones
         let detune_semitones = self.config.detune_cents / 100.0;
 
         for i in 0..count {
@@ -152,16 +79,12 @@ impl UnisonEngine {
             };
         }
 
-        // Clear unused voices
         for i in count..MAX_UNISON_VOICES {
             self.voices[i] = UnisonVoiceParams::default();
         }
     }
 
-    /// Randomize phase offsets for all voices.
-    ///
-    /// Call on note-on for natural detuned sound.
-    /// Uses simple xorshift for RT-safety (no allocations).
+    /// Uses xorshift RNG (no allocations).
     pub fn randomize_phases(&mut self) {
         if !self.config.phase_randomize {
             return;
@@ -170,66 +93,53 @@ impl UnisonEngine {
         let count = (self.config.voice_count as usize).clamp(1, MAX_UNISON_VOICES);
 
         for i in 0..count {
-            // Simple xorshift32 RNG
             self.rng_state ^= self.rng_state << 13;
             self.rng_state ^= self.rng_state >> 17;
             self.rng_state ^= self.rng_state << 5;
 
-            // Convert to 0.0-1.0 range
             self.voices[i].phase_offset = (self.rng_state as f32) / (u32::MAX as f32);
         }
     }
 
-    /// Get the number of active unison voices.
     #[inline]
     pub fn voice_count(&self) -> usize {
         (self.config.voice_count as usize).clamp(1, MAX_UNISON_VOICES)
     }
 
-    /// Get parameters for a specific voice.
-    ///
-    /// RT-safe: just an array lookup.
     #[inline]
     pub fn voice_params(&self, index: usize) -> &UnisonVoiceParams {
         &self.voices[index.min(MAX_UNISON_VOICES - 1)]
     }
 
-    /// Get all voice parameters as a slice.
     #[inline]
     pub fn all_params(&self) -> &[UnisonVoiceParams] {
         &self.voices[..self.voice_count()]
     }
 
-    /// Update configuration and recompute parameters.
     pub fn set_config(&mut self, config: UnisonConfig) {
         self.config = config;
         self.recompute_params();
     }
 
-    /// Get current configuration.
     pub fn config(&self) -> &UnisonConfig {
         &self.config
     }
 
-    /// Set voice count.
     pub fn set_voice_count(&mut self, count: u8) {
         self.config.voice_count = count.clamp(1, MAX_UNISON_VOICES as u8);
         self.recompute_params();
     }
 
-    /// Set detune amount in cents.
     pub fn set_detune(&mut self, cents: f32) {
         self.config.detune_cents = cents.max(0.0);
         self.recompute_params();
     }
 
-    /// Set stereo spread.
     pub fn set_stereo_spread(&mut self, spread: f32) {
         self.config.stereo_spread = spread.clamp(0.0, 1.0);
         self.recompute_params();
     }
 
-    /// Seed the RNG for reproducible phase randomization.
     pub fn seed_rng(&mut self, seed: u32) {
         self.rng_state = if seed == 0 { 1 } else { seed };
     }

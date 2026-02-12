@@ -1,4 +1,4 @@
-//! SoundFont file management and loading
+//! SoundFont file management with lock-free caching.
 
 use crate::error::{Error, Result};
 use core::sync::atomic::{AtomicUsize, Ordering};
@@ -9,18 +9,15 @@ use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use tutti_core::Arc;
 
-/// Handle to a loaded SoundFont
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SoundFontHandle(usize);
 
 impl SoundFontHandle {
-    /// Get the internal ID (for debugging/logging only)
     pub fn id(&self) -> usize {
         self.0
     }
 }
 
-/// SoundFont file manager with lock-free caching.
 pub struct SoundFontSystem {
     sample_rate: u32,
     soundfonts: DashMap<usize, Arc<SoundFont>>,
@@ -29,7 +26,6 @@ pub struct SoundFontSystem {
 }
 
 impl SoundFontSystem {
-    /// Create a new SoundFont manager
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
@@ -39,7 +35,7 @@ impl SoundFontSystem {
         }
     }
 
-    /// Load a SoundFont from file or return existing handle.
+    /// Returns existing handle if already loaded.
     pub fn load(&self, path: impl AsRef<Path>) -> Result<SoundFontHandle> {
         let path = path.as_ref().to_path_buf();
 
@@ -47,7 +43,6 @@ impl SoundFontSystem {
             return Ok(*handle);
         }
 
-        // Load the SoundFont file (I/O happens outside lock)
         let file = File::open(&path)?;
 
         let mut reader = BufReader::new(file);
@@ -59,7 +54,6 @@ impl SoundFontSystem {
             ))
         })?);
 
-        // Allocate handle and store (atomic operations)
         let handle_id = self.next_handle.fetch_add(1, Ordering::Relaxed);
         let handle = SoundFontHandle(handle_id);
 
@@ -69,34 +63,28 @@ impl SoundFontSystem {
         Ok(handle)
     }
 
-    /// Get a SoundFont by handle
     pub fn get(&self, handle: &SoundFontHandle) -> Option<Arc<SoundFont>> {
         self.soundfonts
             .get(&handle.0)
             .map(|entry| entry.value().clone())
     }
 
-    /// Get the sample rate
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
 
-    /// Create default synthesizer settings
     pub fn default_settings(&self) -> SynthesizerSettings {
         SynthesizerSettings::new(self.sample_rate as i32)
     }
 
-    /// Get the number of loaded SoundFonts
     pub fn len(&self) -> usize {
         self.soundfonts.len()
     }
 
-    /// Check if no SoundFonts are loaded
     pub fn is_empty(&self) -> bool {
         self.soundfonts.is_empty()
     }
 
-    /// Get a list of all loaded SoundFont handles
     pub fn handles(&self) -> Vec<SoundFontHandle> {
         self.soundfonts
             .iter()
