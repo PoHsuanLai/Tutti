@@ -24,7 +24,6 @@ pub struct PortInfo {
     pub active: Arc<AtomicBool>,
 }
 
-/// Multi-port MIDI manager with lock-free arc-swap pattern for RT-safe updates.
 pub struct MidiPortManager {
     input_ports: Arc<ArcSwap<Vec<Arc<AsyncMidiPort>>>>,
     output_ports: Arc<ArcSwap<Vec<Arc<AsyncMidiPort>>>>,
@@ -32,12 +31,13 @@ pub struct MidiPortManager {
     port_info: Arc<RwLock<Vec<PortInfo>>>,
     fifo_size: usize,
     event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
+    output_event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
 }
 
 // SAFETY: MidiPortManager is Sync because:
-// 1. event_buffer (UnsafeCell) is only accessed from audio callback (single-threaded)
+// 1. event_buffer / output_event_buffer (UnsafeCell) are only accessed from
+//    audio callback (single-threaded)
 // 2. All other fields (ArcSwap, RwLock, primitives) are already Sync
-// 3. We never access event_buffer from multiple threads concurrently
 unsafe impl Sync for MidiPortManager {}
 
 impl MidiPortManager {
@@ -49,6 +49,7 @@ impl MidiPortManager {
             port_info: Arc::new(RwLock::new(Vec::new())),
             fifo_size,
             event_buffer: std::cell::UnsafeCell::new(Vec::with_capacity(256)),
+            output_event_buffer: std::cell::UnsafeCell::new(Vec::with_capacity(256)),
         }
     }
 
@@ -78,7 +79,6 @@ impl MidiPortManager {
         let name = name.into();
         let port = Arc::new(AsyncMidiPort::new(&name, self.fifo_size));
 
-        // Get output producer handle before storing the port
         let output_handle = port.output_producer_handle();
 
         let current_ports = self.output_ports.load();
@@ -87,7 +87,6 @@ impl MidiPortManager {
         new_ports.push(port);
         self.output_ports.store(Arc::new(new_ports));
 
-        // Store the output handle
         let current_handles = self.output_handles.load();
         let mut new_handles = (**current_handles).clone();
         new_handles.push(output_handle);
@@ -106,9 +105,12 @@ impl MidiPortManager {
         port_index
     }
 
-    pub fn get_port_info(&self, port_index: usize) -> Option<PortInfo> {
+    pub fn get_port_info(&self, port_type: PortType, port_index: usize) -> Option<PortInfo> {
         let port_info = self.port_info.read();
-        port_info.get(port_index).cloned()
+        port_info
+            .iter()
+            .find(|info| info.port_type == port_type && info.index == port_index)
+            .cloned()
     }
 
     pub fn list_input_ports(&self) -> Vec<PortInfo> {
@@ -129,10 +131,12 @@ impl MidiPortManager {
             .collect()
     }
 
-    pub fn set_port_active(&self, port_index: usize, active: bool) -> bool {
-        // Update both input and output ports (index is shared space in port_info)
+    pub fn set_port_active(&self, port_type: PortType, port_index: usize, active: bool) -> bool {
         let port_info = self.port_info.read();
-        if let Some(info) = port_info.get(port_index) {
+        if let Some(info) = port_info
+            .iter()
+            .find(|info| info.port_type == port_type && info.index == port_index)
+        {
             info.active.store(active, Ordering::Release);
             // Also update the port's internal active flag for RT-safe access
             match info.port_type {
@@ -155,12 +159,12 @@ impl MidiPortManager {
         }
     }
 
-    /// Check if port is active. NOT RT-safe (acquires lock).
-    /// For RT-safe access, use the port's is_active() method directly.
-    pub fn is_port_active(&self, port_index: usize) -> bool {
+    /// NOT RT-safe (acquires lock). For RT-safe access, use the port's `is_active()` directly.
+    pub fn is_port_active(&self, port_type: PortType, port_index: usize) -> bool {
         let port_info = self.port_info.read();
         port_info
-            .get(port_index)
+            .iter()
+            .find(|info| info.port_type == port_type && info.index == port_index)
             .map(|info| info.active.load(Ordering::Acquire))
             .unwrap_or(false)
     }
@@ -173,10 +177,10 @@ impl MidiPortManager {
         self.output_ports.load()
     }
 
-    /// Write an event to an output port (RT-safe: lock-free).
+    /// RT-safe (lock-free).
     ///
     /// # Safety
-    /// This method must only be called from a single thread (the audio thread).
+    /// Must only be called from a single thread (the audio thread).
     /// The underlying SPSC queue requires a single producer.
     pub fn write_output_event(&self, port_index: usize, event: MidiEvent) -> bool {
         let output_handles = self.output_handles.load();
@@ -187,54 +191,54 @@ impl MidiPortManager {
         }
     }
 
-    /// Read input from all active ports. RT-safe (lock-free).
-    pub fn cycle_start_read_all_inputs(&self, nframes: usize) -> &[(usize, MidiEvent)] {
+    /// RT-safe (lock-free, no heap allocation).
+    ///
+    /// Drains all active input port ring buffers directly into a pre-allocated
+    /// event buffer (capacity 256). No per-port Vec allocation.
+    pub fn cycle_start_read_all_inputs(&self, _nframes: usize) -> &[(usize, MidiEvent)] {
         unsafe {
             let all_events = &mut *self.event_buffer.get();
             all_events.clear();
             let input_ports = self.input_ports.load();
 
             for (port_index, port) in input_ports.iter().enumerate() {
-                // Use port's atomic is_active() for RT-safe check (no lock)
                 if !port.is_active() {
                     continue;
                 }
-                let events = port.cycle_start_read_input(nframes);
-                for event in events {
-                    all_events.push((port_index, event));
-                }
+                port.cycle_start_read_input_into(all_events, port_index);
             }
             all_events.as_slice()
         }
     }
 
-    /// Flush output from all active ports. RT-safe (lock-free).
-    pub fn cycle_end_flush_all_outputs(&self) -> Vec<(usize, Vec<MidiEvent>)> {
-        let mut all_output_events = Vec::new();
-        let output_ports = self.output_ports.load();
+    /// RT-safe (lock-free, no heap allocation).
+    ///
+    /// Returns a flat slice of (port_index, event) pairs from all active output ports.
+    /// Uses a pre-allocated internal buffer.
+    pub fn cycle_end_flush_all_outputs(&self) -> &[(usize, MidiEvent)] {
+        unsafe {
+            let all_events = &mut *self.output_event_buffer.get();
+            all_events.clear();
+            let output_ports = self.output_ports.load();
 
-        for (port_index, port) in output_ports.iter().enumerate() {
-            // Use port's atomic is_active() for RT-safe check (no lock)
-            if !port.is_active() {
-                continue;
+            for (port_index, port) in output_ports.iter().enumerate() {
+                if !port.is_active() {
+                    continue;
+                }
+                port.cycle_end_flush_output_into(all_events, port_index);
             }
-            let events = port.cycle_end_flush_output();
-            if !events.is_empty() {
-                all_output_events.push((port_index, events));
-            }
+            all_events.as_slice()
         }
-        all_output_events
     }
 
-    /// Write an event to a specific output port (RT-safe: lock-free).
+    /// RT-safe (lock-free).
     ///
     /// # Safety
-    /// This method must only be called from a single thread (the audio thread).
+    /// Must only be called from a single thread (the audio thread).
     /// The underlying SPSC queue requires a single producer.
     pub fn write_event_to_port(&self, port_index: usize, event: MidiEvent) -> bool {
         let output_ports = self.output_ports.load();
         if let Some(port) = output_ports.get(port_index) {
-            // Use port's atomic is_active() for RT-safe check (no lock)
             if !port.is_active() {
                 return false;
             }
@@ -260,7 +264,6 @@ impl MidiPortManager {
             .map(|port| port.input_producer_handle())
     }
 
-    /// Get a lock-free unified input producer handle for a port.
     #[cfg(feature = "midi2")]
     pub fn get_unified_input_producer_handle(
         &self,
@@ -272,12 +275,14 @@ impl MidiPortManager {
             .map(|port| port.unified_input_producer_handle())
     }
 
-    /// Read unified input from all active ports. RT-safe (lock-free).
+    /// RT-safe (lock-free, no heap allocation).
     #[cfg(feature = "midi2")]
     pub fn cycle_start_read_all_unified_inputs(
         &self,
         _nframes: usize,
     ) -> Vec<(usize, crate::event::UnifiedMidiEvent)> {
+        // TODO: Add pre-allocated buffer (like event_buffer) when unified MIDI
+        // is used on the RT path. Currently only used in tests.
         let mut all_events = Vec::new();
         let input_ports = self.input_ports.load();
 
@@ -285,15 +290,11 @@ impl MidiPortManager {
             if !port.is_active() {
                 continue;
             }
-            let events = port.cycle_start_read_unified_input();
-            for event in events {
-                all_events.push((port_index, event));
-            }
+            port.cycle_start_read_unified_input_into(&mut all_events, port_index);
         }
         all_events
     }
 
-    /// Push a unified MIDI event to a specific input port.
     #[cfg(feature = "midi2")]
     pub fn push_unified_event(
         &self,
@@ -318,9 +319,7 @@ impl Default for MidiPortManager {
 
 // Implement MidiInputSource trait from tutti-core for audio callback integration
 impl tutti_core::midi::MidiInputSource for MidiPortManager {
-    /// Read all pending MIDI events from hardware ports.
-    ///
-    /// This is the bridge between hardware MIDI (via midir) and the audio callback.
+    /// Bridge between hardware MIDI (via midir) and the audio callback.
     /// Called once per audio buffer to collect all events that arrived since the last call.
     fn cycle_read(&self, nframes: usize) -> &[(usize, tutti_core::midi::MidiEvent)] {
         self.cycle_start_read_all_inputs(nframes)
@@ -399,13 +398,13 @@ mod tests {
         let manager = MidiPortManager::new(256);
 
         let port_id = manager.create_input_port("Test");
-        assert!(manager.is_port_active(port_id));
+        assert!(manager.is_port_active(PortType::Input, port_id));
 
-        manager.set_port_active(port_id, false);
-        assert!(!manager.is_port_active(port_id));
+        manager.set_port_active(PortType::Input, port_id, false);
+        assert!(!manager.is_port_active(PortType::Input, port_id));
 
-        manager.set_port_active(port_id, true);
-        assert!(manager.is_port_active(port_id));
+        manager.set_port_active(PortType::Input, port_id, true);
+        assert!(manager.is_port_active(PortType::Input, port_id));
     }
 
     #[test]
@@ -437,10 +436,8 @@ mod tests {
         let output_events = manager.cycle_end_flush_all_outputs();
         assert_eq!(output_events.len(), 1);
         assert_eq!(output_events[0].0, output_id);
-        assert_eq!(output_events[0].1.len(), 1);
-        // Verify it's a note off with correct note
-        assert!(output_events[0].1[0].is_note_off());
-        assert_eq!(output_events[0].1[0].note(), Some(0x3C));
+        assert!(output_events[0].1.is_note_off());
+        assert_eq!(output_events[0].1.note(), Some(0x3C));
     }
 
     #[test]
@@ -455,7 +452,7 @@ mod tests {
         assert!(producer_handle.push(event));
 
         // Deactivate port
-        manager.set_port_active(input_id, false);
+        manager.set_port_active(PortType::Input, input_id, false);
 
         // Reading inputs should return empty (port is inactive)
         let events = manager.cycle_start_read_all_inputs(512);

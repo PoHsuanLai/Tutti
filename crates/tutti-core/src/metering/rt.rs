@@ -4,11 +4,7 @@ use super::MeteringManager;
 use crate::compat::Vec;
 use core::time::Duration;
 
-/// Real-time metering context passed to the audio callback.
-///
-/// Holds pre-allocated buffers to avoid allocations in the RT path.
-/// Buffers are pre-allocated with capacity for MAX_FRAMES to ensure
-/// resize() within capacity doesn't allocate.
+/// Pre-allocated buffers for RT-safe metering (deinterleave scratch space).
 pub struct MeteringContext {
     left_buf: Vec<f32>,
     right_buf: Vec<f32>,
@@ -18,9 +14,6 @@ pub struct MeteringContext {
 const MAX_FRAMES: usize = 8192;
 
 impl MeteringContext {
-    /// Create a new metering context with pre-allocated buffers.
-    ///
-    /// RT-safe: Buffers are pre-allocated to avoid allocation in audio callback.
     pub fn new() -> Self {
         Self {
             left_buf: Vec::with_capacity(MAX_FRAMES),
@@ -28,13 +21,11 @@ impl MeteringContext {
         }
     }
 
-    /// Ensure buffers are large enough for the given frame count.
-    ///
-    /// RT-safe: resize within pre-allocated capacity doesn't allocate.
+    /// Clamped to MAX_FRAMES so resize stays within pre-allocated capacity.
     #[inline]
     fn ensure_capacity(&mut self, frames: usize) {
+        let frames = frames.min(MAX_FRAMES);
         if self.left_buf.len() < frames {
-            // RT-safe: resize within capacity is just length adjustment + fill
             self.left_buf.resize(frames, 0.0);
             self.right_buf.resize(frames, 0.0);
         }
@@ -59,14 +50,8 @@ impl Default for MeteringContext {
 impl MeteringManager {
     /// Update all enabled meters from the audio output buffer.
     ///
-    /// Call this from the audio callback after DSP processing.
-    /// The `elapsed` duration is used for CPU metering.
-    ///
-    /// # Arguments
-    /// * `output` - Interleaved stereo f32 samples
-    /// * `frames` - Number of stereo frames
-    /// * `elapsed` - Time spent processing this buffer (for CPU metering)
-    /// * `ctx` - Pre-allocated buffers for RT-safe operation
+    /// Called from audio callback after DSP processing.
+    /// `output` is interleaved stereo f32, `frames` is the number of stereo frames.
     #[inline]
     pub fn update_rt(
         &self,
@@ -75,6 +60,11 @@ impl MeteringManager {
         elapsed: Duration,
         ctx: &mut MeteringContext,
     ) {
+        debug_assert!(
+            frames <= MAX_FRAMES,
+            "Audio buffer frames ({frames}) exceeds MAX_FRAMES ({MAX_FRAMES})"
+        );
+
         self.update_cpu(frames, elapsed);
         self.update_amplitude(output, frames);
 
@@ -93,7 +83,6 @@ impl MeteringManager {
         self.push_analysis_tap(output, frames);
     }
 
-    /// Update amplitude metering (peak and RMS).
     #[inline]
     fn update_amplitude(&self, output: &[f32], frames: usize) {
         if !self.amp_enabled() {
@@ -120,13 +109,12 @@ impl MeteringManager {
         self.amplitude_atomic().set(peak_l, peak_r, rms_l, rms_r);
     }
 
-    /// Update stereo correlation metering.
     #[inline]
     fn update_stereo(&self, left: &[f32], right: &[f32]) {
         self.stereo_atomic().update_from_buffers(left, right);
     }
 
-    /// Update LUFS loudness metering (non-blocking).
+    /// Non-blocking: skips update if LUFS lock is contended.
     #[inline]
     fn update_lufs(&self, left: &[f32], right: &[f32]) {
         if let Some(mut ebur128) = self.ebur128().try_lock() {
@@ -134,7 +122,6 @@ impl MeteringManager {
         }
     }
 
-    /// Update CPU metering.
     #[inline]
     fn update_cpu(&self, frames: usize, elapsed: Duration) {
         self.cpu().record(frames, elapsed);

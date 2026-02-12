@@ -33,14 +33,11 @@ unsafe impl Send for InputProducerHandle {}
 unsafe impl Sync for InputProducerHandle {}
 
 impl InputProducerHandle {
-    /// Push a MIDI event to the input buffer (lock-free).
-    ///
     /// # Safety
     /// Must only be called from a single thread (the midir callback thread).
     #[inline]
     pub fn push(&self, event: MidiEvent) -> bool {
         // SAFETY: We have exclusive access as the single producer (SPSC invariant).
-        // The midir callback is the only caller of this method.
         let prod = unsafe { &mut *self.producer };
         prod.try_push(event).is_ok()
     }
@@ -68,8 +65,6 @@ unsafe impl Sync for UnifiedInputProducerHandle {}
 
 #[cfg(feature = "midi2")]
 impl UnifiedInputProducerHandle {
-    /// Push a unified MIDI event to the input buffer (lock-free).
-    ///
     /// # Safety
     /// Must only be called from a single thread (SPSC invariant).
     #[inline]
@@ -104,16 +99,12 @@ unsafe impl Send for OutputProducerHandle {}
 unsafe impl Sync for OutputProducerHandle {}
 
 impl OutputProducerHandle {
-    /// Push a MIDI event to the output buffer (lock-free).
-    ///
     /// # Safety
     /// Must only be called from a single thread (the audio thread).
-    /// Even though this handle can be cloned, you must ensure that only
-    /// one thread calls push() at any given time (SPSC invariant).
+    /// Even though this handle can be cloned, only one thread may call push() at a time (SPSC invariant).
     #[inline]
     pub fn push(&self, event: MidiEvent) -> bool {
         // SAFETY: We have exclusive access as the single producer (SPSC invariant).
-        // The caller guarantees single-threaded access.
         let prod = unsafe { &mut *self.producer };
         prod.try_push(event).is_ok()
     }
@@ -167,21 +158,19 @@ impl AsyncMidiPort {
         &self.name
     }
 
-    /// Check if port is active. RT-safe (lock-free atomic load).
+    /// RT-safe (lock-free atomic load).
     #[inline]
     pub fn is_active(&self) -> bool {
         self.active.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Set port active state. Can be called from any thread.
+    /// Can be called from any thread.
     #[inline]
     pub fn set_active(&self, active: bool) {
         self.active
             .store(active, std::sync::atomic::Ordering::Release);
     }
 
-    /// Get a lock-free producer handle for MIDI input.
-    ///
     /// # Safety
     /// The returned handle must only be used from a single thread (typically
     /// the midir callback thread). This is the SPSC invariant.
@@ -191,8 +180,6 @@ impl AsyncMidiPort {
         }
     }
 
-    /// Get a lock-free producer handle for unified MIDI input.
-    ///
     /// # Safety
     /// The returned handle must only be used from a single thread (SPSC invariant).
     #[cfg(feature = "midi2")]
@@ -202,8 +189,6 @@ impl AsyncMidiPort {
         }
     }
 
-    /// Get a lock-free producer handle for MIDI output.
-    ///
     /// # Safety
     /// The returned handle must only be used from a single thread (typically
     /// the audio thread). This is the SPSC invariant.
@@ -213,33 +198,40 @@ impl AsyncMidiPort {
         }
     }
 
-    pub fn cycle_start_read_input(&self, _nframes: usize) -> Vec<MidiEvent> {
-        let mut events = Vec::new();
+    /// RT-safe: drain input ring buffer directly into caller's pre-allocated buffer.
+    #[inline]
+    pub fn cycle_start_read_input_into(&self, buf: &mut Vec<(usize, MidiEvent)>, port_index: usize) {
         let consumer = unsafe { &mut *self.input_consumer.get() };
         while let Some(event) = consumer.try_pop() {
-            events.push(event);
+            buf.push((port_index, event));
         }
-        events
     }
 
-    /// Read all pending unified MIDI events from the input buffer. RT-safe (lock-free).
+    /// RT-safe: drain unified input ring buffer directly into caller's pre-allocated buffer.
+    #[inline]
     #[cfg(feature = "midi2")]
-    pub fn cycle_start_read_unified_input(&self) -> Vec<crate::event::UnifiedMidiEvent> {
-        let mut events = Vec::new();
+    pub fn cycle_start_read_unified_input_into(
+        &self,
+        buf: &mut Vec<(usize, crate::event::UnifiedMidiEvent)>,
+        port_index: usize,
+    ) {
         let consumer = unsafe { &mut *self.unified_input_consumer.get() };
         while let Some(event) = consumer.try_pop() {
-            events.push(event);
+            buf.push((port_index, event));
         }
-        events
     }
 
-    pub fn cycle_end_flush_output(&self) -> Vec<MidiEvent> {
-        let mut events = Vec::new();
+    /// RT-safe: drain output ring buffer directly into caller's pre-allocated buffer.
+    #[inline]
+    pub fn cycle_end_flush_output_into(
+        &self,
+        buf: &mut Vec<(usize, MidiEvent)>,
+        port_index: usize,
+    ) {
         let consumer = unsafe { &mut *self.output_consumer.get() };
         while let Some(event) = consumer.try_pop() {
-            events.push(event);
+            buf.push((port_index, event));
         }
-        events
     }
 }
 
@@ -265,10 +257,18 @@ impl std::fmt::Debug for AsyncMidiPort {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_create_port() {
-        let port = AsyncMidiPort::new("TestPort", 256);
-        assert_eq!(port.name(), "TestPort");
+    /// Test helper: drain input into a fresh Vec.
+    fn read_input(port: &AsyncMidiPort) -> Vec<MidiEvent> {
+        let mut buf = Vec::new();
+        port.cycle_start_read_input_into(&mut buf, 0);
+        buf.into_iter().map(|(_, e)| e).collect()
+    }
+
+    /// Test helper: drain output into a fresh Vec.
+    fn flush_output(port: &AsyncMidiPort) -> Vec<MidiEvent> {
+        let mut buf = Vec::new();
+        port.cycle_end_flush_output_into(&mut buf, 0);
+        buf.into_iter().map(|(_, e)| e).collect()
     }
 
     #[test]
@@ -276,12 +276,10 @@ mod tests {
         let port = AsyncMidiPort::new("Input", 256);
         let producer_handle = port.input_producer_handle();
 
-        // Simulate midir callback writing an event
-        let event = MidiEvent::note_on(0, 0, 0x3C, 0x7F); // Note On, channel 0, note 60, velocity 127
+        let event = MidiEvent::note_on(0, 0, 0x3C, 0x7F);
         assert!(producer_handle.push(event));
 
-        // Simulate audio thread reading events
-        let events = port.cycle_start_read_input(512);
+        let events = read_input(&port);
         assert_eq!(events.len(), 1);
         assert!(events[0].is_note_on());
         assert_eq!(events[0].note(), Some(0x3C));
@@ -293,12 +291,10 @@ mod tests {
         let port = AsyncMidiPort::new("Output", 256);
         let output_handle = port.output_producer_handle();
 
-        // Audio thread writes an event
-        let event = MidiEvent::note_off(10, 0, 0x3C, 0); // Note Off at frame 10, channel 0, note 60
+        let event = MidiEvent::note_off(10, 0, 0x3C, 0);
         assert!(output_handle.push(event));
 
-        // Flush output (audio thread sends to hardware)
-        let events = port.cycle_end_flush_output();
+        let events = flush_output(&port);
         assert_eq!(events.len(), 1);
         assert!(events[0].is_note_off());
         assert_eq!(events[0].note(), Some(0x3C));
@@ -306,17 +302,54 @@ mod tests {
 
     #[test]
     fn test_fifo_full() {
-        let port = AsyncMidiPort::new("Full", 4); // Small FIFO
+        let port = AsyncMidiPort::new("Full", 4);
         let output_handle = port.output_producer_handle();
 
-        // Fill the output FIFO
         for i in 0..4 {
             let event = MidiEvent::note_on(i, 0, 0x3C, 0x7F);
             assert!(output_handle.push(event), "Failed to write event {}", i);
         }
 
-        // Next write should fail (FIFO full)
         let event = MidiEvent::note_on(5, 0, 0x3C, 0x7F);
         assert!(!output_handle.push(event), "FIFO should be full");
+    }
+
+    #[test]
+    fn test_active_flag_toggle() {
+        let port = AsyncMidiPort::new("ActiveTest", 256);
+        assert!(port.is_active());
+
+        port.set_active(false);
+        assert!(!port.is_active());
+
+        port.set_active(true);
+        assert!(port.is_active());
+    }
+
+    #[test]
+    fn test_input_output_isolation() {
+        let port = AsyncMidiPort::new("Isolation", 256);
+        let input_handle = port.input_producer_handle();
+        let output_handle = port.output_producer_handle();
+
+        // Push to input only
+        let event = MidiEvent::note_on(0, 0, 60, 100);
+        input_handle.push(event);
+
+        // Output should be empty
+        assert!(flush_output(&port).is_empty(), "Output should not receive input events");
+
+        // Input should have the event
+        assert_eq!(read_input(&port).len(), 1);
+
+        // Push to output only
+        let event = MidiEvent::note_off(0, 0, 60, 0);
+        output_handle.push(event);
+
+        // Input should be empty
+        assert!(read_input(&port).is_empty(), "Input should not receive output events");
+
+        // Output should have the event
+        assert_eq!(flush_output(&port).len(), 1);
     }
 }
