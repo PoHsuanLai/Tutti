@@ -14,7 +14,6 @@ use tutti::prelude::*;
 
 fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(48000.0)
         .build()
         .expect("Failed to create test engine")
 }
@@ -62,7 +61,7 @@ fn test_sine_wave_frequency() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0)).to_master();
+        net.add(sine_hz::<f64>(440.0)).master();
     });
 
     let (left, _right, sample_rate) = engine
@@ -89,7 +88,7 @@ fn test_sine_wave_amplitude() {
 
     // Sine at half amplitude
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left, _right, _sr) = engine
@@ -123,7 +122,7 @@ fn test_stereo_output() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left, right, _sr) = engine
@@ -190,7 +189,7 @@ fn test_zero_node_silence() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(zero()).to_master();
+        net.add(zero()).master();
     });
 
     let (left, _right, _sr) = engine
@@ -216,7 +215,7 @@ fn test_signal_mixing() {
     // Single sine at 0.3 amplitude
     let engine1 = test_engine();
     engine1.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     let (single, _, _) = engine1
@@ -232,7 +231,7 @@ fn test_signal_mixing() {
     engine2.graph(|net| {
         // Mix two oscillators at the DSP level
         let mixed = (sine_hz::<f64>(440.0) * 0.3) + (sine_hz::<f64>(880.0) * 0.3);
-        net.add(mixed).to_master();
+        net.add(mixed).master();
     });
 
     let (mixed, _, _) = engine2
@@ -257,7 +256,7 @@ fn test_signal_mixing() {
 fn test_amplitude_scaling() {
     let engine1 = test_engine();
     engine1.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 1.0).to_master();
+        net.add(sine_hz::<f64>(440.0) * 1.0).master();
     });
 
     let (full, _, _) = engine1
@@ -270,7 +269,7 @@ fn test_amplitude_scaling() {
 
     let engine2 = test_engine();
     engine2.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (half, _, _) = engine2
@@ -300,7 +299,7 @@ fn test_lowpass_filter() {
     // High frequency source (4000 Hz)
     let engine1 = test_engine();
     engine1.graph(|net| {
-        net.add(sine_hz::<f64>(4000.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(4000.0) * 0.5).master();
     });
 
     let (unfiltered, _, _) = engine1
@@ -315,7 +314,7 @@ fn test_lowpass_filter() {
     let engine2 = test_engine();
     engine2.graph(|net| {
         net.add(sine_hz::<f64>(4000.0) * 0.5 >> lowpole_hz(500.0))
-            .to_master();
+            .master();
     });
 
     let (filtered, _, _) = engine2
@@ -347,7 +346,7 @@ fn test_dsp_chain() {
     // Oscillator -> filter -> output
     engine.graph(|net| {
         let chain = sine_hz::<f64>(440.0) >> lowpole_hz(2000.0) * 0.5;
-        net.add(chain).to_master();
+        net.add(chain).master();
     });
 
     let (left, _, _) = engine
@@ -372,7 +371,7 @@ fn test_shared_parameter() {
     let amp_clone = amp.clone();
 
     engine.graph(|net| {
-        net.add(var(&amp_clone) * sine_hz::<f64>(440.0)).to_master();
+        net.add(var(&amp_clone) * sine_hz::<f64>(440.0)).master();
     });
 
     // Render with amplitude = 0
@@ -415,7 +414,7 @@ fn test_render_duration() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0)).to_master();
+        net.add(sine_hz::<f64>(440.0)).master();
     });
 
     let duration = 0.5; // 0.5 seconds
@@ -447,7 +446,7 @@ fn test_waveform_characteristics() {
     // Sine wave - smooth, low harmonic content
     let engine_sine = test_engine();
     engine_sine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
     let (sine_out, _, _) = engine_sine.export().duration_seconds(0.1).render().unwrap();
     let sine_rms = rms(&sine_out);
@@ -456,7 +455,7 @@ fn test_waveform_characteristics() {
     // Square wave - more harmonic content, higher RMS for same peak
     let engine_square = test_engine();
     engine_square.graph(|net| {
-        net.add(square_hz(440.0) * 0.5).to_master();
+        net.add(square_hz(440.0) * 0.5).master();
     });
     let (square_out, _, _) = engine_square
         .export()
@@ -494,7 +493,7 @@ fn test_saw_wave() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(saw_hz(440.0) * 0.5).to_master();
+        net.add(saw_hz(440.0) * 0.5).master();
     });
 
     let (left, _, _) = engine
@@ -513,7 +512,7 @@ fn test_noise() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(white() * 0.3).to_master();
+        net.add(white() * 0.3).master();
     });
 
     let (left, _, _) = engine
@@ -544,7 +543,7 @@ fn test_parallel_paths_summing() {
     // Single signal
     let engine_single = test_engine();
     engine_single.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     let (single, _, _) = engine_single
@@ -560,7 +559,7 @@ fn test_parallel_paths_summing() {
     engine_summed.graph(|net| {
         // Two different frequencies mixed together
         let mixed = (sine_hz::<f64>(440.0) * 0.3) + (sine_hz::<f64>(880.0) * 0.3);
-        net.add(mixed).to_master();
+        net.add(mixed).master();
     });
 
     let (summed, _, _) = engine_summed
@@ -589,7 +588,7 @@ fn test_signal_chain_order() {
     engine1.graph(|net| {
         // 4kHz sine -> lowpass 500Hz -> * 2.0
         let chain = sine_hz::<f64>(4000.0) >> lowpole_hz(500.0) * 2.0;
-        net.add(chain).to_master();
+        net.add(chain).master();
     });
 
     let (filter_first, _, _) = engine1
@@ -605,7 +604,7 @@ fn test_signal_chain_order() {
     engine2.graph(|net| {
         // 4kHz sine * 2.0 -> lowpass 500Hz (filter after amplification)
         let chain = sine_hz::<f64>(4000.0) * 2.0 >> lowpole_hz(500.0);
-        net.add(chain).to_master();
+        net.add(chain).master();
     });
 
     let (amp_first, _, _) = engine2

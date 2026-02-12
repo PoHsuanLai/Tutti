@@ -31,7 +31,7 @@ fn test_sine_vs_programmatic_reference() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0)).to_master();
+        net.add(sine_hz::<f64>(440.0)).master();
     });
 
     let (left, _right, sr) = engine
@@ -68,7 +68,7 @@ fn test_scaled_sine_vs_reference() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(1000.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(1000.0) * 0.5).master();
     });
 
     let (left, _right, sr) = engine
@@ -100,7 +100,7 @@ fn test_scaled_sine_vs_reference() {
 fn test_render_determinism() {
     let engine1 = test_engine();
     engine1.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left1, right1, _) = engine1
@@ -111,7 +111,7 @@ fn test_render_determinism() {
 
     let engine2 = test_engine();
     engine2.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left2, right2, _) = engine2
@@ -161,7 +161,7 @@ fn test_filter_chain_regression() {
     engine.graph(|net| {
         // Deterministic DSP chain
         let chain = sine_hz::<f64>(440.0) >> lowpole_hz(1000.0) >> highpole_hz(100.0) * 0.5;
-        net.add(chain).to_master();
+        net.add(chain).master();
     });
 
     let (left, right, _sr) = engine
@@ -210,7 +210,7 @@ fn generate_reference_files() {
     {
         let engine = test_engine();
         engine.graph(|net| {
-            net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+            net.add(sine_hz::<f64>(440.0) * 0.5).master();
         });
 
         let (left, right, sr) = engine
@@ -229,7 +229,7 @@ fn generate_reference_files() {
         let engine = test_engine();
         engine.graph(|net| {
             let chain = sine_hz::<f64>(440.0) >> lowpole_hz(1000.0) >> highpole_hz(100.0) * 0.5;
-            net.add(chain).to_master();
+            net.add(chain).master();
         });
 
         let (left, right, sr) = engine
@@ -256,7 +256,7 @@ fn test_mono_to_stereo() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left, right, _sr) = engine
@@ -277,7 +277,7 @@ fn test_stereo_difference() {
     engine.graph(|net| {
         // Different frequencies for L and R
         let stereo = sine_hz::<f64>(440.0) | sine_hz::<f64>(880.0);
-        net.add(stereo * 0.5).to_master();
+        net.add(stereo * 0.5).master();
     });
 
     let (left, right, _sr) = engine
@@ -390,7 +390,7 @@ fn test_engine_render_wav_file_round_trip() {
     // Render from engine
     let engine = test_engine();
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (original_left, original_right, sr) = engine
@@ -450,7 +450,7 @@ fn test_full_engine_round_trip() {
     // Step 1: Render original audio from engine
     let engine1 = test_engine();
     engine1.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (original_left, original_right, sr) = engine1
@@ -470,7 +470,6 @@ fn test_full_engine_round_trip() {
 
     // Step 3: Load WAV into a new engine and render
     let engine2 = TuttiEngine::builder()
-        .sample_rate(sr)
         .build()
         .expect("Failed to build engine2");
 
@@ -481,7 +480,7 @@ fn test_full_engine_round_trip() {
         .expect("Failed to load WAV into engine");
 
     engine2.graph(|net| {
-        net.add(sampler).to_master();
+        net.add(sampler).master();
     });
 
     let (loaded_left, loaded_right, loaded_sr): (Vec<f32>, Vec<f32>, f64) = engine2

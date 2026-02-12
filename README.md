@@ -89,13 +89,9 @@ Each subsystem is an independent crate. TuttiEngine provides fluent handles to c
 ```rust
 use tutti::prelude::*;
 
-// Create tokio runtime for plugin loading (optional)
-let runtime = tokio::runtime::Runtime::new()?;
-
 // Build engine - subsystems enabled via Cargo features
 let engine = TuttiEngine::builder()
     .sample_rate(44100.0)
-    .plugin_runtime(runtime.handle().clone())  // Optional: for plugin loading
     .build()?;
 
 // Load nodes once (explicit format methods = compile-time type safety)

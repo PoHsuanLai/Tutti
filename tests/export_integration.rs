@@ -14,7 +14,6 @@ use tutti::prelude::*;
 
 fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(48000.0)
         .build()
         .expect("Failed to create test engine")
 }
@@ -41,7 +40,7 @@ fn test_export_builder() {
 
     // Add a simple signal
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     // Create export builder (doesn't render yet)
@@ -55,7 +54,7 @@ fn test_export_duration_seconds() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let builder = engine.export().duration_seconds(1.0);
@@ -71,7 +70,7 @@ fn test_export_duration_beats() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     // 4 beats at 120 BPM = 2 seconds
@@ -88,7 +87,7 @@ fn test_export_to_wav() {
     let output_path = dir.join("test_output.wav");
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     // Export 0.5 seconds to WAV
@@ -146,9 +145,9 @@ fn test_export_complex_graph() {
 
     engine.graph(|net| {
         // Multiple sources mixed
-        net.add(sine_hz::<f64>(220.0) * 0.2).to_master();
-        net.add(sine_hz::<f64>(440.0) * 0.15).to_master();
-        net.add(sine_hz::<f64>(880.0) * 0.1).to_master();
+        net.add(sine_hz::<f64>(220.0) * 0.2).master();
+        net.add(sine_hz::<f64>(440.0) * 0.15).master();
+        net.add(sine_hz::<f64>(880.0) * 0.1).master();
     });
 
     let result = engine
@@ -171,7 +170,7 @@ fn test_export_render() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     // Render to buffer
@@ -202,7 +201,7 @@ fn test_export_sequential() {
     let dir = setup_temp_dir("sequential");
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     // Export multiple files
@@ -225,7 +224,7 @@ fn test_export_during_playback() {
     let output_path = dir.join("test_during_play.wav");
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     // Start playback
@@ -253,7 +252,7 @@ fn test_export_format() {
     let output_path = dir.join("test_format.wav");
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     let result = engine
@@ -279,7 +278,7 @@ fn test_export_latency_compensation() {
     let output_path = dir.join("test_latency.wav");
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     let result = engine
@@ -305,7 +304,7 @@ fn test_export_to_flac() {
     let output_path = dir.join("test_output.flac");
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     let result = engine
@@ -337,7 +336,7 @@ fn test_export_with_normalization() {
 
     engine.graph(|net| {
         // Quiet signal that should be normalized up
-        net.add(sine_hz::<f64>(440.0) * 0.1).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.1).master();
     });
 
     let result = engine
@@ -366,7 +365,7 @@ fn test_export_bit_depth() {
     let output_path = dir.join("test_16bit.wav");
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     let result = engine

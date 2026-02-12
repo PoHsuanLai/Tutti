@@ -15,7 +15,7 @@ fn main() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     engine.transport().play();
@@ -30,22 +30,22 @@ fn main() -> tutti::Result<()> {
 
         match input.trim() {
             "1" => engine.graph(|net| {
-                net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+                net.add(sine_hz::<f64>(440.0) * 0.5).master();
             }),
             "2" => engine.graph(|net| {
-                net.add(saw_hz(220.0) * 0.3).to_master();
+                net.add(saw_hz(220.0) * 0.3).master();
             }),
             "3" => engine.graph(|net| {
-                net.add(square_hz(330.0) * 0.3).to_master();
+                net.add(square_hz(330.0) * 0.3).master();
             }),
             "4" => engine.graph(|net| {
-                net.add(pink::<f64>() * 0.2).to_master();
+                net.add(pink::<f64>() * 0.2).master();
             }),
             "5" => engine.graph(|net| {
                 let c = sine_hz::<f64>(261.63) * 0.2;
                 let e = sine_hz::<f64>(329.63) * 0.2;
                 let g = sine_hz::<f64>(392.00) * 0.2;
-                net.add(c + e + g).to_master();
+                net.add(c + e + g).master();
             }),
             "q" => break,
             _ => println!("?"),

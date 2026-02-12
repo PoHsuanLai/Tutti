@@ -20,8 +20,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  1. Train model (PyTorch)");
     println!("  2. Export: torch.onnx.export(model, input, \"model.onnx\")");
     println!("  3. Convert: burn-import onnx model.onnx --out-type burn model.mpk");
-    println!("  4. Load: engine.load_synth_mpk(\"synth\", \"model.mpk\")?;");
-    println!("  5. Use: let synth = engine.create(\"synth\", &params!{{}})?;");
+    println!("  4. Load: let (synth, _id) = engine.neural_synth(\"model.mpk\").build()?;");
+    println!("  5. Use: engine.graph(|net| net.add_boxed(synth).master());");
 
     Ok(())
 }

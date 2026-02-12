@@ -19,7 +19,6 @@ use tutti::prelude::*;
 
 fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(48000.0)
         .build()
         .expect("Failed to create test engine")
 }
@@ -55,7 +54,7 @@ fn test_midi_note_frequency() {
     let engine = test_engine();
 
     let synth = engine.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     // Send note BEFORE export (don't call transport.play() - it would consume events)
     engine.note_on(synth_id, Note::A4, 100);
@@ -87,7 +86,7 @@ fn test_midi_octave_relationship() {
     // C4 = 261.63 Hz
     let engine_c4 = test_engine();
     let synth_c4 = engine_c4.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_c4.graph(|net| net.add(synth_c4).to_master());
+    let synth_id = engine_c4.graph(|net| net.add(synth_c4).master());
 
     engine_c4.note_on(synth_id, Note::C4, 100);
 
@@ -104,7 +103,7 @@ fn test_midi_octave_relationship() {
     // C5 = 523.25 Hz (should be 2x C4)
     let engine_c5 = test_engine();
     let synth_c5 = engine_c5.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_c5.graph(|net| net.add(synth_c5).to_master());
+    let synth_id = engine_c5.graph(|net| net.add(synth_c5).master());
 
     engine_c5.note_on(synth_id, Note::C5, 100);
 
@@ -138,7 +137,7 @@ fn test_midi_velocity_amplitude() {
     // Low velocity (40)
     let engine_low = test_engine();
     let synth_low = engine_low.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_low.graph(|net| net.add(synth_low).to_master());
+    let synth_id = engine_low.graph(|net| net.add(synth_low).master());
 
     engine_low.note_on(synth_id, Note::C4, 40); // Low velocity
 
@@ -155,7 +154,7 @@ fn test_midi_velocity_amplitude() {
     // High velocity (127)
     let engine_high = test_engine();
     let synth_high = engine_high.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_high.graph(|net| net.add(synth_high).to_master());
+    let synth_id = engine_high.graph(|net| net.add(synth_high).master());
 
     engine_high.note_on(synth_id, Note::C4, 127); // Max velocity
 
@@ -189,7 +188,7 @@ fn test_midi_chord_amplitude() {
     // Single note
     let engine_single = test_engine();
     let synth_single = engine_single.synth().sine().poly(4).build().unwrap();
-    let synth_id = engine_single.graph(|net| net.add(synth_single).to_master());
+    let synth_id = engine_single.graph(|net| net.add(synth_single).master());
 
     engine_single.note_on(synth_id, Note::C4, 100);
 
@@ -206,7 +205,7 @@ fn test_midi_chord_amplitude() {
     // C major chord (C4, E4, G4)
     let engine_chord = test_engine();
     let synth_chord = engine_chord.synth().sine().poly(4).build().unwrap();
-    let synth_id = engine_chord.graph(|net| net.add(synth_chord).to_master());
+    let synth_id = engine_chord.graph(|net| net.add(synth_chord).master());
 
     engine_chord.note_on(synth_id, Note::C4, 100);
     engine_chord.note_on(synth_id, Note::E4, 100);

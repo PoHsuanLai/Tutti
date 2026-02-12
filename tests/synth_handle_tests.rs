@@ -16,7 +16,6 @@ use tutti::prelude::*;
 
 fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(48000.0)
         .build()
         .expect("Failed to create test engine")
 }
@@ -55,7 +54,7 @@ fn zero_crossings(samples: &[f32]) -> usize {
 fn test_triangle_oscillator() {
     let engine = test_engine();
     let synth = engine.synth().triangle().poly(1).build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -80,7 +79,7 @@ fn test_triangle_oscillator() {
 fn test_noise_oscillator() {
     let engine = test_engine();
     let synth = engine.synth().noise().poly(1).build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -118,7 +117,7 @@ fn test_oscillator_crest_factors() {
     // Sine wave
     let engine_sine = test_engine();
     let synth = engine_sine.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_sine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine_sine.graph(|net| net.add(synth).master());
     engine_sine.note_on(synth_id, Note::A4, 100);
 
     let (sine_out, _, _) = engine_sine
@@ -134,7 +133,7 @@ fn test_oscillator_crest_factors() {
     // Square wave (0.5 pulse width = standard square)
     let engine_square = test_engine();
     let synth = engine_square.synth().square(0.5).poly(1).build().unwrap();
-    let synth_id = engine_square.graph(|net| net.add(synth).to_master());
+    let synth_id = engine_square.graph(|net| net.add(synth).master());
     engine_square.note_on(synth_id, Note::A4, 100);
 
     let (square_out, _, _) = engine_square
@@ -166,7 +165,7 @@ fn test_oscillator_crest_factors() {
 fn test_mono_mode() {
     let engine = test_engine();
     let synth = engine.synth().saw().mono().build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     // Play two notes - mono should only produce one voice
     engine.note_on(synth_id, Note::C4, 100);
@@ -186,7 +185,7 @@ fn test_mono_mode() {
     // Compare with poly mode playing same notes
     let engine_poly = test_engine();
     let synth = engine_poly.synth().saw().poly(4).build().unwrap();
-    let synth_id = engine_poly.graph(|net| net.add(synth).to_master());
+    let synth_id = engine_poly.graph(|net| net.add(synth).master());
 
     engine_poly.note_on(synth_id, Note::C4, 100);
     engine_poly.note_on(synth_id, Note::E4, 100);
@@ -220,7 +219,7 @@ fn test_mono_mode() {
 fn test_legato_mode() {
     let engine = test_engine();
     let synth = engine.synth().saw().legato().build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -256,7 +255,7 @@ fn test_filter_moog() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -296,7 +295,7 @@ fn test_filter_lowpass() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -321,7 +320,7 @@ fn test_filter_highpass() {
     // Low note without filter
     let engine_no_filter = test_engine();
     let synth = engine_no_filter.synth().sine().no_filter().poly(1).build().unwrap();
-    let synth_id = engine_no_filter.graph(|net| net.add(synth).to_master());
+    let synth_id = engine_no_filter.graph(|net| net.add(synth).master());
 
     engine_no_filter.note_on(synth_id, Note::A2, 100); // ~110 Hz
 
@@ -342,7 +341,7 @@ fn test_filter_highpass() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine_filtered.graph(|net| net.add(synth).to_master());
+    let synth_id = engine_filtered.graph(|net| net.add(synth).master());
 
     engine_filtered.note_on(synth_id, Note::A2, 100);
 
@@ -384,7 +383,7 @@ fn test_filter_bandpass() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -418,7 +417,7 @@ fn test_adsr_envelope() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -458,7 +457,7 @@ fn test_envelope_organ() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -502,7 +501,7 @@ fn test_envelope_pluck() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -540,7 +539,7 @@ fn test_envelope_pad() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -584,7 +583,7 @@ fn test_full_synth_chain() {
         .poly(4)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     // Play a chord
     engine.note_on(synth_id, Note::C4, 100);
@@ -629,7 +628,7 @@ fn test_unison_thicker_sound() {
     // Without unison
     let engine_no_unison = test_engine();
     let synth = engine_no_unison.synth().saw().poly(1).build().unwrap();
-    let synth_id = engine_no_unison.graph(|net| net.add(synth).to_master());
+    let synth_id = engine_no_unison.graph(|net| net.add(synth).master());
 
     engine_no_unison.note_on(synth_id, Note::A4, 100);
 
@@ -652,7 +651,7 @@ fn test_unison_thicker_sound() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine_unison.graph(|net| net.add(synth).to_master());
+    let synth_id = engine_unison.graph(|net| net.add(synth).master());
 
     engine_unison.note_on(synth_id, Note::A4, 100);
 
@@ -682,7 +681,7 @@ fn test_unison_stereo_spread() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -729,7 +728,7 @@ fn test_portamento_produces_audio() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -759,7 +758,7 @@ fn test_portamento_legato() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -788,7 +787,7 @@ fn test_portamento_exponential() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -824,7 +823,7 @@ fn test_combined_unison_portamento_filter() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A3, 100);
 

@@ -166,7 +166,7 @@ impl ClickNode {
         if accent_every == 0 {
             return false;
         }
-        (beat as u32) % accent_every == 0
+        (beat as u32).is_multiple_of(accent_every)
     }
 }
 

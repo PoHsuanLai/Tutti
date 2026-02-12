@@ -28,7 +28,7 @@ fn main() -> tutti::Result<()> {
 
     // New fluent API: engine.sf2(path).preset(n).build() returns SoundFontUnit
     let piano = engine.sf2(&soundfont_path).preset(0).build()?;
-    let synth = engine.graph(|net| net.add(piano).to_master());
+    let synth = engine.graph(|net| net.add(piano).master());
 
     engine.transport().play();
     println!("Playing melody...");

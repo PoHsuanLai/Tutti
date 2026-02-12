@@ -26,18 +26,10 @@ pub const TEST_BUFFER_SIZE: usize = 512;
 /// Avoids hardware audio I/O for CI environments.
 pub fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(TEST_SAMPLE_RATE)
         .build()
         .expect("Failed to create test engine")
 }
 
-/// Create a test engine with specific sample rate.
-pub fn test_engine_with_sr(sample_rate: f64) -> TuttiEngine {
-    TuttiEngine::builder()
-        .sample_rate(sample_rate)
-        .build()
-        .expect("Failed to create test engine")
-}
 
 /// Generate a test signal: sine wave at given frequency for specified samples.
 pub fn generate_sine(frequency: f64, sample_rate: f64, num_samples: usize) -> Vec<f32> {

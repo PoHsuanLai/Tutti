@@ -29,7 +29,7 @@ fn main() -> tutti::Result<()> {
 
     // Add to graph
     engine.graph(|net| {
-        net.add(sampler).to_master();
+        net.add(sampler).master();
     });
 
     engine.transport().play();
@@ -44,7 +44,7 @@ fn run_tone_demo() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
     engine.graph(|net| {
-        net.add(sine_hz::<f32>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f32>(440.0) * 0.3).master();
     });
 
     engine.transport().play();

@@ -22,7 +22,7 @@ fn main() -> tutti::Result<()> {
 
     // Sine wave with variable frequency
     engine.graph(|net| {
-        net.add(var(&freq_var) >> sine::<f32>() * 0.15).to_master();
+        net.add(var(&freq_var) >> sine::<f32>() * 0.15).master();
     });
 
     // Configure transport - 4 beat loop

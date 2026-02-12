@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let osc1 = sine_hz::<f64>(261.63) * 0.3;
         let osc2 = sine_hz::<f64>(329.63) * 0.2;
         let osc3 = sine_hz::<f64>(392.00) * 0.2;
-        net.add((osc1 + osc2 + osc3) >> split::<U2>()).to_master();
+        net.add((osc1 + osc2 + osc3) >> split::<U2>()).master();
     });
 
     engine.transport().tempo(120.0);

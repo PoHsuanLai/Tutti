@@ -55,7 +55,7 @@ fn test_zero_node_is_silent() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(zero()).to_master();
+        net.add(zero()).master();
     });
 
     let (left, _right, _sr) = engine
@@ -73,7 +73,7 @@ fn test_zero_gain_is_silent() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(white() * 0.0).to_master();
+        net.add(white() * 0.0).master();
     });
 
     let (left, _right, _sr) = engine
@@ -109,7 +109,7 @@ fn test_sine_is_not_silent() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left, _right, _sr) = engine
@@ -135,7 +135,7 @@ fn test_noise_is_not_silent() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(white() * 0.3).to_master();
+        net.add(white() * 0.3).master();
     });
 
     let (left, _right, _sr) = engine
@@ -153,7 +153,7 @@ fn test_saw_is_not_silent() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(saw_hz(440.0) * 0.5).to_master();
+        net.add(saw_hz(440.0) * 0.5).master();
     });
 
     let (left, _right, _sr) = engine
@@ -234,7 +234,7 @@ fn test_assert_not_silent_valid() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left, _right, _sr) = engine

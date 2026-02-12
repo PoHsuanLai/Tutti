@@ -46,7 +46,7 @@ fn run_synth_demo() -> Result<(), Box<dyn std::error::Error>> {
 
     engine.graph(|net| {
         let pad = sine_hz::<f64>(220.0) * 0.2 + sine_hz::<f64>(330.0) * 0.15;
-        net.add(pad >> split::<U2>()).to_master();
+        net.add(pad >> split::<U2>()).master();
     });
 
     engine.transport().play();

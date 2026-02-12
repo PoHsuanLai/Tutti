@@ -47,7 +47,7 @@ fn test_render_sample_count() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0)).to_master();
+        net.add(sine_hz::<f64>(440.0)).master();
     });
 
     // 0.1 seconds at 48kHz = 4800 samples
@@ -179,7 +179,7 @@ fn test_unity_gain_amplitude() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 1.0).to_master();
+        net.add(sine_hz::<f64>(440.0) * 1.0).master();
     });
 
     let (left, _right, _sr) = engine
@@ -202,7 +202,7 @@ fn test_half_gain_amplitude() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     let (left, _right, _sr) = engine
@@ -225,7 +225,7 @@ fn test_zero_gain_silence() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.0).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.0).master();
     });
 
     let (left, _right, _sr) = engine
@@ -243,7 +243,7 @@ fn test_double_gain() {
     let engine = test_engine();
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 2.0).to_master();
+        net.add(sine_hz::<f64>(440.0) * 2.0).master();
     });
 
     let (left, _right, _sr) = engine

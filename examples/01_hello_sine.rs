@@ -15,7 +15,7 @@ fn main() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     engine.transport().play();

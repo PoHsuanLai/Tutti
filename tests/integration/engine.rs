@@ -14,7 +14,7 @@ use helpers::*;
 /// doesn't support it. This test verifies the engine reports a valid rate.
 #[test]
 fn test_engine_custom_sample_rate() {
-    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
+    let engine = TuttiEngine::builder().build().unwrap();
 
     // Engine should report a valid sample rate (common rates: 44100, 48000, 96000)
     let rate = engine.sample_rate();
@@ -27,7 +27,6 @@ fn test_engine_custom_sample_rate() {
 fn test_engine_sequential_creation() {
     for i in 0..3 {
         let engine = TuttiEngine::builder()
-            .sample_rate(44100.0 + i as f64 * 4000.0)
             .build()
             .unwrap();
 

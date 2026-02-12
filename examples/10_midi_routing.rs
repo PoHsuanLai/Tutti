@@ -23,7 +23,7 @@ fn main() -> tutti::Result<()> {
         .adsr(0.01, 0.1, 0.7, 0.3)
         .build()?;
 
-    let synth_id = engine.graph(|net| net.add(synth).to_master());
+    let synth_id = engine.graph(|net| net.add(synth).master());
 
     engine.transport().play();
     println!("Playing arpeggio...");

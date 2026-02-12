@@ -34,7 +34,6 @@ mod lane;
 
 pub use lane::{AutomationLane, LiveAutomationLane};
 
-// Re-export audio-automation types
 pub use audio_automation::{
     AutomationClip, AutomationEnvelope, AutomationPoint, AutomationState, CurveType,
 };

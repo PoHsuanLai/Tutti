@@ -8,7 +8,7 @@ use tutti::prelude::*;
 
 #[test]
 fn test_dsp_lfo_creation() {
-    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
+    let engine = TuttiEngine::builder().build().unwrap();
 
     // Create LFO nodes directly
     let lfo1 = LfoNode::new(LfoShape::Sine, 2.0);
@@ -27,7 +27,7 @@ fn test_dsp_lfo_creation() {
 #[test]
 #[cfg(feature = "dsp-dynamics")]
 fn test_dsp_sidechain_dynamics_creation() {
-    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
+    let engine = TuttiEngine::builder().build().unwrap();
 
     use tutti::dsp_nodes::{SidechainCompressor, SidechainGate};
     use tutti::dsp_nodes::{StereoSidechainCompressor, StereoSidechainGate};
@@ -65,7 +65,7 @@ fn test_dsp_sidechain_dynamics_creation() {
 #[test]
 #[cfg(feature = "dsp-spatial")]
 fn test_dsp_spatial_panners_creation() {
-    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
+    let engine = TuttiEngine::builder().build().unwrap();
 
     use tutti::dsp_nodes::{BinauralPannerNode, SpatialPannerNode};
 
@@ -85,7 +85,7 @@ fn test_dsp_spatial_panners_creation() {
 #[test]
 #[cfg(feature = "dsp-dynamics")]
 fn test_dsp_nodes_in_graph() {
-    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
+    let engine = TuttiEngine::builder().build().unwrap();
 
     use tutti::dsp_nodes::SidechainCompressor;
 
@@ -112,7 +112,7 @@ fn test_dsp_nodes_in_graph() {
 
 #[test]
 fn test_multiple_lfo_instances() {
-    let engine = TuttiEngine::builder().sample_rate(48000.0).build().unwrap();
+    let engine = TuttiEngine::builder().build().unwrap();
 
     // Create multiple LFO instances with different parameters
     let lfo1 = LfoNode::new(LfoShape::Sine, 2.0);

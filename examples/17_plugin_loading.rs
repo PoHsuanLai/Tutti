@@ -2,7 +2,7 @@
 //!
 //! Load and use VST3/CLAP plugins in the audio graph.
 //!
-//! **Concepts:** `vst3()`, plugin hosting, tokio runtime
+//! **Concepts:** `vst3()`, in-process plugin hosting
 //!
 //! ```bash
 //! cargo run --example 17_plugin_loading --features plugin
@@ -16,14 +16,10 @@
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
-    let runtime = tokio::runtime::Runtime::new()?;
-
-    let engine = TuttiEngine::builder()
-        .sample_rate(44100.0)
-        .plugin_runtime(runtime.handle().clone())
-        .build()?;
+    let engine = TuttiEngine::builder().build()?;
 
     let plugin_paths = [
         "/Library/Audio/Plug-Ins/VST3/DragonflyRoomReverb.vst3",
@@ -31,11 +27,11 @@ fn main() -> tutti::Result<()> {
         "assets/plugins/DragonflyRoomReverb.vst3",
     ];
 
-    // New fluent API: engine.vst3(path).build() returns AudioUnit
+    // Fluent API: engine.vst3(path).build() returns (Box<dyn AudioUnit>, PluginHandle)
     let mut reverb_unit = None;
     for path in &plugin_paths {
         if std::path::Path::new(path).exists() {
-            if let Ok(unit) = engine.vst3(path).build() {
+            if let Ok((unit, _handle)) = engine.vst3(path).build() {
                 println!("Loaded: {}", path);
                 reverb_unit = Some(unit);
                 break;
@@ -51,16 +47,16 @@ fn main() -> tutti::Result<()> {
         }
     };
 
-    let sine_id = engine.graph(|net| net.add(sine_hz::<f32>(440.0) * 0.3).id());
-    let reverb = engine.graph(|net| net.add_boxed(reverb_unit).id());
+    let sine_id = engine.graph(|net: &mut TuttiNet| net.add(sine_hz::<f32>(440.0) * 0.3).id());
+    let reverb = engine.graph(|net: &mut TuttiNet| net.add_boxed(reverb_unit).id());
 
-    engine.graph(|net| {
+    engine.graph(|net: &mut TuttiNet| {
         net.pipe(sine_id, reverb);
         net.pipe_output(reverb);
     });
 
     engine.transport().play();
-    println!("Playing sine → reverb...");
+    println!("Playing sine -> reverb...");
     std::thread::sleep(Duration::from_secs(5));
 
     Ok(())

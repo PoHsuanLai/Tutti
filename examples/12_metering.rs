@@ -21,7 +21,7 @@ fn main() -> tutti::Result<()> {
     engine.graph(|net| {
         let left = sine_hz::<f64>(440.0) * 0.5;
         let right = sine_hz::<f64>(442.0) * 0.5; // Slight detune
-        net.add(left | right).to_master();
+        net.add(left | right).master();
     });
 
     engine.transport().play();

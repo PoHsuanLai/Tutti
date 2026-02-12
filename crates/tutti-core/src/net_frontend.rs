@@ -40,7 +40,7 @@ pub struct NodeInfo {
 /// net.add(saw_hz(110.0))
 ///    .connect(lowpass_hz(800.0))
 ///    .connect(reverb_stereo(10.0, 2.0, 0.5))
-///    .to_master();
+///    .master();
 /// ```
 pub struct NodeHandle<'a> {
     net: &'a mut TuttiNet,
@@ -63,7 +63,7 @@ impl<'a> NodeHandle<'a> {
     /// Connect this node to the graph output.
     ///
     /// Returns the final node's ID.
-    pub fn to_master(self) -> NodeId {
+    pub fn master(self) -> NodeId {
         self.net.net.pipe_output(self.id);
         self.id
     }
@@ -132,13 +132,13 @@ impl TuttiNet {
     ///
     /// ```ignore
     /// // Simple: direct to output
-    /// net.add(sine_hz(440.0) * 0.5).to_master();
+    /// net.add(sine_hz(440.0) * 0.5).master();
     ///
     /// // Chain: connect multiple effects
     /// net.add(saw_hz(110.0))
     ///    .connect(lowpass_hz(800.0))
     ///    .connect(reverb_stereo(10.0, 2.0, 0.5))
-    ///    .to_master();
+    ///    .master();
     ///
     /// // Get ID for manual wiring
     /// let osc = net.add(sine_hz(440.0)).id();
@@ -167,7 +167,7 @@ impl TuttiNet {
     /// ```ignore
     /// system.graph(|net| {
     ///     let voice = builder.build_voice().unwrap();
-    ///     net.add_neural(voice, builder.model_id()).to_master();
+    ///     net.add_neural(voice, builder.model_id()).master();
     /// });
     /// ```
     #[cfg(feature = "neural")]
@@ -632,7 +632,7 @@ mod tests {
         // Test fluent chaining API
         net.add(sine_hz::<f32>(440.0))
             .connect(lowpass_hz::<f32>(1000.0, 1.0))
-            .to_master();
+            .master();
 
         assert_eq!(net.size(), 2);
         assert!(net.error().is_none());
@@ -654,7 +654,7 @@ mod tests {
     fn test_replace_node() {
         let (mut net, _backend) = create_net();
 
-        let synth = net.add(sine_hz::<f32>(440.0)).to_master();
+        let synth = net.add(sine_hz::<f32>(440.0)).master();
 
         // Replace with a different frequency
         let _old = net.replace(synth, sine_hz::<f32>(880.0));
@@ -668,7 +668,7 @@ mod tests {
         let (mut net, mut backend) = create_net();
 
         // Add a constant generator using fluent API
-        net.add(dc((0.5f32, 0.5f32))).to_master();
+        net.add(dc((0.5f32, 0.5f32))).master();
         net.commit();
 
         // Process some samples through the backend
@@ -684,7 +684,7 @@ mod tests {
         let (mut net, _backend) = create_net();
 
         // Add a sine wave generator using fluent API
-        net.add(sine_hz::<f32>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f32>(440.0) * 0.5).master();
 
         // Render 0.1 seconds of audio
         let wave = net.render_offline(44100.0, 0.1);
@@ -715,7 +715,7 @@ mod tests {
         // Add a stereo generator with a limiter (which has latency)
         // Using fluent API
         net.add((sine_hz::<f32>(440.0) * 0.8) >> pan(0.0) >> limiter_stereo(0.5, 0.5))
-            .to_master();
+            .master();
 
         // Render with latency compensation
         let wave = net.render_offline_latency(44100.0, 0.1);

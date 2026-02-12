@@ -14,7 +14,6 @@ use tutti::prelude::*;
 
 fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(48000.0)
         .build()
         .expect("Failed to create test engine")
 }
@@ -30,7 +29,7 @@ fn test_meter_amplitude_accuracy() {
 
     // 0.5 amplitude sine wave
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     engine.transport().play();
@@ -80,7 +79,7 @@ fn test_meter_correlation_mono() {
 
     // Mono source (identical L/R)
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     engine.transport().play();
@@ -107,7 +106,7 @@ fn test_meter_silence() {
 
     // No audio source - should be silent
     engine.graph(|net| {
-        net.add(zero()).to_master();
+        net.add(zero()).master();
     });
 
     engine.transport().play();

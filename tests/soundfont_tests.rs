@@ -15,7 +15,6 @@ use tutti::prelude::*;
 
 fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(48000.0)
         .build()
         .expect("Failed to create test engine")
 }
@@ -68,7 +67,7 @@ fn test_soundfont_produces_audio() {
 
     // New API: build returns AudioUnit, user adds to graph
     let piano = engine.sf2(&sf_path).preset(0).build().expect("Failed to build piano");
-    let piano_id = engine.graph(|net| net.add(piano).to_master());
+    let piano_id = engine.graph(|net| net.add(piano).master());
 
     // Play a note
     engine.note_on(piano_id, Note::C4, 100);
@@ -107,7 +106,7 @@ fn test_soundfont_presets() {
 
     // Preset 0 = Piano (using fluent builder with preset)
     let piano = engine.sf2(&sf_path).preset(0).build().expect("Failed to build preset 0");
-    let piano_id = engine.graph(|net| net.add(piano).to_master());
+    let piano_id = engine.graph(|net| net.add(piano).master());
 
     engine.note_on(piano_id, Note::C4, 100);
 
@@ -144,7 +143,7 @@ fn test_soundfont_channels() {
 
     // Create SoundFont on channel 0
     let sf = engine.sf2(&sf_path).preset(0).channel(0).build().expect("Failed to build");
-    let sf_id = engine.graph(|net| net.add(sf).to_master());
+    let sf_id = engine.graph(|net| net.add(sf).master());
 
     engine.note_on(sf_id, Note::C4, 100);
 
@@ -180,7 +179,7 @@ fn test_soundfont_velocity() {
     }
 
     let sf = engine.sf2(&sf_path).preset(0).build().expect("Failed to build");
-    let sf_id = engine.graph(|net| net.add(sf).to_master());
+    let sf_id = engine.graph(|net| net.add(sf).master());
 
     // Soft note
     engine.note_on(sf_id, Note::C4, 30);
@@ -223,7 +222,7 @@ fn test_soundfont_polyphony() {
     }
 
     let sf = engine.sf2(&sf_path).preset(0).build().expect("Failed to build");
-    let sf_id = engine.graph(|net| net.add(sf).to_master());
+    let sf_id = engine.graph(|net| net.add(sf).master());
 
     // Single note
     engine.note_on(sf_id, Note::C4, 80);
@@ -273,8 +272,8 @@ fn test_soundfont_multiple_instances() {
     let piano = engine.sf2(&sf_path).preset(0).build().expect("Failed to build piano");
     let strings = engine.sf2(&sf_path).preset(48).build().expect("Failed to build strings");
 
-    let piano_id = engine.graph(|net| net.add(piano).to_master());
-    let strings_id = engine.graph(|net| net.add(strings).to_master());
+    let piano_id = engine.graph(|net| net.add(piano).master());
+    let strings_id = engine.graph(|net| net.add(strings).master());
 
     // Play notes on both
     engine.note_on(piano_id, Note::C4, 100);

@@ -20,7 +20,7 @@ fn main() -> tutti::Result<()> {
         let e = sine_hz::<f32>(329.63) * 0.2; // E4
         let g = sine_hz::<f32>(392.00) * 0.2; // G4
 
-        net.add(c + e + g).to_master();
+        net.add(c + e + g).master();
     });
 
     engine.transport().play();

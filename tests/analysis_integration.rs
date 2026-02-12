@@ -13,7 +13,6 @@ use tutti::prelude::*;
 
 fn test_engine() -> TuttiEngine {
     TuttiEngine::builder()
-        .sample_rate(48000.0)
         .build()
         .expect("Failed to create test engine")
 }
@@ -61,10 +60,11 @@ fn test_analysis_handle() {
 #[test]
 fn test_waveform_summary() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
     // Generate test signal
-    let samples = generate_sine(440.0, 48000.0, 0.5);
+    let samples = generate_sine(440.0, sr, 0.5);
 
     // Generate waveform summary
     let summary = analysis.waveform_summary(&samples, 256);
@@ -84,10 +84,11 @@ fn test_waveform_summary() {
 #[test]
 fn test_pitch_detection() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
-    // Generate 440Hz sine (A4)
-    let samples = generate_sine(440.0, 48000.0, 0.5);
+    // Generate 440Hz sine (A4) at the engine's actual sample rate
+    let samples = generate_sine(440.0, sr, 0.5);
 
     // Detect pitch
     let result = analysis.detect_pitch(&samples);
@@ -108,12 +109,13 @@ fn test_pitch_detection() {
 #[test]
 fn test_pitch_detection_various_frequencies() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
     let test_frequencies = [220.0, 440.0, 880.0, 1000.0];
 
     for &freq in &test_frequencies {
-        let samples = generate_sine(freq, 48000.0, 0.3);
+        let samples = generate_sine(freq, sr, 0.3);
         let result = analysis.detect_pitch(&samples);
 
         // Just verify it doesn't panic
@@ -126,11 +128,12 @@ fn test_pitch_detection_various_frequencies() {
 #[test]
 fn test_transient_detection() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
     // Generate signal with transient at 0.1 seconds
-    let click_sample = (48000.0 * 0.1) as usize;
-    let samples = generate_click(48000.0, click_sample, 0.5);
+    let click_sample = (sr * 0.1) as usize;
+    let samples = generate_click(sr, click_sample, 0.5);
 
     // Detect transients
     let transients = analysis.detect_transients(&samples);
@@ -148,16 +151,16 @@ fn test_transient_detection() {
 #[test]
 fn test_transient_detection_multiple() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
     // Generate signal with multiple transients
-    let sample_rate = 48000.0;
-    let num_samples = (sample_rate * 1.0) as usize;
+    let num_samples = (sr * 1.0) as usize;
     let mut samples = vec![0.0f32; num_samples];
 
     // Add clicks at 0.1s, 0.3s, 0.5s, 0.7s
     for click_time in [0.1, 0.3, 0.5, 0.7] {
-        let click_sample = (sample_rate * click_time) as usize;
+        let click_sample = (sr * click_time) as usize;
         if click_sample < num_samples {
             samples[click_sample] = 1.0;
             let decay_len = std::cmp::min(50, num_samples - click_sample);
@@ -181,10 +184,11 @@ fn test_transient_detection_multiple() {
 #[test]
 fn test_stereo_analysis() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
     // Generate identical L/R channels (correlation = 1.0)
-    let left = generate_sine(440.0, 48000.0, 0.25);
+    let left = generate_sine(440.0, sr, 0.25);
     let right = left.clone();
 
     let stereo = analysis.analyze_stereo(&left, &right);
@@ -201,10 +205,11 @@ fn test_stereo_analysis() {
 #[test]
 fn test_stereo_analysis_inverted() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
     // Generate inverted signals (correlation = -1.0)
-    let left = generate_sine(440.0, 48000.0, 0.25);
+    let left = generate_sine(440.0, sr, 0.25);
     let right: Vec<f32> = left.iter().map(|&s| -s).collect();
 
     let stereo = analysis.analyze_stereo(&left, &right);
@@ -221,11 +226,12 @@ fn test_stereo_analysis_inverted() {
 #[test]
 fn test_stereo_analysis_uncorrelated() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
     // Generate signals at different frequencies (low correlation)
-    let left = generate_sine(440.0, 48000.0, 0.25);
-    let right = generate_sine(550.0, 48000.0, 0.25);
+    let left = generate_sine(440.0, sr, 0.25);
+    let right = generate_sine(550.0, sr, 0.25);
 
     let stereo = analysis.analyze_stereo(&left, &right);
 
@@ -266,7 +272,7 @@ fn test_live_analysis_toggle() {
 
     // Add some audio
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.3).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     engine.transport().play();
@@ -286,9 +292,10 @@ fn test_live_analysis_toggle() {
 #[test]
 fn test_waveform_summary_bin_sizes() {
     let engine = test_engine();
+    let sr = engine.sample_rate();
     let analysis = engine.analysis();
 
-    let samples = generate_sine(440.0, 48000.0, 0.5);
+    let samples = generate_sine(440.0, sr, 0.5);
 
     // Different bin sizes should produce different summary lengths
     let summary_64 = analysis.waveform_summary(&samples, 64);

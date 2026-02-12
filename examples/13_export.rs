@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let c = sine_hz::<f64>(261.63) * 0.2;
         let e = sine_hz::<f64>(329.63) * 0.2;
         let g = sine_hz::<f64>(392.00) * 0.2;
-        net.add((c + e + g) >> split::<U2>()).to_master();
+        net.add((c + e + g) >> split::<U2>()).master();
     });
 
     // Export to WAV

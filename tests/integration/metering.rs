@@ -17,7 +17,7 @@ fn test_metering_cpu() {
 
     // Start some audio processing
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0)).to_master();
+        net.add(sine_hz::<f64>(440.0)).master();
     });
 
     engine.transport().play();
@@ -47,7 +47,7 @@ fn test_metering_lufs() {
 
     // Full-scale 1kHz sine
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(1000.0)).to_master();
+        net.add(sine_hz::<f64>(1000.0)).master();
     });
 
     engine.transport().play();
@@ -87,7 +87,7 @@ fn test_metering_correlation_api() {
 
     // Mono source going to stereo output should have high correlation
     engine.graph(|net| {
-        net.add(sine_hz::<f64>(440.0) * 0.5).to_master();
+        net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     engine.transport().play();

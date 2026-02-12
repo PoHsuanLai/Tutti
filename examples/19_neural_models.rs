@@ -35,7 +35,7 @@ fn main() -> tutti::Result<()> {
     let (synth_unit, _model_id) = engine.neural_synth(model_path).build()?;
 
     engine.graph(|net| {
-        net.add_boxed(synth_unit).to_master();
+        net.add_boxed(synth_unit).master();
     });
 
     engine.transport().play();

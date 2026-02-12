@@ -15,7 +15,7 @@ fn main() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
 
     engine.graph(|net| {
-        net.add(dc(0.0)).to_master();
+        net.add(dc(0.0)).master();
     });
 
     engine.transport().play();
@@ -37,14 +37,14 @@ fn main() -> tutti::Result<()> {
             print!("{} ", sound);
             match sound {
                 'K' => engine.graph(|net| {
-                    net.add(sine_hz::<f32>(110.0) * 0.5).to_master();
+                    net.add(sine_hz::<f32>(110.0) * 0.5).master();
                 }),
                 'S' => engine.graph(|net| {
-                    net.add(sine_hz::<f32>(200.0) * 0.4).to_master();
+                    net.add(sine_hz::<f32>(200.0) * 0.4).master();
                 }),
                 'H' => engine.graph(|net| {
                     net.add(pink::<f64>() >> (bandpass_hz::<f32>(8000.0, 100.0) * 0.2))
-                        .to_master();
+                        .master();
                 }),
                 _ => {}
             }

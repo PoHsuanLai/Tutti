@@ -6,11 +6,18 @@ members = [
     "crates/tutti-synth",
     "crates/tutti-dsp",
     "crates/tutti-plugin",
+    "crates/tutti-plugin-server",
     "crates/tutti-neural",
+    "crates/tutti-burn",
     "crates/tutti-analysis",
     "crates/tutti-export",
+    "crates/tutti-automation",
+    "crates/audio-automation",
     "crates/fundsp-tutti",
     "crates/rustysynth-tutti/rustysynth",
+    "crates/tutti-midi",
+    "crates/vst3-host",
+    "crates/clap-host",
 ]
 resolver = "2"
 
@@ -41,45 +48,78 @@ default = ["full", "std"]
 # Enable std on tutti-core (needed for CPAL audio I/O and neural processing)
 std = ["tutti-core/std"]
 
-# Full feature set (everything enabled)
+# === Audio Format Features ===
+# Each format only pulls in its specific codec
+wav = ["tutti-core/wav"]      # WAV/PCM - the standard
+flac = ["tutti-core/flac"]    # FLAC - lossless
+mp3 = ["tutti-core/mp3"]      # MP3 - legacy compatibility
+ogg = ["tutti-core/ogg"]      # OGG/Vorbis - open compressed
+
+# All audio formats (convenience)
+files = ["wav", "flac", "mp3", "ogg"]
+
+# Full feature set (everything except plugin formats — those are opt-in via clap/vst3/vst2)
+# Plugin hosting requires explicit format selection: --features clap, --features vst3, etc.
 full = [
+    "files",
     "midi", "midi-io", "mpe", "midi2",
     "synth", "soundfont",
-    "plugin",
-    "neural",
-    "sampler", "sampler-butler", "sampler-recording", "sampler-audio-input",
-    "export", "analysis"
+    "neural", "burn",
+    "sampler",
+    "export", "analysis",
+    "automation",
+    "dsp-full"
 ]
 
+# All plugin formats (convenience)
+all-plugins = ["clap", "vst3", "vst2"]
+
+# === DSP Features ===
+dsp-dynamics = ["tutti-dsp/dynamics"]  # Compressors, gates
+dsp-spatial = ["tutti-dsp/spatial"]    # VBAP, binaural (adds vbap crate)
+dsp-full = ["dsp-dynamics", "dsp-spatial"]
+
 # === MIDI Features ===
-midi = ["dep:tutti-midi-io", "tutti-core/midi"]
+# Note: When neural is also enabled, tutti-neural/midi is activated automatically
+midi = ["dep:tutti-midi-io", "tutti-core/midi", "tutti-neural?/midi"]
 midi-io = ["midi", "tutti-midi-io/midi-io"]  # Hardware MIDI I/O
 mpe = ["midi", "tutti-midi-io/mpe"]          # MPE support
 midi2 = ["midi", "tutti-midi-io/midi2"]      # MIDI 2.0
 
 # === Synth Features ===
 synth = ["dep:tutti-synth"]
+# Note: soundfont enables tutti-synth/midi via soundfont feature (which depends on midi)
 soundfont = ["synth", "tutti-synth/soundfont"]
 
 # === Plugin Hosting ===
-plugin = ["dep:tutti-plugin", "dep:tokio"]
-vst2 = ["plugin", "tutti-plugin/vst2"]    # VST2 support (requires VST SDK)
-vst3 = ["plugin", "tutti-plugin/vst3"]    # VST3 support
-clap = ["plugin", "tutti-plugin/clap"]    # CLAP support
+# plugin enables the plugin infrastructure; pick at least one format (clap, vst3, vst2)
+plugin = ["dep:tutti-plugin", "dep:tutti-plugin-server"]
+clap = ["plugin", "tutti-plugin-server/clap"]     # CLAP support
+vst3 = ["plugin", "tutti-plugin-server/vst3"]     # VST3 support
+vst2 = ["plugin", "tutti-plugin-server/vst2"]     # VST2 support (requires VST SDK)
 
 # === Neural Audio ===
-# Neural requires std for GPU (wgpu) and model loading (filesystem)
+# Neural orchestration (no ML framework — BYO backend via InferenceBackend trait)
+# When both neural and midi are enabled, tutti-neural gets midi support for synths
 neural = ["std", "dep:tutti-neural", "tutti-core/neural"]
+# Burn ML backend (adds burn + wgpu; implies neural)
+burn = ["neural", "dep:tutti-burn"]
 
 # === Sampler Features ===
+# Note: sampler enables wav by default via tutti-sampler
 sampler = ["dep:tutti-sampler"]
-sampler-butler = ["sampler", "tutti-sampler/butler"]           # Disk streaming
-sampler-recording = ["sampler", "tutti-sampler/recording"]     # Recording to disk
-sampler-audio-input = ["sampler", "tutti-sampler/audio-input"] # Hardware audio input
+sampler-wav = ["sampler", "tutti-sampler/wav"]
+sampler-flac = ["sampler", "tutti-sampler/flac"]
+sampler-mp3 = ["sampler", "tutti-sampler/mp3"]
+sampler-ogg = ["sampler", "tutti-sampler/ogg"]
+sampler-files = ["sampler", "tutti-sampler/files"]
 
 # === Export & Analysis ===
 export = ["dep:tutti-export"]
-analysis = ["dep:tutti-analysis", "tutti-analysis/live"]
+analysis = ["dep:tutti-analysis"]
+
+# === Automation ===
+automation = ["dep:tutti-automation"]
 
 [dependencies]
 # Core (always included - minimal DSP)
@@ -94,32 +134,62 @@ tutti-export = { version = "0.0.1", path = "crates/tutti-export", optional = tru
 tutti-midi-io = { version = "0.0.1", path = "crates/tutti-midi-io", optional = true, default-features = false }
 tutti-synth = { version = "0.0.1", path = "crates/tutti-synth", optional = true, default-features = false }
 tutti-plugin = { version = "0.0.1", path = "crates/tutti-plugin", optional = true }
+tutti-plugin-server = { version = "0.0.1", path = "crates/tutti-plugin-server", optional = true, default-features = false }
 tutti-neural = { version = "0.0.1", path = "crates/tutti-neural", optional = true }
+tutti-burn = { version = "0.0.1", path = "crates/tutti-burn", optional = true }
+tutti-automation = { version = "0.0.1", path = "crates/tutti-automation", optional = true }
 
-# Tokio runtime for plugin loading
-tokio = { version = "1", features = ["rt"], optional = true }
 
 [dev-dependencies]
 approx = "0.5"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+hound = "3.5"  # WAV file I/O for test reference files
+winit = "0.30"
+raw-window-handle = "0.6"
+clap-host = { path = "crates/clap-host" }
+vst3-host = { path = "crates/vst3-host" }
 
 # Example-specific feature requirements
 [[example]]
-name = "midi_synth"
+name = "09_midi_synth"
 required-features = ["midi", "synth"]
 
 [[example]]
-name = "neural_models"
-required-features = ["neural"]
-
-[[example]]
-name = "plugin_loading"
-required-features = ["plugin"]
-
-[[example]]
-name = "neural_model_save_load"
-required-features = ["neural"]
-
-[[example]]
-name = "soundfont"
+name = "11_soundfont"
 required-features = ["soundfont"]
+
+[[example]]
+name = "13_export"
+required-features = ["export"]
+
+[[example]]
+name = "14_streaming"
+required-features = ["sampler"]
+
+[[example]]
+name = "15_recording"
+required-features = ["sampler", "export"]
+
+[[example]]
+name = "17_plugin_loading"
+required-features = ["plugin", "vst3"]
+
+[[example]]
+name = "18_neural_closure"
+required-features = ["neural", "burn", "midi"]
+
+[[example]]
+name = "19_neural_models"
+required-features = ["neural", "burn"]
+
+[[example]]
+name = "20_neural_workflow"
+required-features = ["neural", "burn"]
+
+[[example]]
+name = "21_load_audio"
+required-features = ["sampler", "wav"]
+
+[[example]]
+name = "22_plugin_editor"
+required-features = ["plugin", "midi"]

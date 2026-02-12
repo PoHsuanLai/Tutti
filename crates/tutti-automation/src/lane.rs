@@ -70,33 +70,16 @@ impl<T, R: TransportReader> AutomationLane<T, R> {
 
     /// Get value accounting for transport loop.
     ///
-    /// When the beat position is beyond the loop end, wraps it back into the loop range.
-    /// This ensures automation repeats correctly during looped playback.
-    ///
-    /// # Arguments
-    ///
-    /// * `beat` - Current beat position
-    /// * `loop_start` - Loop start in beats
-    /// * `loop_end` - Loop end in beats (must be > loop_start)
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// // Loop from beat 4 to beat 8
-    /// let value = lane.get_value_looped(10.0, 4.0, 8.0);
-    /// // beat 10 wraps to beat 6 (10 - 4 = 6, which is within 4..8)
-    /// ```
+    /// Wraps beat positions beyond `loop_end` back into `[loop_start, loop_end)`.
+    /// Falls back to direct evaluation if the loop range is invalid.
     pub fn get_value_looped(&self, beat: f64, loop_start: f64, loop_end: f64) -> f32 {
         let loop_len = loop_end - loop_start;
 
         if loop_len <= 0.0 {
-            // Invalid loop range, use beat directly
             return self.envelope.get_value_at(beat).unwrap_or(0.0);
         }
 
-        let effective_beat = if beat < loop_start {
-            beat
-        } else if beat < loop_end {
+        let effective_beat = if beat < loop_end {
             beat
         } else {
             loop_start + ((beat - loop_start) % loop_len)
@@ -105,9 +88,9 @@ impl<T, R: TransportReader> AutomationLane<T, R> {
         self.envelope.get_value_at(effective_beat).unwrap_or(0.0)
     }
 
-    /// Update and return the current value using transport position.
+    /// Update and return the current value using the transport position.
     ///
-    /// Automatically handles loop wrapping if loop is enabled on the transport.
+    /// Handles loop wrapping automatically when looping is enabled.
     pub fn update(&mut self) -> f32 {
         let beat = self.transport.current_beat();
 
@@ -129,11 +112,11 @@ impl<T: Clone + Send + Sync + 'static, R: TransportReader + Clone + 'static> Aud
     for AutomationLane<T, R>
 {
     fn inputs(&self) -> usize {
-        0 // Generator - no audio input
+        0
     }
 
     fn outputs(&self) -> usize {
-        1 // Single control signal output
+        1
     }
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
@@ -152,16 +135,14 @@ impl<T: Clone + Send + Sync + 'static, R: TransportReader + Clone + 'static> Aud
         self.last_value = 0.0;
     }
 
-    fn set_sample_rate(&mut self, _sample_rate: f64) {
-        // Could use for sub-block interpolation in the future
-    }
+    fn set_sample_rate(&mut self, _sample_rate: f64) {}
 
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         SignalFrame::new(1)
     }
 
     fn get_id(&self) -> u64 {
-        0x4155544F4D415445 // "AUTOMATE" in hex
+        0x4155544F4D415445
     }
 
     fn footprint(&self) -> usize {
@@ -191,111 +172,254 @@ impl<T: Clone, R: TransportReader + Clone> Clone for AutomationLane<T, R> {
 mod tests {
     use super::*;
     use audio_automation::AutomationPoint;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
 
-    // Note: Full tests require a mock TransportHandle
-    // These are basic unit tests for the envelope integration
-
-    #[test]
-    fn test_envelope_value() {
-        let mut envelope: AutomationEnvelope<&str> = AutomationEnvelope::new("test");
-        envelope.add_point(AutomationPoint::new(0.0, 0.0));
-        envelope.add_point(AutomationPoint::new(4.0, 1.0));
-
-        assert!((envelope.get_value_at(0.0).unwrap() - 0.0).abs() < 0.01);
-        assert!((envelope.get_value_at(2.0).unwrap() - 0.5).abs() < 0.01);
-        assert!((envelope.get_value_at(4.0).unwrap() - 1.0).abs() < 0.01);
+    #[derive(Clone)]
+    struct MockTransport {
+        beat: Arc<AtomicU64>,
+        loop_enabled: bool,
+        loop_range: Option<(f64, f64)>,
     }
 
-    /// Test helper to create envelope and test loop wrapping without transport
-    fn create_test_envelope() -> AutomationEnvelope<&'static str> {
-        let mut envelope: AutomationEnvelope<&str> = AutomationEnvelope::new("test");
-        // Envelope: 0.0 at beat 0, 1.0 at beat 4, 0.5 at beat 8
-        envelope.add_point(AutomationPoint::new(0.0, 0.0));
-        envelope.add_point(AutomationPoint::new(4.0, 1.0));
-        envelope.add_point(AutomationPoint::new(8.0, 0.5));
-        envelope
+    impl MockTransport {
+        fn new(beat: f64) -> Self {
+            Self {
+                beat: Arc::new(AtomicU64::new(beat.to_bits())),
+                loop_enabled: false,
+                loop_range: None,
+            }
+        }
+
+        fn with_loop(beat: f64, loop_start: f64, loop_end: f64) -> Self {
+            Self {
+                beat: Arc::new(AtomicU64::new(beat.to_bits())),
+                loop_enabled: true,
+                loop_range: Some((loop_start, loop_end)),
+            }
+        }
+
+        fn set_beat(&self, beat: f64) {
+            self.beat.store(beat.to_bits(), Ordering::Relaxed);
+        }
+    }
+
+    impl TransportReader for MockTransport {
+        fn current_beat(&self) -> f64 {
+            f64::from_bits(self.beat.load(Ordering::Relaxed))
+        }
+        fn is_loop_enabled(&self) -> bool {
+            self.loop_enabled
+        }
+        fn get_loop_range(&self) -> Option<(f64, f64)> {
+            self.loop_range
+        }
+        fn is_playing(&self) -> bool {
+            true
+        }
+        fn is_recording(&self) -> bool {
+            false
+        }
+        fn is_in_preroll(&self) -> bool {
+            false
+        }
+    }
+
+    fn ramp_envelope() -> AutomationEnvelope<&'static str> {
+        let mut env: AutomationEnvelope<&str> = AutomationEnvelope::new("volume");
+        env.add_point(AutomationPoint::new(0.0, 0.0));
+        env.add_point(AutomationPoint::new(4.0, 1.0));
+        env.add_point(AutomationPoint::new(8.0, 0.5));
+        env
     }
 
     #[test]
-    fn test_loop_wrapping_basic() {
-        let envelope = create_test_envelope();
+    fn test_update_tracks_transport_position() {
+        let transport = MockTransport::new(0.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport.clone());
 
-        // Test the loop wrapping logic directly on envelope
-        // Loop from beat 4 to beat 8 (4 beats long)
-        let loop_start: f64 = 4.0;
-        let loop_end: f64 = 8.0;
-        let loop_len = loop_end - loop_start;
+        transport.set_beat(0.0);
+        assert!((lane.update() - 0.0).abs() < 0.01);
 
-        // Beat 10 should wrap to beat 6 (10 - 4 = 6 % 4 = 2, then 4 + 2 = 6)
-        let beat: f64 = 10.0;
-        let wrapped = loop_start + ((beat - loop_start) % loop_len);
-        assert!(
-            (wrapped - 6.0).abs() < 0.001,
-            "Expected 6.0, got {}",
-            wrapped
-        );
+        transport.set_beat(2.0);
+        assert!((lane.update() - 0.5).abs() < 0.01);
 
-        // At beat 6 (midpoint of loop), value should be interpolated
-        let value = envelope.get_value_at(wrapped).unwrap();
-        assert!(
-            value > 0.5 && value < 1.0,
-            "Expected value between 0.5-1.0 at beat 6, got {}",
-            value
-        );
+        transport.set_beat(4.0);
+        assert!((lane.update() - 1.0).abs() < 0.01);
+
+        transport.set_beat(6.0);
+        assert!((lane.update() - 0.75).abs() < 0.01);
     }
 
     #[test]
-    fn test_loop_wrapping_at_boundaries() {
-        let envelope = create_test_envelope();
-        let loop_start: f64 = 4.0;
-        let loop_end: f64 = 8.0;
-        let loop_len = loop_end - loop_start;
+    fn test_update_with_loop_wraps_correctly() {
+        let transport = MockTransport::with_loop(10.0, 4.0, 8.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport);
 
-        // Beat exactly at loop_end should wrap to loop_start
-        let beat: f64 = 8.0;
-        let wrapped = if beat < loop_end {
-            beat
-        } else {
-            loop_start + ((beat - loop_start) % loop_len)
+        let val = lane.update();
+        assert!((val - 0.75).abs() < 0.01, "Expected ~0.75, got {}", val);
+    }
+
+    #[test]
+    fn test_update_loop_enabled_but_no_range_falls_back() {
+        let transport = MockTransport {
+            beat: Arc::new(AtomicU64::new(2.0f64.to_bits())),
+            loop_enabled: true,
+            loop_range: None,
         };
-        assert!(
-            (wrapped - 4.0).abs() < 0.001,
-            "Expected 4.0, got {}",
-            wrapped
-        );
-
-        // Value at beat 4 is 1.0
-        let value = envelope.get_value_at(4.0).unwrap();
-        assert!((value - 1.0).abs() < 0.01);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport);
+        assert!((lane.update() - 0.5).abs() < 0.01);
     }
 
     #[test]
-    fn test_loop_wrapping_multiple_iterations() {
-        let _envelope = create_test_envelope();
-        let loop_start: f64 = 4.0;
-        let loop_end: f64 = 8.0;
-        let loop_len = loop_end - loop_start;
+    fn test_tick_outputs_current_value() {
+        let transport = MockTransport::new(0.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport.clone());
 
-        // Beat 20 should wrap multiple times: 20 - 4 = 16, 16 % 4 = 0, 4 + 0 = 4
-        let beat: f64 = 20.0;
-        let wrapped = loop_start + ((beat - loop_start) % loop_len);
-        assert!(
-            (wrapped - 4.0).abs() < 0.001,
-            "Expected 4.0, got {}",
-            wrapped
-        );
+        let mut output = [0.0f32; 1];
+
+        transport.set_beat(4.0);
+        lane.tick(&[], &mut output);
+        assert!((output[0] - 1.0).abs() < 0.01);
+
+        transport.set_beat(0.0);
+        lane.tick(&[], &mut output);
+        assert!((output[0] - 0.0).abs() < 0.01);
     }
 
     #[test]
-    fn test_before_loop_start() {
-        let envelope = create_test_envelope();
+    fn test_tick_updates_last_value() {
+        let transport = MockTransport::new(4.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport);
 
-        // Before loop start, value should come directly from envelope
-        let value = envelope.get_value_at(2.0).unwrap();
-        assert!(
-            (value - 0.5).abs() < 0.01,
-            "Expected 0.5 at beat 2, got {}",
-            value
-        );
+        assert_eq!(lane.last_value(), 0.0);
+        let mut output = [0.0f32; 1];
+        lane.tick(&[], &mut output);
+        assert!((lane.last_value() - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_looped_value_at_exact_boundary_wraps() {
+        let lane = AutomationLane::new(ramp_envelope(), MockTransport::new(0.0));
+        let val = lane.get_value_looped(8.0, 4.0, 8.0);
+        let at_start = lane.get_value_at(4.0);
+        assert!((val - at_start).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_looped_value_with_invalid_range_doesnt_crash() {
+        let lane = AutomationLane::new(ramp_envelope(), MockTransport::new(0.0));
+        let val = lane.get_value_looped(2.0, 8.0, 4.0);
+        assert!((val - 0.5).abs() < 0.01);
+        let val = lane.get_value_looped(2.0, 4.0, 4.0);
+        assert!((val - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_set_envelope_changes_output() {
+        let transport = MockTransport::new(2.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport);
+
+        assert!((lane.update() - 0.5).abs() < 0.01);
+
+        let mut flat: AutomationEnvelope<&str> = AutomationEnvelope::new("flat");
+        flat.add_point(AutomationPoint::new(0.0, 0.9));
+        flat.add_point(AutomationPoint::new(8.0, 0.9));
+        lane.set_envelope(flat);
+
+        assert!((lane.update() - 0.9).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_reset_clears_last_value() {
+        let mut lane = AutomationLane::new(ramp_envelope(), MockTransport::new(4.0));
+        lane.update();
+        assert!((lane.last_value() - 1.0).abs() < 0.01);
+
+        lane.reset();
+        assert_eq!(lane.last_value(), 0.0);
+    }
+
+    #[test]
+    fn test_empty_envelope_returns_zero() {
+        let empty: AutomationEnvelope<&str> = AutomationEnvelope::new("empty");
+        let mut lane = AutomationLane::new(empty, MockTransport::new(5.0));
+        assert_eq!(lane.update(), 0.0);
+
+        let mut output = [0.0f32; 1];
+        lane.tick(&[], &mut output);
+        assert_eq!(output[0], 0.0);
+    }
+
+    #[test]
+    fn test_process_fills_block_with_automation_value() {
+        use tutti_core::dsp::F32x;
+
+        let transport = MockTransport::new(4.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport);
+
+        let mut output_simd = vec![F32x::ZERO; 8];
+        let input_ref = BufferRef::empty();
+        let mut output_buf = BufferMut::new(&mut output_simd);
+
+        let block_size = 32;
+        lane.process(block_size, &input_ref, &mut output_buf);
+
+        for i in 0..block_size {
+            let val = output_buf.at_f32(0, i);
+            assert!(
+                (val - 1.0).abs() < 0.01,
+                "Sample {} expected ~1.0, got {}",
+                i,
+                val
+            );
+        }
+    }
+
+    #[test]
+    fn test_process_updates_last_value() {
+        use tutti_core::dsp::F32x;
+
+        let transport = MockTransport::new(2.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport);
+
+        assert_eq!(lane.last_value(), 0.0);
+
+        let mut output_simd = vec![F32x::ZERO; 8];
+        let input_ref = BufferRef::empty();
+        let mut output_buf = BufferMut::new(&mut output_simd);
+
+        lane.process(64, &input_ref, &mut output_buf);
+
+        assert!((lane.last_value() - 0.5).abs() < 0.01, "Expected ~0.5, got {}", lane.last_value());
+    }
+
+    #[test]
+    fn test_process_with_transport_advancing() {
+        use tutti_core::dsp::F32x;
+
+        let transport = MockTransport::new(0.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport.clone());
+
+        let mut output_simd = vec![F32x::ZERO; 8];
+
+        {
+            let input_ref = BufferRef::empty();
+            let mut output_buf = BufferMut::new(&mut output_simd);
+            lane.process(16, &input_ref, &mut output_buf);
+            assert!((output_buf.at_f32(0, 0) - 0.0).abs() < 0.01);
+        }
+
+        transport.set_beat(4.0);
+        {
+            let input_ref = BufferRef::empty();
+            let mut output_buf = BufferMut::new(&mut output_simd);
+            lane.process(16, &input_ref, &mut output_buf);
+            assert!(
+                (output_buf.at_f32(0, 0) - 1.0).abs() < 0.01,
+                "Expected ~1.0 after transport advance, got {}",
+                output_buf.at_f32(0, 0)
+            );
+        }
     }
 }
