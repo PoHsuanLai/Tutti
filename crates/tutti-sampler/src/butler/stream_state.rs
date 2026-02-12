@@ -134,6 +134,11 @@ impl ChannelStreamState {
         self.loop_range
     }
 
+    /// Get cached read position for lock-free position queries.
+    pub fn cached_read_position(&self) -> Option<&Arc<AtomicU64>> {
+        self.cached_read_position.as_ref()
+    }
+
     /// Get configured crossfade length in samples.
     pub fn loop_crossfade_samples(&self) -> usize {
         self.loop_crossfade_samples

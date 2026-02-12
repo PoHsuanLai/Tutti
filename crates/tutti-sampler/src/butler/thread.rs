@@ -598,16 +598,26 @@ fn handle_set_loop_range(
     end_samples: u64,
     crossfade_samples: usize,
     stream_states: &DashMap<usize, ChannelStreamState>,
-    producers: &[RegionBufferProducer],
+    producers: &mut [RegionBufferProducer],
     producer_index: &std::collections::HashMap<RegionId, usize>,
     sample_cache: &LruCache,
 ) {
     if let Some(mut stream_state) = stream_states.get_mut(&channel_index) {
         stream_state.set_loop_range(start_samples, end_samples, crossfade_samples);
 
-        if crossfade_samples > 0 {
-            if let Some(region_id) = stream_state.region_id() {
-                if let Some(&idx) = producer_index.get(&region_id) {
+        // When setting a loop range, we need to ensure the buffer contains only samples
+        // within the loop region. The ring buffer may already contain samples past the
+        // loop end, so we need to check the producer's position and flush if necessary.
+        if let Some(region_id) = stream_state.region_id() {
+            if let Some(&idx) = producer_index.get(&region_id) {
+                let producer_pos = producers[idx].file_position();
+                // If producer has written past loop end, flush and seek to loop start
+                if producer_pos > end_samples {
+                    stream_state.flush_buffer();
+                    producers[idx].set_file_position(start_samples);
+                }
+
+                if crossfade_samples > 0 {
                     let file_path = producers[idx].file_path();
                     if let Some(wave) = sample_cache.get(file_path) {
                         let preloop =

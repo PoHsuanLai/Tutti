@@ -191,11 +191,282 @@ fn run_bridge(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::butler::prefetch::RegionBuffer;
+    use crate::butler::request::RegionId;
+    use crossbeam_channel::unbounded;
+    use std::path::PathBuf;
+    use std::time::Duration;
+
+    /// Helper to drain all commands from channel
+    fn drain_commands(rx: &crossbeam_channel::Receiver<ButlerCommand>) -> Vec<ButlerCommand> {
+        let mut cmds = Vec::new();
+        while let Ok(cmd) = rx.try_recv() {
+            cmds.push(cmd);
+        }
+        cmds
+    }
+
+    /// Wait for bridge to process and collect commands
+    fn wait_and_drain(
+        rx: &crossbeam_channel::Receiver<ButlerCommand>,
+        wait_ms: u64,
+    ) -> Vec<ButlerCommand> {
+        thread::sleep(Duration::from_millis(wait_ms));
+        drain_commands(rx)
+    }
+
+    /// Create stream states with actual streaming channels
+    fn create_streaming_channels(count: usize) -> Arc<DashMap<usize, ChannelStreamState>> {
+        let stream_states = Arc::new(DashMap::new());
+
+        for i in 0..count {
+            let region_id = RegionId::generate();
+            let (_producer, consumer) =
+                RegionBuffer::with_capacity(region_id, PathBuf::from("test.wav"), 4096);
+
+            let mut state = ChannelStreamState::default();
+            state.start_streaming(Arc::new(parking_lot::Mutex::new(consumer)));
+            stream_states.insert(i, state);
+        }
+
+        stream_states
+    }
 
     #[test]
     fn test_transport_bridge_creation() {
         let transport = Arc::new(TransportManager::default());
         let samples = transport.beats_to_samples(1.0);
         assert!(samples > 0);
+    }
+
+    #[test]
+    fn test_bridge_start_and_stop() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, _rx) = unbounded();
+        let stream_states = Arc::new(DashMap::new());
+
+        let mut bridge = TransportBridge::new(transport, tx, stream_states, 44100.0);
+
+        // Bridge should be running
+        assert!(bridge.running.load(Ordering::Acquire));
+
+        // Stop it
+        bridge.stop();
+
+        // Should no longer be running
+        assert!(!bridge.running.load(Ordering::Acquire));
+        assert!(bridge.thread.is_none());
+    }
+
+    #[test]
+    fn test_bridge_drop_stops_thread() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, _rx) = unbounded();
+        let stream_states = Arc::new(DashMap::new());
+
+        let running = {
+            let bridge = TransportBridge::new(transport, tx, stream_states, 44100.0);
+            bridge.running.clone()
+        };
+        // Bridge dropped here
+
+        // Give thread time to stop
+        thread::sleep(Duration::from_millis(20));
+        assert!(!running.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn test_motion_state_rolling_sends_run() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, rx) = unbounded();
+        let stream_states = Arc::new(DashMap::new());
+
+        let mut bridge = TransportBridge::new(transport.clone(), tx, stream_states, 44100.0);
+
+        // Wait for initial state to settle
+        thread::sleep(Duration::from_millis(15));
+        drain_commands(&rx);
+
+        // Start playback - need to process commands to update motion_state
+        transport.play();
+        transport.process_commands(); // Actually update state
+
+        // Wait for bridge to detect and send command
+        let cmds = wait_and_drain(&rx, 20);
+
+        bridge.stop();
+
+        // Should have sent Run command
+        let has_run = cmds.iter().any(|c| matches!(c, ButlerCommand::Run));
+        assert!(has_run, "Expected Run command, got: {:?}", cmds);
+    }
+
+    #[test]
+    fn test_motion_state_stopped_sends_pause() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, rx) = unbounded();
+        let stream_states = Arc::new(DashMap::new());
+
+        let mut bridge = TransportBridge::new(transport.clone(), tx, stream_states, 44100.0);
+
+        // Start playing first - need to process commands to update motion_state
+        transport.play();
+        transport.process_commands();
+        thread::sleep(Duration::from_millis(15));
+        drain_commands(&rx);
+
+        // Now stop - need to process commands
+        transport.stop();
+        transport.process_commands();
+
+        let cmds = wait_and_drain(&rx, 20);
+
+        bridge.stop();
+
+        // Should have sent Pause command
+        let has_pause = cmds.iter().any(|c| matches!(c, ButlerCommand::Pause));
+        assert!(has_pause, "Expected Pause command, got: {:?}", cmds);
+    }
+
+    #[test]
+    fn test_beat_jump_sends_seek_when_stopped() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, rx) = unbounded();
+        let stream_states = create_streaming_channels(1);
+
+        let mut bridge = TransportBridge::new(transport.clone(), tx, stream_states, 44100.0);
+
+        // Wait for initial state
+        thread::sleep(Duration::from_millis(15));
+        drain_commands(&rx);
+
+        // Locate to a different beat while stopped (>0.5 beat delta)
+        transport.locate(4.0);
+        transport.process_commands(); // Update current_beat
+
+        let cmds = wait_and_drain(&rx, 20);
+
+        bridge.stop();
+
+        // Should have sent SeekStream for channel 0
+        let has_seek = cmds.iter().any(|c| matches!(c, ButlerCommand::SeekStream { channel_index: 0, .. }));
+        assert!(has_seek, "Expected SeekStream command, got: {:?}", cmds);
+    }
+
+    #[test]
+    fn test_loop_enabled_sends_set_loop_range() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, rx) = unbounded();
+        let stream_states = create_streaming_channels(1);
+
+        let mut bridge = TransportBridge::new(transport.clone(), tx, stream_states, 44100.0);
+
+        // Wait for initial state
+        thread::sleep(Duration::from_millis(15));
+        drain_commands(&rx);
+
+        // Enable loop with range
+        transport.set_loop_range(1.0, 5.0);
+        transport.set_loop_enabled(true);
+
+        let cmds = wait_and_drain(&rx, 20);
+
+        bridge.stop();
+
+        // Should have sent SetLoopRange for channel 0
+        let has_loop = cmds.iter().any(|c| matches!(c, ButlerCommand::SetLoopRange { channel_index: 0, .. }));
+        assert!(has_loop, "Expected SetLoopRange command, got: {:?}", cmds);
+    }
+
+    #[test]
+    fn test_loop_disabled_sends_clear_loop_range() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, rx) = unbounded();
+        let stream_states = create_streaming_channels(1);
+
+        let mut bridge = TransportBridge::new(transport.clone(), tx, stream_states, 44100.0);
+
+        // Enable loop first
+        transport.set_loop_range(1.0, 5.0);
+        transport.set_loop_enabled(true);
+        thread::sleep(Duration::from_millis(15));
+        drain_commands(&rx);
+
+        // Now disable loop
+        transport.set_loop_enabled(false);
+
+        let cmds = wait_and_drain(&rx, 20);
+
+        bridge.stop();
+
+        // Should have sent ClearLoopRange for channel 0
+        let has_clear = cmds.iter().any(|c| matches!(c, ButlerCommand::ClearLoopRange { channel_index: 0 }));
+        assert!(has_clear, "Expected ClearLoopRange command, got: {:?}", cmds);
+    }
+
+    #[test]
+    fn test_slaved_buffer_margin_constant() {
+        // Verify the constant is reasonable for external sync jitter
+        assert!(SLAVED_BUFFER_MARGIN > 1.0);
+        assert!(SLAVED_BUFFER_MARGIN < 3.0);
+    }
+
+    #[test]
+    fn test_multiple_cycles_no_duplicate_commands() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, rx) = unbounded();
+        let stream_states = Arc::new(DashMap::new());
+
+        let mut bridge = TransportBridge::new(transport.clone(), tx, stream_states, 44100.0);
+
+        // Wait multiple poll cycles
+        thread::sleep(Duration::from_millis(50));
+        let _initial_cmds = drain_commands(&rx);
+
+        // Wait more cycles with no state changes
+        thread::sleep(Duration::from_millis(50));
+        let later_cmds = drain_commands(&rx);
+
+        bridge.stop();
+
+        // Should not receive duplicate commands when state hasn't changed
+        // (After initial state is established, no new commands without changes)
+        assert!(
+            later_cmds.is_empty(),
+            "Should not send commands without state changes, got: {:?}",
+            later_cmds
+        );
+    }
+
+    #[test]
+    fn test_bridge_handles_rapid_state_changes() {
+        let transport = Arc::new(TransportManager::default());
+        let (tx, rx) = unbounded();
+        let stream_states = Arc::new(DashMap::new());
+
+        let mut bridge = TransportBridge::new(transport.clone(), tx, stream_states, 44100.0);
+
+        // Rapid play/stop toggles - need process_commands() for state updates
+        for _ in 0..5 {
+            transport.play();
+            transport.process_commands();
+            thread::sleep(Duration::from_millis(10)); // Give bridge time to poll
+            transport.stop();
+            transport.process_commands();
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        thread::sleep(Duration::from_millis(20));
+        let cmds = drain_commands(&rx);
+
+        bridge.stop();
+
+        // Should have multiple Run and Pause commands
+        let run_count = cmds.iter().filter(|c| matches!(c, ButlerCommand::Run)).count();
+        let pause_count = cmds.iter().filter(|c| matches!(c, ButlerCommand::Pause)).count();
+
+        // Should have captured at least some of the state changes
+        assert!(run_count > 0, "Should have some Run commands");
+        assert!(pause_count > 0, "Should have some Pause commands");
     }
 }

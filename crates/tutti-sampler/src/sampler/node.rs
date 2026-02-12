@@ -473,6 +473,7 @@ mod streaming {
 
     impl StreamingSamplerUnit {
         /// Create a new streaming sampler with shared state for varispeed/seeking.
+        /// Plays immediately by default (matches SamplerUnit behavior).
         ///
         /// Use `SamplerSystem::streaming_unit()` to get a fully configured unit,
         /// or create manually from `ChannelStreamState::consumer()` and `shared_state()`.
@@ -482,24 +483,10 @@ mod streaming {
         ) -> Self {
             Self {
                 consumer,
-                playing: AtomicBool::new(false),
+                playing: AtomicBool::new(true), // Auto-play by default (matches SamplerUnit)
                 gain: 1.0,
                 sample_rate: 44100.0,
                 shared_state: Some(shared_state),
-                fractional_pos: 0.0,
-                history: [(0.0, 0.0); 4],
-                fetch_scratch: Vec::with_capacity(MAX_FETCH_SAMPLES),
-            }
-        }
-
-        /// Create a basic streaming sampler without varispeed support.
-        pub fn new_basic(consumer: Arc<Mutex<RegionBufferConsumer>>) -> Self {
-            Self {
-                consumer,
-                playing: AtomicBool::new(false),
-                gain: 1.0,
-                sample_rate: 44100.0,
-                shared_state: None,
                 fractional_pos: 0.0,
                 history: [(0.0, 0.0); 4],
                 fetch_scratch: Vec::with_capacity(MAX_FETCH_SAMPLES),

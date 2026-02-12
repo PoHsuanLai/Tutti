@@ -120,6 +120,9 @@ pub(super) fn refill_all_streams(
         let file_position = producer.file_position() as usize;
         let channels = wave.channels();
 
+        // Get loop range to respect loop boundaries during refill
+        let loop_range = stream_state.loop_range();
+
         if is_reverse {
             refill_reverse(
                 producer,
@@ -137,6 +140,7 @@ pub(super) fn refill_all_streams(
                 chunk_size,
                 channels,
                 interleave_buffer,
+                loop_range,
             );
         }
     }
@@ -350,9 +354,8 @@ fn fill_buffer_reverse(
     }
 }
 
-/// Refill buffer for forward playback.
-///
-/// Crossfade is now handled by the audio thread via SharedStreamState for lock-free access.
+/// Refill buffer for forward playback, respecting loop boundaries if set.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn refill_forward(
     producer: &mut RegionBufferProducer,
     wave: &Wave,
@@ -360,18 +363,34 @@ pub(super) fn refill_forward(
     chunk_size: usize,
     channels: usize,
     interleave_buffer: &mut Vec<(f32, f32)>,
+    loop_range: Option<(u64, u64)>,
 ) {
     interleave_buffer.clear();
 
-    for i in 0..chunk_size {
-        let sample_idx = file_position + i;
+    // Extract loop bounds if set and valid
+    let loop_bounds = loop_range.and_then(|(start, end)| {
+        let start = start as usize;
+        let end = end as usize;
+        let len = end.saturating_sub(start);
+        if len > 0 { Some((start, end, len)) } else { None }
+    });
 
-        let sample = if sample_idx >= wave.len() {
+    let mut pos = file_position;
+
+    for _ in 0..chunk_size {
+        // Wrap position if looping
+        if let Some((loop_start, loop_end, loop_len)) = loop_bounds {
+            if pos >= loop_end {
+                pos = loop_start + ((pos - loop_start) % loop_len);
+            }
+        }
+
+        let sample = if pos >= wave.len() {
             (0.0, 0.0)
         } else {
-            let left = wave.at(0, sample_idx);
+            let left = wave.at(0, pos);
             let right = if channels > 1 {
-                wave.at(1, sample_idx)
+                wave.at(1, pos)
             } else {
                 left
             };
@@ -379,10 +398,19 @@ pub(super) fn refill_forward(
         };
 
         interleave_buffer.push(sample);
+        pos += 1;
     }
 
     let written = producer.write(interleave_buffer);
-    producer.set_file_position((file_position + written) as u64);
+
+    // Calculate new file position, wrapping if looping
+    let mut new_pos = file_position + written;
+    if let Some((loop_start, loop_end, loop_len)) = loop_bounds {
+        if new_pos >= loop_end {
+            new_pos = loop_start + ((new_pos - loop_start) % loop_len);
+        }
+    }
+    producer.set_file_position(new_pos as u64);
 }
 
 /// Refill buffer for reverse playback.
@@ -443,6 +471,289 @@ pub(super) fn get_wave_from_cache(
                 Some(arc_wave)
             }
             Err(_) => None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // calculate_varifill_chunk tests
+    // =========================================================================
+
+    #[test]
+    fn test_varifill_empty_buffer_increases_chunk() {
+        // Empty buffer (fill=0) should have high urgency -> larger chunk
+        let base = 4096;
+        let chunk = calculate_varifill_chunk(0.0, base, 10_000_000.0, 1.0);
+
+        // urgency=1.0, multiplier = (0.5 + 1.0*1.5) * 1.0 * 1.0 = 2.0
+        assert!(chunk > base, "Empty buffer should increase chunk size");
+        assert_eq!(chunk, base * 2);
+    }
+
+    #[test]
+    fn test_varifill_full_buffer_decreases_chunk() {
+        // Full buffer (fill=1) should have low urgency -> smaller chunk
+        let base = 4096;
+        let chunk = calculate_varifill_chunk(1.0, base, 10_000_000.0, 1.0);
+
+        // urgency=0.0, multiplier = (0.5 + 0.0*1.5) * 1.0 * 1.0 = 0.5
+        assert!(chunk < base, "Full buffer should decrease chunk size");
+        assert_eq!(chunk, base / 2);
+    }
+
+    #[test]
+    fn test_varifill_half_buffer_near_base() {
+        // Half-full buffer should be close to base chunk
+        let base = 4096;
+        let chunk = calculate_varifill_chunk(0.5, base, 10_000_000.0, 1.0);
+
+        // urgency=0.5, multiplier = (0.5 + 0.5*1.5) * 1.0 * 1.0 = 1.25
+        assert_eq!(chunk, (base as f64 * 1.25) as usize);
+    }
+
+    #[test]
+    fn test_varifill_high_speed_increases_chunk() {
+        // High playback speed should increase chunk to keep up
+        let base = 4096;
+        let normal = calculate_varifill_chunk(0.5, base, 10_000_000.0, 1.0);
+        let fast = calculate_varifill_chunk(0.5, base, 10_000_000.0, 2.0);
+
+        assert!(fast > normal, "Higher speed should increase chunk");
+        assert_eq!(fast, normal * 2);
+    }
+
+    #[test]
+    fn test_varifill_slow_speed_no_decrease() {
+        // Slow speed (<1.0) should NOT decrease chunk (use max(1.0))
+        let base = 4096;
+        let normal = calculate_varifill_chunk(0.5, base, 10_000_000.0, 1.0);
+        let slow = calculate_varifill_chunk(0.5, base, 10_000_000.0, 0.5);
+
+        assert_eq!(slow, normal, "Slow speed should not decrease chunk below normal");
+    }
+
+    #[test]
+    fn test_varifill_high_bandwidth_increases_chunk() {
+        // High disk throughput allows larger chunks
+        let base = 4096;
+        let normal = calculate_varifill_chunk(0.5, base, 10_000_000.0, 1.0);
+        let fast_disk = calculate_varifill_chunk(0.5, base, 40_000_000.0, 1.0); // 4x bandwidth
+
+        // bandwidth_factor = sqrt(4) = 2.0
+        assert!(fast_disk > normal, "Higher bandwidth should allow larger chunks");
+    }
+
+    #[test]
+    fn test_varifill_low_bandwidth_decreases_chunk() {
+        // Low disk throughput should use smaller chunks
+        let base = 4096;
+        let normal = calculate_varifill_chunk(0.5, base, 10_000_000.0, 1.0);
+        let slow_disk = calculate_varifill_chunk(0.5, base, 2_500_000.0, 1.0); // 0.25x bandwidth
+
+        // bandwidth_factor = sqrt(0.25) = 0.5
+        assert!(slow_disk < normal, "Lower bandwidth should use smaller chunks");
+    }
+
+    #[test]
+    fn test_varifill_zero_bandwidth_uses_default() {
+        // Zero bandwidth should use factor of 1.0
+        let base = 4096;
+        let normal = calculate_varifill_chunk(0.5, base, 10_000_000.0, 1.0);
+        let zero_bw = calculate_varifill_chunk(0.5, base, 0.0, 1.0);
+
+        assert_eq!(zero_bw, normal, "Zero bandwidth should use default factor");
+    }
+
+    #[test]
+    fn test_varifill_minimum_chunk_size() {
+        // Even with everything minimal, chunk should be at least 1024
+        let chunk = calculate_varifill_chunk(1.0, 100, 1_000_000.0, 1.0);
+
+        assert!(chunk >= 1024, "Minimum chunk size should be 1024");
+    }
+
+    #[test]
+    fn test_varifill_clamps_multiplier() {
+        // Extreme values should be clamped
+        let base = 4096;
+
+        // Very empty buffer + fast disk + high speed
+        let extreme_high = calculate_varifill_chunk(0.0, base, 100_000_000.0, 4.0);
+        // Multiplier would be (0.5 + 1.5) * 2.0 * 4.0 = 16.0, clamped to 4.0
+        assert_eq!(extreme_high, base * 4, "Should clamp to 4x base");
+
+        // Very full buffer + slow disk
+        let extreme_low = calculate_varifill_chunk(1.0, base, 1_000_000.0, 1.0);
+        // Multiplier would be 0.5 * 0.316 * 1.0 = 0.158, clamped to 0.25
+        // But then max(1024) kicks in
+        assert!(extreme_low >= 1024, "Should respect minimum chunk size");
+    }
+
+    #[test]
+    fn test_varifill_bandwidth_factor_clamped() {
+        // Bandwidth factor should be clamped between 0.5 and 2.0
+        let base = 4096;
+
+        // Very high bandwidth (100x baseline)
+        let very_high = calculate_varifill_chunk(0.5, base, 1_000_000_000.0, 1.0);
+        // sqrt(100) = 10, but clamped to 2.0
+        let expected_high = (base as f64 * 1.25 * 2.0) as usize;
+        assert_eq!(very_high, expected_high);
+
+        // Very low bandwidth (0.01x baseline)
+        let very_low = calculate_varifill_chunk(0.5, base, 100_000.0, 1.0);
+        // sqrt(0.01) = 0.1, but clamped to 0.5
+        let expected_low = (base as f64 * 1.25 * 0.5) as usize;
+        assert_eq!(very_low, expected_low);
+    }
+
+    // =========================================================================
+    // Edge case / robustness tests
+    // =========================================================================
+
+    #[test]
+    fn test_varifill_buffer_fill_over_one() {
+        // Buffer fill > 1.0 (shouldn't happen, but test robustness)
+        let chunk = calculate_varifill_chunk(1.5, 4096, 10_000_000.0, 1.0);
+
+        // urgency = 1.0 - 1.5 = -0.5
+        // multiplier = (0.5 + (-0.5)*1.5) * 1.0 * 1.0 = -0.25, clamped to 0.25
+        assert!(chunk >= 1024, "Should still respect minimum");
+    }
+
+    #[test]
+    fn test_varifill_buffer_fill_negative() {
+        // Buffer fill < 0 (shouldn't happen, but test robustness)
+        let chunk = calculate_varifill_chunk(-0.5, 4096, 10_000_000.0, 1.0);
+
+        // urgency = 1.0 - (-0.5) = 1.5
+        // multiplier = (0.5 + 1.5*1.5) * 1.0 * 1.0 = 2.75
+        assert!(chunk > 4096, "Should increase chunk for negative fill");
+    }
+
+    #[test]
+    fn test_varifill_nan_buffer_fill() {
+        // NaN buffer_fill - should not crash, clamp handles it
+        let chunk = calculate_varifill_chunk(f32::NAN, 4096, 10_000_000.0, 1.0);
+        assert!(chunk >= 1024, "Should respect minimum even with NaN");
+    }
+
+    #[test]
+    fn test_varifill_infinity_bandwidth() {
+        // Infinite bandwidth - should be clamped
+        let chunk = calculate_varifill_chunk(0.5, 4096, f64::INFINITY, 1.0);
+        // sqrt(inf) = inf, but clamped to 2.0
+        let expected = (4096.0 * 1.25 * 2.0) as usize;
+        assert_eq!(chunk, expected);
+    }
+
+    #[test]
+    fn test_varifill_negative_bandwidth() {
+        // Negative bandwidth (invalid) - should use default factor 1.0
+        let chunk = calculate_varifill_chunk(0.5, 4096, -1000.0, 1.0);
+        let normal = calculate_varifill_chunk(0.5, 4096, 10_000_000.0, 1.0);
+        // Negative is not > 0, so uses factor 1.0
+        assert_eq!(chunk, normal);
+    }
+
+    // =========================================================================
+    // fill_buffer_forward tests (for loop-aware refill logic verification)
+    // =========================================================================
+
+    fn make_test_wave(samples: &[(f32, f32)]) -> Wave {
+        let mut wave = Wave::new(2, 48000.0);
+        for (l, r) in samples {
+            wave.push((*l, *r));
+        }
+        wave
+    }
+
+    #[test]
+    fn test_fill_buffer_forward_basic() {
+        // Create a simple wave: 0.1, 0.2, 0.3, 0.4
+        let wave = make_test_wave(&[(0.1, 0.1), (0.2, 0.2), (0.3, 0.3), (0.4, 0.4)]);
+        let mut buffer = Vec::new();
+
+        fill_buffer_forward(&wave, 0, 3, 2, &mut buffer);
+
+        assert_eq!(buffer.len(), 3);
+        assert_eq!(buffer[0], (0.1, 0.1));
+        assert_eq!(buffer[1], (0.2, 0.2));
+        assert_eq!(buffer[2], (0.3, 0.3));
+    }
+
+    #[test]
+    fn test_fill_buffer_forward_past_end_pads_zeros() {
+        let wave = make_test_wave(&[(0.1, 0.1), (0.2, 0.2)]);
+        let mut buffer = Vec::new();
+
+        fill_buffer_forward(&wave, 1, 4, 2, &mut buffer);
+
+        assert_eq!(buffer.len(), 4);
+        assert_eq!(buffer[0], (0.2, 0.2)); // Last valid sample
+        assert_eq!(buffer[1], (0.0, 0.0)); // Past end - zeros
+        assert_eq!(buffer[2], (0.0, 0.0));
+        assert_eq!(buffer[3], (0.0, 0.0));
+    }
+
+    // =========================================================================
+    // Loop-aware refill position calculation tests
+    // =========================================================================
+
+    #[test]
+    fn test_loop_wrap_position_calculation() {
+        // Test the wrapping logic used in refill_forward_loop_aware
+        let loop_start = 100usize;
+        let loop_end = 200usize;
+        let loop_len = loop_end - loop_start;
+
+        // Position at exactly loop_end should wrap to loop_start
+        let pos = 200usize;
+        let wrapped = if pos >= loop_end {
+            loop_start + ((pos - loop_start) % loop_len)
+        } else {
+            pos
+        };
+        assert_eq!(wrapped, loop_start);
+
+        // Position past loop_end should wrap correctly
+        let pos = 250usize;
+        let wrapped = if pos >= loop_end {
+            loop_start + ((pos - loop_start) % loop_len)
+        } else {
+            pos
+        };
+        // 250 - 100 = 150, 150 % 100 = 50, 100 + 50 = 150
+        assert_eq!(wrapped, 150);
+
+        // Position 2 full loops past should wrap back
+        let pos = 300usize;
+        let wrapped = if pos >= loop_end {
+            loop_start + ((pos - loop_start) % loop_len)
+        } else {
+            pos
+        };
+        // 300 - 100 = 200, 200 % 100 = 0, 100 + 0 = 100
+        assert_eq!(wrapped, loop_start);
+    }
+
+    #[test]
+    fn test_loop_wrap_does_not_affect_position_before_loop_end() {
+        let loop_start = 100usize;
+        let loop_end = 200usize;
+
+        // Position before loop_end should not be affected
+        for pos in [100, 150, 199] {
+            let wrapped = if pos >= loop_end {
+                loop_start + ((pos - loop_start) % (loop_end - loop_start))
+            } else {
+                pos
+            };
+            assert_eq!(wrapped, pos, "Position {} should not be wrapped", pos);
         }
     }
 }

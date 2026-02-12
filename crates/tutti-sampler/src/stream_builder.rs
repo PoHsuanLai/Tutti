@@ -201,3 +201,105 @@ impl<'a> RecordBuilder<'a> {
         self.sampler.start_capture(session)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // =========================================================================
+    // StreamBuilder tests (disabled path - no SamplerSystem needed)
+    // =========================================================================
+
+    #[test]
+    fn test_stream_builder_disabled_defaults() {
+        let builder = StreamBuilder::disabled();
+
+        assert!(builder.sampler.is_none());
+        assert_eq!(builder.file_path, PathBuf::new());
+        assert_eq!(builder.channel, 0);
+        assert_eq!(builder.offset_samples, 0);
+        assert!(builder.loop_range.is_none());
+        assert_eq!(builder.crossfade_samples, 0);
+        assert_eq!(builder.direction, PlayDirection::Forward);
+        assert_eq!(builder.speed, 1.0);
+    }
+
+    #[test]
+    fn test_stream_builder_disabled_start_is_noop() {
+        // Should not panic or do anything
+        let builder = StreamBuilder::disabled();
+        builder.start();
+    }
+
+    #[test]
+    fn test_stream_builder_channel() {
+        let builder = StreamBuilder::disabled().channel(5);
+        assert_eq!(builder.channel, 5);
+    }
+
+    #[test]
+    fn test_stream_builder_offset_samples() {
+        let builder = StreamBuilder::disabled().offset_samples(44100);
+        assert_eq!(builder.offset_samples, 44100);
+    }
+
+    #[test]
+    fn test_stream_builder_loop_samples() {
+        let builder = StreamBuilder::disabled().loop_samples(1000, 5000);
+        assert_eq!(builder.loop_range, Some((1000, 5000)));
+    }
+
+    #[test]
+    fn test_stream_builder_crossfade_samples() {
+        let builder = StreamBuilder::disabled().crossfade_samples(256);
+        assert_eq!(builder.crossfade_samples, 256);
+    }
+
+    #[test]
+    fn test_stream_builder_reverse() {
+        let builder = StreamBuilder::disabled().reverse();
+        assert_eq!(builder.direction, PlayDirection::Reverse);
+    }
+
+    #[test]
+    fn test_stream_builder_speed_positive() {
+        let builder = StreamBuilder::disabled().speed(2.0);
+        assert_eq!(builder.speed, 2.0);
+        assert_eq!(builder.direction, PlayDirection::Forward);
+    }
+
+    #[test]
+    fn test_stream_builder_speed_negative_sets_reverse() {
+        let builder = StreamBuilder::disabled().speed(-1.5);
+        assert_eq!(builder.speed, 1.5); // abs value
+        assert_eq!(builder.direction, PlayDirection::Reverse);
+    }
+
+    #[test]
+    fn test_stream_builder_chaining() {
+        let builder = StreamBuilder::disabled()
+            .channel(2)
+            .offset_samples(1000)
+            .loop_samples(0, 10000)
+            .crossfade_samples(128)
+            .speed(1.5);
+
+        assert_eq!(builder.channel, 2);
+        assert_eq!(builder.offset_samples, 1000);
+        assert_eq!(builder.loop_range, Some((0, 10000)));
+        assert_eq!(builder.crossfade_samples, 128);
+        assert_eq!(builder.speed, 1.5);
+    }
+
+    #[test]
+    fn test_stream_builder_chained_start_is_noop() {
+        // Full chain with disabled builder should still be safe
+        StreamBuilder::disabled()
+            .channel(0)
+            .offset_samples(44100)
+            .loop_samples(0, 88200)
+            .crossfade_samples(256)
+            .reverse()
+            .start();
+    }
+}

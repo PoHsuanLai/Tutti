@@ -237,3 +237,205 @@ impl std::fmt::Debug for ButlerCommand {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_region_id_uniqueness() {
+        let mut ids = HashSet::new();
+        for _ in 0..1000 {
+            let id = RegionId::generate();
+            assert!(ids.insert(id.0), "RegionId should be unique");
+        }
+        assert_eq!(ids.len(), 1000);
+    }
+
+    #[test]
+    fn test_region_id_monotonic() {
+        let id1 = RegionId::generate();
+        let id2 = RegionId::generate();
+        let id3 = RegionId::generate();
+        assert!(id2.0 > id1.0, "IDs should be monotonically increasing");
+        assert!(id3.0 > id2.0, "IDs should be monotonically increasing");
+    }
+
+    #[test]
+    fn test_capture_id_uniqueness() {
+        let mut ids = HashSet::new();
+        for _ in 0..1000 {
+            let id = CaptureId::generate();
+            assert!(ids.insert(id.0), "CaptureId should be unique");
+        }
+        assert_eq!(ids.len(), 1000);
+    }
+
+    #[test]
+    fn test_capture_id_monotonic() {
+        let id1 = CaptureId::generate();
+        let id2 = CaptureId::generate();
+        let id3 = CaptureId::generate();
+        assert!(id2.0 > id1.0, "IDs should be monotonically increasing");
+        assert!(id3.0 > id2.0, "IDs should be monotonically increasing");
+    }
+
+    #[test]
+    fn test_butler_state_default() {
+        let state = ButlerState::default();
+        assert_eq!(state, ButlerState::Running);
+    }
+
+    #[test]
+    fn test_flush_request_new() {
+        let capture_id = CaptureId::generate();
+        let req = FlushRequest::new(capture_id);
+        assert_eq!(req.capture_id, capture_id);
+    }
+
+    #[test]
+    fn test_butler_command_debug_simple_variants() {
+        assert_eq!(format!("{:?}", ButlerCommand::Run), "Run");
+        assert_eq!(format!("{:?}", ButlerCommand::Pause), "Pause");
+        assert_eq!(format!("{:?}", ButlerCommand::WaitForCompletion), "WaitForCompletion");
+        assert_eq!(format!("{:?}", ButlerCommand::FlushAll), "FlushAll");
+        assert_eq!(format!("{:?}", ButlerCommand::Shutdown), "Shutdown");
+    }
+
+    #[test]
+    fn test_butler_command_debug_stream_audio_file() {
+        let cmd = ButlerCommand::StreamAudioFile {
+            channel_index: 0,
+            file_path: PathBuf::from("/path/to/audio.wav"),
+            offset_samples: 1000,
+        };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("StreamAudioFile"));
+        assert!(debug.contains("channel_index: 0"));
+        assert!(debug.contains("audio.wav"));
+        assert!(debug.contains("offset_samples: 1000"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_stop_streaming() {
+        let cmd = ButlerCommand::StopStreaming { channel_index: 5 };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("StopStreaming"));
+        assert!(debug.contains("channel_index: 5"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_seek_stream() {
+        let cmd = ButlerCommand::SeekStream {
+            channel_index: 2,
+            position_samples: 44100,
+        };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("SeekStream"));
+        assert!(debug.contains("channel_index: 2"));
+        assert!(debug.contains("position_samples: 44100"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_set_loop_range() {
+        let cmd = ButlerCommand::SetLoopRange {
+            channel_index: 1,
+            start_samples: 0,
+            end_samples: 88200,
+            crossfade_samples: 512,
+        };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("SetLoopRange"));
+        assert!(debug.contains("channel_index: 1"));
+        assert!(debug.contains("start_samples: 0"));
+        assert!(debug.contains("end_samples: 88200"));
+        assert!(debug.contains("crossfade_samples: 512"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_clear_loop_range() {
+        let cmd = ButlerCommand::ClearLoopRange { channel_index: 3 };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("ClearLoopRange"));
+        assert!(debug.contains("channel_index: 3"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_set_varispeed() {
+        let cmd = ButlerCommand::SetVarispeed {
+            channel_index: 0,
+            direction: PlayDirection::Forward,
+            speed: 2.0,
+        };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("SetVarispeed"));
+        assert!(debug.contains("channel_index: 0"));
+        assert!(debug.contains("Forward"));
+        assert!(debug.contains("speed: 2.0"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_update_pdc_preroll() {
+        let cmd = ButlerCommand::UpdatePdcPreroll {
+            channel_index: 4,
+            new_preroll: 256,
+        };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("UpdatePdcPreroll"));
+        assert!(debug.contains("channel_index: 4"));
+        assert!(debug.contains("new_preroll: 256"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_remove_capture() {
+        let id = CaptureId(42);
+        let cmd = ButlerCommand::RemoveCapture(id);
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("RemoveCapture"));
+        assert!(debug.contains("42"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_flush() {
+        let req = FlushRequest::new(CaptureId(99));
+        let cmd = ButlerCommand::Flush(req);
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("Flush"));
+        assert!(debug.contains("99"));
+    }
+
+    #[test]
+    fn test_butler_command_debug_set_buffer_margin() {
+        let cmd = ButlerCommand::SetBufferMargin { margin: 1.5 };
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("SetBufferMargin"));
+        assert!(debug.contains("margin: 1.5"));
+    }
+
+    #[test]
+    fn test_region_id_equality() {
+        let id1 = RegionId(100);
+        let id2 = RegionId(100);
+        let id3 = RegionId(200);
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
+    }
+
+    #[test]
+    fn test_capture_id_equality() {
+        let id1 = CaptureId(100);
+        let id2 = CaptureId(100);
+        let id3 = CaptureId(200);
+        assert_eq!(id1, id2);
+        assert_ne!(id1, id3);
+    }
+
+    #[test]
+    fn test_butler_state_equality() {
+        assert_eq!(ButlerState::Running, ButlerState::Running);
+        assert_eq!(ButlerState::Paused, ButlerState::Paused);
+        assert_eq!(ButlerState::Shutdown, ButlerState::Shutdown);
+        assert_ne!(ButlerState::Running, ButlerState::Paused);
+    }
+}

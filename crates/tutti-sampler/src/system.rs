@@ -346,10 +346,9 @@ impl SamplerSystem {
     /// // Start streaming first
     /// sampler.stream_file(0, "audio.wav").start();
     ///
-    /// // Get the audio unit for the graph
-    /// if let Some(unit) = sampler.streaming_unit(0) {
-    ///     unit.play();
-    ///     // Insert unit into audio graph...
+    /// // Get the audio unit for the graph (auto-plays, like SamplerUnit)
+    /// if let Some(mut unit) = sampler.streaming_unit(0) {
+    ///     // Insert unit into audio graph and call tick()...
     /// }
     /// ```
     pub fn streaming_unit(&self, channel_index: usize) -> Option<crate::StreamingSamplerUnit> {

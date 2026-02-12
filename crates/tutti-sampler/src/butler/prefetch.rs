@@ -344,4 +344,116 @@ mod tests {
         let written = prod.write(&samples);
         assert!(written <= 4096);
     }
+
+    #[test]
+    fn test_clear_allows_refill() {
+        let region_id = RegionId::generate();
+        let capacity = 100;
+        let (mut prod, mut cons) =
+            RegionBuffer::with_capacity(region_id, PathBuf::from("test.wav"), capacity);
+
+        // Fill buffer with "section A" data (values 0.0 - 0.99)
+        let section_a: Vec<_> = (0..50).map(|i| (i as f32 / 100.0, i as f32 / 100.0)).collect();
+        let written = prod.write(&section_a);
+        assert_eq!(written, 50);
+
+        // Verify we can read section A
+        let first = cons.read().unwrap();
+        assert!((first.0 - 0.0).abs() < 0.001, "First sample should be ~0.0");
+
+        // Clear the buffer (simulating a seek)
+        cons.clear();
+
+        // After clear, write_space should be available for producer
+        let write_space_after_clear = prod.write_space();
+        assert!(
+            write_space_after_clear > 0,
+            "Producer should have write space after consumer clear, got {}",
+            write_space_after_clear
+        );
+
+        // Write "section B" data (values 1.0 - 1.49)
+        let section_b: Vec<_> = (0..50).map(|i| (1.0 + i as f32 / 100.0, 1.0 + i as f32 / 100.0)).collect();
+        let written_b = prod.write(&section_b);
+        assert!(written_b > 0, "Should be able to write after clear");
+
+        // Read from consumer - should get section B data
+        let sample_b = cons.read().unwrap();
+        assert!(
+            sample_b.0 >= 1.0,
+            "After clear and refill, should read section B (>=1.0), got {}",
+            sample_b.0
+        );
+    }
+
+    /// Test full buffer clear and refill scenario (simulates seek)
+    #[test]
+    fn test_full_buffer_seek_simulation() {
+        let region_id = RegionId::generate();
+        // Use a larger buffer to match more realistic scenarios
+        let capacity = 4096;
+        let (mut prod, mut cons) =
+            RegionBuffer::with_capacity(region_id, PathBuf::from("test.wav"), capacity);
+
+        // Fill buffer completely with "220Hz-like" data (low values)
+        let low_freq: Vec<_> = (0..4096).map(|i| {
+            let phase = (i as f32 * 0.03).sin(); // ~220Hz pattern
+            (phase, phase)
+        }).collect();
+        let written_low = prod.write(&low_freq);
+        eprintln!("Wrote {} low-freq samples", written_low);
+
+        // Read a few samples to simulate audio playback
+        for _ in 0..100 {
+            let _ = cons.read();
+        }
+
+        let write_space_before = prod.write_space();
+        eprintln!("Write space before clear: {}", write_space_before);
+
+        // Clear the buffer (simulating seek)
+        cons.clear();
+
+        let write_space_after = prod.write_space();
+        eprintln!("Write space after clear: {}", write_space_after);
+
+        // The key assertion: producer should see MORE write space after clear
+        assert!(
+            write_space_after > write_space_before,
+            "Producer write space should increase after clear: before={}, after={}",
+            write_space_before,
+            write_space_after
+        );
+
+        // Refill with "880Hz-like" data (high values)
+        let high_freq: Vec<_> = (0..write_space_after).map(|i| {
+            let phase = (i as f32 * 0.125).sin(); // ~880Hz pattern
+            (phase, phase)
+        }).collect();
+        let written_high = prod.write(&high_freq);
+        eprintln!("Wrote {} high-freq samples after clear", written_high);
+
+        // Read should get high-freq data, not low-freq
+        let sample = cons.read().unwrap();
+
+        // First sample of high-freq (i=0): sin(0) = 0.0
+        // Second sample: sin(0.125) ≈ 0.125
+        // Compare to low-freq first sample: sin(0) = 0.0, second: sin(0.03) ≈ 0.03
+
+        let sample2 = cons.read().unwrap();
+        let sample3 = cons.read().unwrap();
+        let sample_diff = sample3.0 - sample2.0;
+
+        eprintln!("Sample values: {:?}, {:?}, {:?}", sample, sample2, sample3);
+        eprintln!("Diff between samples: {}", sample_diff);
+
+        // High freq should have larger differences between samples
+        // Low freq: sin(0.03) - sin(0) ≈ 0.03
+        // High freq: sin(0.25) - sin(0.125) ≈ 0.12
+        assert!(
+            sample_diff.abs() > 0.05,
+            "After refill, should get high-freq data with larger sample diff, got {}",
+            sample_diff.abs()
+        );
+    }
 }
