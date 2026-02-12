@@ -1,7 +1,4 @@
-//! Shared memory for zero-copy audio buffer passing
-//!
-//! Audio buffers are passed between processes via shared memory to minimize
-//! latency and avoid data copying.
+//! Shared memory for zero-copy audio buffer passing.
 
 use crate::error::{BridgeError, Result};
 use memmap2::MmapMut;
@@ -19,33 +16,17 @@ use std::path::PathBuf;
 /// 1. Only one process writes to each channel at a time (single producer)
 /// 2. The memory is synchronized at the OS level via shared memory
 pub struct SharedAudioBuffer {
-    /// Memory-mapped region (wrapped in UnsafeCell for interior mutability)
     mmap: UnsafeCell<MmapMut>,
-
-    /// Buffer name/path
     name: String,
-
-    /// Number of channels
     channels: usize,
-
-    /// Number of samples per channel
     samples: usize,
-
     /// Sample format (f32 or f64)
     sample_format: crate::protocol::SampleFormat,
-
     /// Whether this instance owns the shared memory (should clean up on drop)
     owns_memory: bool,
 }
 
 impl SharedAudioBuffer {
-    /// Create a new shared buffer
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Unique buffer name
-    /// * `channels` - Number of audio channels
-    /// * `samples` - Number of samples per channel
     pub fn create(name: String, channels: usize, samples: usize) -> Result<Self> {
         Self::create_with_format(
             name,
@@ -84,7 +65,7 @@ impl SharedAudioBuffer {
         })
     }
 
-    /// Open an existing shared buffer (assumes f32)
+    /// Assumes f32 format.
     pub fn open(name: String, channels: usize, samples: usize) -> Result<Self> {
         Self::open_with_format(
             name,
@@ -129,7 +110,6 @@ impl SharedAudioBuffer {
 
         let path = Self::shm_path_unix(name);
 
-        // Create shared memory file
         let file = OpenOptions::new()
             .read(true)
             .write(true)
@@ -144,12 +124,10 @@ impl SharedAudioBuffer {
                 ))
             })?;
 
-        // Set file size
         file.set_len(size as u64).map_err(|e| {
             BridgeError::SharedMemoryError(format!("Failed to set file size: {}", e))
         })?;
 
-        // Memory map it
         let mmap = unsafe { MmapMut::map_mut(&file) }.map_err(|e| {
             BridgeError::SharedMemoryError(format!("Failed to create memory map: {}", e))
         })?;
@@ -190,7 +168,6 @@ impl SharedAudioBuffer {
 
     #[cfg(windows)]
     fn create_windows(name: &str, size: usize) -> Result<MmapMut> {
-        // File-backed memory mapping for cross-platform compatibility.
         // Windows native shared memory (CreateFileMapping with INVALID_HANDLE_VALUE)
         // would be more efficient, but memmap2 doesn't expose that API.
         let temp_dir = std::env::temp_dir();
@@ -203,10 +180,8 @@ impl SharedAudioBuffer {
             .truncate(true)
             .open(&path)?;
 
-        // Set file size
         file.set_len(size as u64)?;
 
-        // Memory map it
         let mmap = unsafe { MmapMut::map_mut(&file) }?;
 
         Ok(mmap)
@@ -256,7 +231,6 @@ impl SharedAudioBuffer {
         let mmap = unsafe { &mut *self.mmap.get() };
         let slice = &mut mmap[offset..offset + std::mem::size_of_val(data)];
 
-        // Copy as bytes
         let bytes = unsafe {
             std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data))
         };
@@ -266,7 +240,7 @@ impl SharedAudioBuffer {
         Ok(())
     }
 
-    /// Read audio data from the buffer (allocates Vec)
+    /// Allocates a new Vec.
     pub fn read_channel(&self, channel: usize) -> Result<Vec<f32>> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(
@@ -280,7 +254,6 @@ impl SharedAudioBuffer {
         let mmap = unsafe { &*self.mmap.get() };
         let slice = &mmap[offset..offset + self.samples * std::mem::size_of::<f32>()];
 
-        // Read as f32
         let mut data = vec![0.0f32; self.samples];
         let bytes = unsafe {
             std::slice::from_raw_parts_mut(
@@ -295,9 +268,6 @@ impl SharedAudioBuffer {
     }
 
     /// Read channel data directly into provided buffer (zero-copy, RT-safe)
-    ///
-    /// Returns the number of samples actually copied.
-    /// The output buffer should be at least `self.samples()` in length.
     pub fn read_channel_into(&self, channel: usize, output: &mut [f32]) -> Result<usize> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(
@@ -311,11 +281,9 @@ impl SharedAudioBuffer {
         let mmap = unsafe { &*self.mmap.get() };
         let slice = &mmap[offset..offset + self.samples * std::mem::size_of::<f32>()];
 
-        // Determine how many samples to copy
         let copy_samples = self.samples.min(output.len());
         let copy_bytes = copy_samples * std::mem::size_of::<f32>();
 
-        // Read as f32 directly into output
         let bytes =
             unsafe { std::slice::from_raw_parts_mut(output.as_mut_ptr() as *mut u8, copy_bytes) };
 
@@ -324,22 +292,18 @@ impl SharedAudioBuffer {
         Ok(copy_samples)
     }
 
-    /// Get the buffer name
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Get number of channels
     pub fn channels(&self) -> usize {
         self.channels
     }
 
-    /// Get number of samples
     pub fn samples(&self) -> usize {
         self.samples
     }
 
-    /// Get sample format
     pub fn sample_format(&self) -> crate::protocol::SampleFormat {
         self.sample_format
     }
@@ -364,7 +328,6 @@ impl SharedAudioBuffer {
         let mmap = unsafe { &mut *self.mmap.get() };
         let slice = &mut mmap[offset..offset + std::mem::size_of_val(data)];
 
-        // Copy as bytes
         let bytes = unsafe {
             std::slice::from_raw_parts(data.as_ptr() as *const u8, std::mem::size_of_val(data))
         };
@@ -388,7 +351,6 @@ impl SharedAudioBuffer {
         let mmap = unsafe { &*self.mmap.get() };
         let slice = &mmap[offset..offset + self.samples * std::mem::size_of::<f64>()];
 
-        // Read as f64
         let mut data = vec![0.0f64; self.samples];
         let bytes = unsafe {
             std::slice::from_raw_parts_mut(
@@ -416,11 +378,9 @@ impl SharedAudioBuffer {
         let mmap = unsafe { &*self.mmap.get() };
         let slice = &mmap[offset..offset + self.samples * std::mem::size_of::<f64>()];
 
-        // Determine how many samples to copy
         let copy_samples = self.samples.min(output.len());
         let copy_bytes = copy_samples * std::mem::size_of::<f64>();
 
-        // Read as f64 directly into output
         let bytes =
             unsafe { std::slice::from_raw_parts_mut(output.as_mut_ptr() as *mut u8, copy_bytes) };
 
@@ -577,5 +537,58 @@ mod tests {
 
         let cloned = original.clone();
         assert_eq!(cloned.sample_format(), SampleFormat::Float64);
+    }
+
+    #[test]
+    fn test_shared_buffer_f32_read_into() {
+        let name = format!("test_buffer_f32_into_{}", std::process::id());
+        let channels = 1;
+        let samples = 128;
+
+        let buffer = SharedAudioBuffer::create(name, channels, samples).unwrap();
+
+        let test_data: Vec<f32> = (0..samples).map(|i| (i as f32).sin()).collect();
+        buffer.write_channel(0, &test_data).unwrap();
+
+        let mut output = vec![0.0f32; samples];
+        let copied = buffer.read_channel_into(0, &mut output).unwrap();
+
+        assert_eq!(copied, samples);
+        assert_eq!(test_data, output);
+    }
+
+    #[test]
+    fn test_write_channel_out_of_bounds() {
+        let name = format!("test_oob_write_{}", std::process::id());
+        let buffer = SharedAudioBuffer::create(name, 2, 64).unwrap();
+        let data = vec![0.0f32; 64];
+        // Channel 2 doesn't exist (0 and 1 only)
+        assert!(buffer.write_channel(2, &data).is_err());
+        assert!(buffer.write_channel(100, &data).is_err());
+    }
+
+    #[test]
+    fn test_write_channel_oversized_data() {
+        let name = format!("test_oversize_{}", std::process::id());
+        let buffer = SharedAudioBuffer::create(name, 1, 64).unwrap();
+        let data = vec![0.0f32; 128]; // 128 > 64 samples
+        assert!(buffer.write_channel(0, &data).is_err());
+    }
+
+    #[test]
+    fn test_read_channel_out_of_bounds() {
+        let name = format!("test_oob_read_{}", std::process::id());
+        let buffer = SharedAudioBuffer::create(name, 2, 64).unwrap();
+        assert!(buffer.read_channel(2).is_err());
+        assert!(buffer.read_channel(100).is_err());
+    }
+
+    #[test]
+    fn test_getters() {
+        let name = format!("test_getters_{}", std::process::id());
+        let buffer = SharedAudioBuffer::create(name.clone(), 4, 256).unwrap();
+        assert_eq!(buffer.name(), name);
+        assert_eq!(buffer.channels(), 4);
+        assert_eq!(buffer.samples(), 256);
     }
 }

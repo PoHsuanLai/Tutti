@@ -23,7 +23,7 @@ fn default_block_size() -> usize {
 pub use crate::metadata::PluginMetadata;
 pub use tutti_midi_io::MidiEvent;
 
-/// IPC-serializable MIDI event (raw bytes format for cross-process communication).
+/// Raw bytes MIDI event for IPC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcMidiEvent {
     pub frame_offset: usize,
@@ -90,16 +90,9 @@ pub struct ParameterPoint {
     pub value: f64,
 }
 
-/// SmallVec type for automation points (RT-safe for typical counts)
 pub type ParameterPointVec = SmallVec<[ParameterPoint; PARAM_POINT_STACK_CAPACITY]>;
 
-/// Parameter automation queue.
-///
 /// `param_id` is the format-native identifier (VST3 ParamID, CLAP clap_id, or VST2 index).
-///
-/// ## RT Safety
-///
-/// Uses `SmallVec` internally - no heap allocation for up to 4 points per parameter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterQueue {
     pub param_id: u32,
@@ -122,15 +115,9 @@ impl ParameterQueue {
     }
 }
 
-/// SmallVec type for parameter queues (RT-safe for typical counts)
 pub type ParameterQueueVec = SmallVec<[ParameterQueue; PARAM_QUEUE_STACK_CAPACITY]>;
 
 /// Collection of parameter automation changes.
-///
-/// ## RT Safety
-///
-/// Uses `SmallVec` internally - no heap allocation for up to 8 parameter queues.
-/// Clone is RT-safe when within stack capacity.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParameterChanges {
     pub queues: ParameterQueueVec,
@@ -159,8 +146,6 @@ pub struct ParameterFlags {
     pub hidden: bool,
 }
 
-/// Parameter metadata.
-///
 /// `id` is the format-native identifier (VST3 ParamID, CLAP clap_id, or VST2 index).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParameterInfo {
@@ -245,15 +230,9 @@ pub struct NoteExpressionValue {
     pub value: f64,
 }
 
-/// SmallVec type for note expression changes (RT-safe for typical counts)
 pub type NoteExpressionVec = SmallVec<[NoteExpressionValue; NOTE_EXPR_STACK_CAPACITY]>;
 
 /// Collection of note expression changes.
-///
-/// ## RT Safety
-///
-/// Uses `SmallVec` internally - no heap allocation for up to 8 expression changes.
-/// Clone is RT-safe when within stack capacity.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NoteExpressionChanges {
     pub changes: NoteExpressionVec,
@@ -316,6 +295,25 @@ pub struct AudioBuffer<'a, T = f32> {
 pub type AudioBuffer32<'a> = AudioBuffer<'a, f32>;
 pub type AudioBuffer64<'a> = AudioBuffer<'a, f64>;
 
+/// Data for `HostMessage::ProcessAudioMidi`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessAudioMidiData {
+    pub buffer_id: u32,
+    pub num_samples: usize,
+    pub midi_events: IpcMidiEventVec,
+}
+
+/// Data for `HostMessage::ProcessAudioFull`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessAudioFullData {
+    pub buffer_id: u32,
+    pub num_samples: usize,
+    pub midi_events: IpcMidiEventVec,
+    pub param_changes: ParameterChanges,
+    pub note_expression: NoteExpressionChanges,
+    pub transport: TransportInfo,
+}
+
 /// Host to bridge message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HostMessage {
@@ -326,25 +324,17 @@ pub enum HostMessage {
         block_size: usize,
         #[serde(default)]
         preferred_format: SampleFormat,
+        /// Shared memory name created by the client for audio I/O.
+        #[serde(default)]
+        shm_name: String,
     },
     UnloadPlugin,
     ProcessAudio {
         buffer_id: u32,
         num_samples: usize,
     },
-    ProcessAudioMidi {
-        buffer_id: u32,
-        num_samples: usize,
-        midi_events: IpcMidiEventVec,
-    },
-    ProcessAudioFull {
-        buffer_id: u32,
-        num_samples: usize,
-        midi_events: IpcMidiEventVec,
-        param_changes: ParameterChanges,
-        note_expression: NoteExpressionChanges,
-        transport: TransportInfo,
-    },
+    ProcessAudioMidi(Box<ProcessAudioMidiData>),
+    ProcessAudioFull(Box<ProcessAudioFullData>),
     SetParameter {
         param_id: u32,
         value: f32,
@@ -372,6 +362,22 @@ pub enum HostMessage {
     Shutdown,
 }
 
+/// Data for `BridgeMessage::AudioProcessedMidi`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioProcessedMidiData {
+    pub latency_us: u64,
+    pub midi_output: IpcMidiEventVec,
+}
+
+/// Data for `BridgeMessage::AudioProcessedFull`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AudioProcessedFullData {
+    pub latency_us: u64,
+    pub midi_output: IpcMidiEventVec,
+    pub param_output: ParameterChanges,
+    pub note_expression_output: NoteExpressionChanges,
+}
+
 /// Bridge to host message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BridgeMessage {
@@ -382,16 +388,8 @@ pub enum BridgeMessage {
     AudioProcessed {
         latency_us: u64,
     },
-    AudioProcessedMidi {
-        latency_us: u64,
-        midi_output: IpcMidiEventVec,
-    },
-    AudioProcessedFull {
-        latency_us: u64,
-        midi_output: IpcMidiEventVec,
-        param_output: ParameterChanges,
-        note_expression_output: NoteExpressionChanges,
-    },
+    AudioProcessedMidi(Box<AudioProcessedMidiData>),
+    AudioProcessedFull(Box<AudioProcessedFullData>),
     ParameterValue {
         value: Option<f32>,
     },
@@ -456,6 +454,7 @@ impl Default for BridgeConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tutti_core::ParameterScale;
 
     #[test]
     fn test_message_serialization() {
@@ -464,6 +463,7 @@ mod tests {
             sample_rate: 44100.0,
             block_size: 512,
             preferred_format: SampleFormat::Float32,
+            shm_name: String::new(),
         };
 
         let encoded = bincode::serialize(&msg).unwrap();
@@ -478,13 +478,6 @@ mod tests {
             }
             _ => panic!("Wrong message type"),
         }
-    }
-
-    #[test]
-    fn test_bridge_config_default() {
-        let config = BridgeConfig::default();
-        assert_eq!(config.max_buffer_size, 8192);
-        assert_eq!(config.timeout_ms, 5000);
     }
 
     #[test]
@@ -521,21 +514,20 @@ mod tests {
         .map(IpcMidiEvent::from)
         .collect();
 
-        let msg = HostMessage::ProcessAudioMidi {
+        let msg = HostMessage::ProcessAudioMidi(Box::new(ProcessAudioMidiData {
             buffer_id: 42,
             num_samples: 512,
             midi_events,
-        };
+        }));
 
         let encoded = bincode::serialize(&msg).unwrap();
         let decoded: HostMessage = bincode::deserialize(&encoded).unwrap();
 
         match decoded {
-            HostMessage::ProcessAudioMidi {
-                buffer_id,
-                num_samples,
-                midi_events: decoded_events,
-            } => {
+            HostMessage::ProcessAudioMidi(data) => {
+                let buffer_id = data.buffer_id;
+                let num_samples = data.num_samples;
+                let decoded_events = data.midi_events;
                 assert_eq!(buffer_id, 42);
                 assert_eq!(num_samples, 512);
                 assert_eq!(decoded_events.len(), 3);
@@ -573,20 +565,18 @@ mod tests {
         .map(IpcMidiEvent::from)
         .collect();
 
-        let msg = BridgeMessage::AudioProcessedMidi {
+        let msg = BridgeMessage::AudioProcessedMidi(Box::new(AudioProcessedMidiData {
             latency_us: 1500,
             midi_output,
-        };
+        }));
 
         let encoded = bincode::serialize(&msg).unwrap();
         let decoded: BridgeMessage = bincode::deserialize(&encoded).unwrap();
 
         match decoded {
-            BridgeMessage::AudioProcessedMidi {
-                latency_us,
-                midi_output: decoded_output,
-            } => {
-                assert_eq!(latency_us, 1500);
+            BridgeMessage::AudioProcessedMidi(data) => {
+                assert_eq!(data.latency_us, 1500);
+                let decoded_output = data.midi_output;
                 assert_eq!(decoded_output.len(), 2);
 
                 let events: Vec<MidiEvent> = decoded_output
@@ -607,6 +597,7 @@ mod tests {
             sample_rate: 96000.0,
             block_size: 1024,
             preferred_format: SampleFormat::Float64,
+            shm_name: "test_shm".to_string(),
         };
 
         let encoded = bincode::serialize(&msg).unwrap();
@@ -618,6 +609,7 @@ mod tests {
                 sample_rate,
                 block_size,
                 preferred_format,
+                ..
             } => {
                 assert_eq!(path, PathBuf::from("/test/reverb.vst3"));
                 assert_eq!(sample_rate, 96000.0);
@@ -628,14 +620,116 @@ mod tests {
         }
     }
 
+    // --- ParameterInfo::to_range() ---
+
     #[test]
-    fn test_sample_format_default() {
-        assert_eq!(SampleFormat::default(), SampleFormat::Float32);
+    fn test_to_range_toggle() {
+        let mut info = ParameterInfo::new(1, "Bypass".to_string());
+        info.step_count = 1;
+        let range = info.to_range();
+        assert_eq!(range.scale, ParameterScale::Toggle);
     }
 
     #[test]
-    fn test_bridge_config_default_format() {
-        let config = BridgeConfig::default();
-        assert_eq!(config.preferred_format, SampleFormat::Float32);
+    fn test_to_range_integer() {
+        let mut info = ParameterInfo::new(2, "Algorithm".to_string());
+        info.step_count = 5;
+        let range = info.to_range();
+        assert_eq!(range.scale, ParameterScale::Integer);
+    }
+
+    #[test]
+    fn test_to_range_logarithmic_db() {
+        let mut info = ParameterInfo::new(3, "Gain".to_string());
+        info.unit = "dB".to_string();
+        info.min_value = 0.001;
+        info.max_value = 10.0;
+        let range = info.to_range();
+        assert_eq!(range.scale, ParameterScale::Logarithmic);
+    }
+
+    #[test]
+    fn test_to_range_logarithmic_hz() {
+        let mut info = ParameterInfo::new(4, "Cutoff".to_string());
+        info.unit = "Hz".to_string();
+        info.min_value = 20.0;
+        info.max_value = 20000.0;
+        let range = info.to_range();
+        assert_eq!(range.scale, ParameterScale::Logarithmic);
+    }
+
+    #[test]
+    fn test_to_range_log_fallback_non_positive_min() {
+        let mut info = ParameterInfo::new(5, "Freq".to_string());
+        info.unit = "Hz".to_string();
+        info.min_value = 0.0;
+        info.max_value = 20000.0;
+        let range = info.to_range();
+        // Falls back to Linear because log requires positive min
+        assert_eq!(range.scale, ParameterScale::Linear);
+    }
+
+    #[test]
+    fn test_to_range_linear_default() {
+        let info = ParameterInfo::new(6, "Mix".to_string());
+        let range = info.to_range();
+        assert_eq!(range.scale, ParameterScale::Linear);
+    }
+
+    #[test]
+    fn test_to_range_values_preserved() {
+        let mut info = ParameterInfo::new(7, "Volume".to_string());
+        info.min_value = -96.0;
+        info.max_value = 6.0;
+        info.default_value = -12.0;
+        let range = info.to_range();
+        assert_eq!(range.min, -96.0);
+        assert_eq!(range.max, 6.0);
+        assert_eq!(range.default, -12.0);
+    }
+
+    // --- Collections ---
+
+    #[test]
+    fn test_parameter_changes_add_queue() {
+        let mut changes = ParameterChanges::new();
+        assert!(changes.is_empty());
+
+        let mut queue = ParameterQueue::new(42);
+        queue.add_point(0, 0.5);
+        queue.add_point(128, 0.8);
+        changes.add_queue(queue);
+
+        assert!(!changes.is_empty());
+        assert_eq!(changes.queues.len(), 1);
+        assert_eq!(changes.queues[0].param_id, 42);
+        assert_eq!(changes.queues[0].points.len(), 2);
+    }
+
+    #[test]
+    fn test_note_expression_add_change() {
+        let mut expr = NoteExpressionChanges::new();
+        assert!(expr.is_empty());
+
+        expr.add_change(NoteExpressionValue {
+            sample_offset: 0,
+            note_id: 1,
+            expression_type: NoteExpressionType::Tuning,
+            value: 0.5,
+        });
+
+        assert!(!expr.is_empty());
+        assert_eq!(expr.changes.len(), 1);
+        assert_eq!(expr.changes[0].expression_type, NoteExpressionType::Tuning);
+    }
+
+    #[test]
+    fn test_transport_info_default() {
+        let info = TransportInfo::default();
+        assert_eq!(info.tempo, 120.0);
+        assert_eq!(info.time_sig_numerator, 4);
+        assert_eq!(info.time_sig_denominator, 4);
+        assert!(!info.playing);
+        assert!(!info.recording);
     }
 }

@@ -67,7 +67,7 @@ tracing-subscriber = "0.3"
 vst = { version = "0.3", optional = true }
 
 # CLAP plugin hosting (optional)
-clap-host = { git = "https://github.com/PoHsuanLai/clap-host", optional = true }
+clap-host = { path = "../clap-host", optional = true }
 
 # VST3 plugin hosting (optional)
 vst3-host = { git = "https://github.com/PoHsuanLai/vst3-host", optional = true }

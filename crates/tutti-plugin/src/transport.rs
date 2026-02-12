@@ -71,4 +71,28 @@ impl MessageTransport {
             Ok(bincode::deserialize(&data)?)
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn from_stream(stream: UnixStream) -> Self {
+        Self { stream }
+    }
+
+    /// Create from a std UnixStream. Must be called inside a tokio runtime context.
+    #[cfg(all(test, unix))]
+    pub(crate) fn from_std_stream(stream: std::os::unix::net::UnixStream) -> Result<Self> {
+        let stream = UnixStream::from_std(stream)?;
+        Ok(Self { stream })
+    }
+
+    pub async fn recv_with_timeout(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<BridgeMessage> {
+        tokio::time::timeout(timeout, self.recv_bridge_message())
+            .await
+            .map_err(|_| crate::error::BridgeError::Timeout {
+                operation: "recv_bridge_message".to_string(),
+                duration_ms: timeout.as_millis() as u64,
+            })?
+    }
 }

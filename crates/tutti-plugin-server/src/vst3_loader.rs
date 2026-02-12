@@ -11,16 +11,12 @@ use tutti_plugin::protocol::{
     ParameterChanges, ParameterPoint, ParameterQueue, TransportInfo,
 };
 
-// Import tutti_midi_io types for conversion
 use tutti_midi_io::{Channel, ChannelVoiceMsg, ControlChange};
 
 // Re-export the vst3-host crate for advanced users
 pub use vst3_host;
 
-/// VST3 plugin instance wrapper for Tutti.
-///
-/// This wraps `vst3_host::Vst3Instance` and provides conversion between
-/// Tutti's protocol types and vst3-host's generic types.
+/// Wraps `vst3_host::Vst3Instance`, implements `PluginInstance` trait.
 pub struct Vst3Instance {
     inner: vst3_host::Vst3Instance,
     metadata: PluginMetadata,
@@ -52,22 +48,22 @@ impl Vst3Instance {
             })?;
 
         let info = inner.info();
+        let has_editor = inner.has_editor();
         let metadata = PluginMetadata::new(info.id.clone(), info.name.clone())
             .author(info.vendor.clone())
             .version(info.version.clone())
             .audio_io(info.num_inputs, info.num_outputs)
             .midi(info.has_midi_input)
-            .f64_support(info.supports_f64);
+            .f64_support(info.supports_f64)
+            .editor(has_editor, None);
 
         Ok(Self { inner, metadata })
     }
 
-    /// Get plugin metadata.
     pub fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
 
-    /// Check if this plugin supports 64-bit (f64) audio processing.
     pub fn supports_f64(&self) -> bool {
         self.inner.supports_f64()
     }
@@ -77,7 +73,6 @@ impl Vst3Instance {
         self.inner.supports_f64()
     }
 
-    /// Set the sample format (f32 or f64).
     pub fn set_sample_format(&mut self, format: tutti_plugin::protocol::SampleFormat) -> Result<()> {
         let use_f64 = matches!(format, tutti_plugin::protocol::SampleFormat::Float64);
         self.inner
@@ -89,7 +84,6 @@ impl Vst3Instance {
             })
     }
 
-    /// Process audio with MIDI events.
     pub fn process_with_midi<'a>(
         &mut self,
         buffer: &'a mut AudioBuffer<'a>,
@@ -121,7 +115,6 @@ impl Vst3Instance {
             .collect()
     }
 
-    /// Process audio with MIDI events and transport info.
     pub fn process_with_transport<'a>(
         &mut self,
         buffer: &'a mut AudioBuffer<'a>,
@@ -150,7 +143,6 @@ impl Vst3Instance {
             .collect()
     }
 
-    /// Process audio with full automation (MIDI + parameter changes + note expression).
     pub fn process_with_automation<'a>(
         &mut self,
         buffer: &'a mut AudioBuffer<'a>,
@@ -190,7 +182,6 @@ impl Vst3Instance {
         (tutti_midi, tutti_params, NoteExpressionChanges::new())
     }
 
-    /// Process audio with f64 buffers.
     pub fn process_with_midi_f64<'a>(
         &mut self,
         buffer: &'a mut AudioBuffer64<'a>,
@@ -217,7 +208,6 @@ impl Vst3Instance {
             .collect()
     }
 
-    /// Process audio with f64 buffers and transport info.
     pub fn process_with_transport_f64<'a>(
         &mut self,
         buffer: &'a mut AudioBuffer64<'a>,
@@ -245,7 +235,6 @@ impl Vst3Instance {
             .collect()
     }
 
-    /// Process audio with f64 buffers and full automation.
     pub fn process_with_automation_f64<'a>(
         &mut self,
         buffer: &'a mut AudioBuffer64<'a>,
@@ -285,7 +274,7 @@ impl Vst3Instance {
         (tutti_midi, tutti_params, NoteExpressionChanges::new())
     }
 
-    /// Simple f64 processing (no MIDI, no automation).
+    /// No MIDI, no automation.
     pub fn process_f64<'a>(&mut self, buffer: &'a mut AudioBuffer64<'a>) {
         let mut vst3_buffer = vst3_host::AudioBuffer::new(
             buffer.inputs,
@@ -301,33 +290,25 @@ impl Vst3Instance {
             .process::<f64, _>(&mut vst3_buffer, &empty_midi, None, &[], &transport);
     }
 
-    /// Set sample rate.
     pub fn set_sample_rate(&mut self, rate: f64) {
         self.inner.set_sample_rate(rate);
     }
 
-    /// Get parameter count.
     pub fn get_parameter_count(&self) -> i32 {
         self.inner.get_parameter_count()
     }
 
-    /// Get parameter value by native ParamID (normalized 0-1).
-    ///
     /// Note: VST3 ParamIDs are stable identifiers that may be sparse (e.g., 0, 5, 1000).
     /// Use `get_parameter_count()` and the underlying VST3 API to enumerate parameters.
     pub fn get_parameter_by_id(&self, param_id: u32) -> f64 {
         self.inner.get_parameter(param_id)
     }
 
-    /// Set parameter value by native ParamID (normalized 0-1).
-    ///
     /// Note: VST3 ParamIDs are stable identifiers that may be sparse (e.g., 0, 5, 1000).
     pub fn set_parameter_by_id(&mut self, param_id: u32, value: f64) {
         self.inner.set_parameter(param_id, value);
     }
 
-    /// Get list of all parameters with their metadata.
-    ///
     /// For VST3, the param_id is the native ParamID which may be sparse.
     pub fn get_parameter_list(&self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         let count = self.inner.get_parameter_count();
@@ -359,7 +340,6 @@ impl Vst3Instance {
         result
     }
 
-    /// Get info about a specific parameter by its native ParamID.
     pub fn get_parameter_info(&self, param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
         // VST3 getParameterInfo takes an index, not an ID.
         // We need to iterate to find the matching ID.
@@ -393,27 +373,18 @@ impl Vst3Instance {
         None
     }
 
-    /// Save plugin state.
     pub fn get_state(&self) -> Result<Vec<u8>> {
-        self.inner.get_state().map_err(|e| BridgeError::LoadFailed {
-            path: std::path::PathBuf::from("state"),
-            stage: LoadStage::Initialization,
-            reason: e.to_string(),
-        })
+        self.inner
+            .get_state()
+            .map_err(|e| BridgeError::StateSaveError(e.to_string()))
     }
 
-    /// Load plugin state.
     pub fn set_state(&mut self, data: &[u8]) -> Result<()> {
         self.inner
             .set_state(data)
-            .map_err(|e| BridgeError::LoadFailed {
-                path: std::path::PathBuf::from("state"),
-                stage: LoadStage::Initialization,
-                reason: e.to_string(),
-            })
+            .map_err(|e| BridgeError::StateRestoreError(e.to_string()))
     }
 
-    /// Check if plugin has editor.
     pub fn has_editor(&self) -> bool {
         self.inner.has_editor()
     }
@@ -426,14 +397,9 @@ impl Vst3Instance {
     pub unsafe fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
         self.inner
             .open_editor(parent)
-            .map_err(|e| BridgeError::LoadFailed {
-                path: std::path::PathBuf::from("editor"),
-                stage: LoadStage::Initialization,
-                reason: e.to_string(),
-            })
+            .map_err(|e| BridgeError::EditorError(e.to_string()))
     }
 
-    /// Close plugin editor.
     pub fn close_editor(&mut self) {
         self.inner.close_editor();
     }
@@ -564,6 +530,7 @@ impl vst3_host::Vst3MidiEvent for TuttiMidiWrapper<'_> {
             ChannelVoiceMsg::PitchBend { bend } => {
                 let mut h = header;
                 h.event_type = K_DATA_EVENT;
+                let bend = (bend as u16).min(16383);
                 let mut bytes = [0u8; 16];
                 bytes[0] = 0xE0 | (self.event.channel as u8);
                 bytes[1] = (bend & 0x7F) as u8;
@@ -687,7 +654,6 @@ fn convert_vst3_midi_to_tutti(event: &vst3_host::MidiEvent) -> Option<MidiEvent>
     })
 }
 
-// Implement the unified PluginInstance trait
 impl crate::instance::PluginInstance for Vst3Instance {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
@@ -822,7 +788,7 @@ impl crate::instance::PluginInstance for Vst3Instance {
     unsafe fn open_editor(
         &mut self,
         parent: *mut std::ffi::c_void,
-    ) -> crate::error::Result<(u32, u32)> {
+    ) -> Result<(u32, u32)> {
         Vst3Instance::open_editor(self, parent)
     }
 
@@ -834,11 +800,215 @@ impl crate::instance::PluginInstance for Vst3Instance {
         // VST3 doesn't have explicit idle
     }
 
-    fn get_state(&mut self) -> crate::error::Result<Vec<u8>> {
+    fn get_state(&mut self) -> Result<Vec<u8>> {
         Vst3Instance::get_state(self)
     }
 
-    fn set_state(&mut self, data: &[u8]) -> crate::error::Result<()> {
+    fn set_state(&mut self, data: &[u8]) -> Result<()> {
         Vst3Instance::set_state(self, data)
+    }
+}
+
+#[cfg(test)]
+#[cfg(feature = "vst3")]
+mod tests {
+    use super::*;
+    use crate::instance::PluginInstance;
+    use std::path::Path;
+    use tutti_midi_io::{Channel, ChannelVoiceMsg};
+    use tutti_plugin::protocol::MidiEvent;
+
+    const VST3_PLUGIN: &str = "/Library/Audio/Plug-Ins/VST3/TAL-NoiseMaker.vst3";
+
+    #[test]
+    fn test_vst3_load() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = Path::new(VST3_PLUGIN);
+        let instance = Vst3Instance::load(path, 44100.0, 512);
+        assert!(
+            instance.is_ok(),
+            "Failed to load VST3 plugin: {:?}",
+            instance.err()
+        );
+
+        let instance = instance.unwrap();
+        let meta = instance.metadata();
+        assert!(!meta.name.is_empty(), "Plugin name should not be empty");
+        assert!(!meta.id.is_empty(), "Plugin id should not be empty");
+    }
+
+    #[test]
+    fn test_vst3_metadata() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = Path::new(VST3_PLUGIN);
+        let instance = Vst3Instance::load(path, 44100.0, 512).expect("Failed to load VST3 plugin");
+        let meta = instance.metadata();
+
+        assert!(
+            meta.audio_io.outputs > 0,
+            "Expected audio outputs > 0, got {}",
+            meta.audio_io.outputs
+        );
+    }
+
+    #[test]
+    fn test_vst3_parameter_count() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = Path::new(VST3_PLUGIN);
+        let instance = Vst3Instance::load(path, 44100.0, 512).expect("Failed to load VST3 plugin");
+
+        let count = instance.get_parameter_count();
+        assert!(
+            count > 0,
+            "TAL-NoiseMaker should have parameters, got {}",
+            count
+        );
+    }
+
+    #[test]
+    fn test_vst3_parameter_list() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = Path::new(VST3_PLUGIN);
+        let instance = Vst3Instance::load(path, 44100.0, 512).expect("Failed to load VST3 plugin");
+
+        let params = instance.get_parameter_list();
+        assert!(
+            !params.is_empty(),
+            "Parameter list should not be empty for TAL-NoiseMaker"
+        );
+
+        for param in &params {
+            assert!(
+                !param.name.is_empty(),
+                "Parameter id {} has empty name",
+                param.id
+            );
+        }
+    }
+
+    #[test]
+    fn test_vst3_get_parameter() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = Path::new(VST3_PLUGIN);
+        let instance = Vst3Instance::load(path, 44100.0, 512).expect("Failed to load VST3 plugin");
+
+        let params = instance.get_parameter_list();
+        assert!(!params.is_empty(), "Need at least one parameter");
+
+        let first_id = params[0].id;
+        let value = instance.get_parameter_by_id(first_id);
+        assert!(
+            value.is_finite(),
+            "Parameter value should be finite, got {}",
+            value
+        );
+    }
+
+    #[test]
+    fn test_vst3_process_f32_silence() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = Path::new(VST3_PLUGIN);
+        let mut instance =
+            Vst3Instance::load(path, 44100.0, 512).expect("Failed to load VST3 plugin");
+
+        let num_samples = 512;
+        let input_data = vec![vec![0.0f32; num_samples]; 2];
+        let mut output_data = vec![vec![0.0f32; num_samples]; 2];
+
+        let input_slices: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
+        let mut output_slices: Vec<&mut [f32]> =
+            output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        let mut buffer = AudioBuffer {
+            inputs: &input_slices,
+            outputs: &mut output_slices,
+            num_samples,
+            sample_rate: 44100.0,
+        };
+
+        let ctx = crate::instance::ProcessContext::new();
+        // Should not panic
+        let _output = PluginInstance::process_f32(&mut instance, &mut buffer, &ctx);
+    }
+
+    #[test]
+    fn test_vst3_process_f32_with_note() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = Path::new(VST3_PLUGIN);
+        let mut instance =
+            Vst3Instance::load(path, 44100.0, 512).expect("Failed to load VST3 plugin");
+
+        let num_samples = 512;
+        let note_on = [MidiEvent {
+            frame_offset: 0,
+            channel: Channel::Ch1,
+            msg: ChannelVoiceMsg::NoteOn {
+                note: 60,
+                velocity: 100,
+            },
+        }];
+
+        let mut has_nonzero = false;
+
+        // Process block with NoteOn
+        {
+            let input_data = vec![vec![0.0f32; num_samples]; 2];
+            let mut output_data = vec![vec![0.0f32; num_samples]; 2];
+
+            let input_slices: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
+            let mut output_slices: Vec<&mut [f32]> =
+                output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+            let mut buffer = AudioBuffer {
+                inputs: &input_slices,
+                outputs: &mut output_slices,
+                num_samples,
+                sample_rate: 44100.0,
+            };
+
+            let ctx = crate::instance::ProcessContext::new().midi(&note_on);
+            let _output = PluginInstance::process_f32(&mut instance, &mut buffer, &ctx);
+
+            for ch in output_data.iter() {
+                for &sample in ch.iter() {
+                    if sample != 0.0 {
+                        has_nonzero = true;
+                    }
+                }
+            }
+        }
+
+        // Process additional blocks to give the synth time to produce sound
+        let empty_ctx = crate::instance::ProcessContext::new();
+        for _ in 0..4 {
+            let input_data = vec![vec![0.0f32; num_samples]; 2];
+            let mut output_data = vec![vec![0.0f32; num_samples]; 2];
+
+            let input_slices: Vec<&[f32]> = input_data.iter().map(|v| v.as_slice()).collect();
+            let mut output_slices: Vec<&mut [f32]> =
+                output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+            let mut buffer = AudioBuffer {
+                inputs: &input_slices,
+                outputs: &mut output_slices,
+                num_samples,
+                sample_rate: 44100.0,
+            };
+
+            let _output = PluginInstance::process_f32(&mut instance, &mut buffer, &empty_ctx);
+
+            for ch in output_data.iter() {
+                for &sample in ch.iter() {
+                    if sample != 0.0 {
+                        has_nonzero = true;
+                    }
+                }
+            }
+        }
+
+        assert!(
+            has_nonzero,
+            "Expected at least one non-zero output sample after NoteOn"
+        );
     }
 }

@@ -127,4 +127,52 @@ mod tests {
         // Should default to false for backward compat
         assert!(!decoded.supports_f64);
     }
+
+    #[test]
+    fn test_builder_all_methods() {
+        let meta = PluginMetadata::new("com.test.reverb", "Super Reverb")
+            .vendor("TestCo")
+            .version("2.1.0")
+            .audio_io(4, 8)
+            .midi(true)
+            .editor(true, Some((800, 600)))
+            .latency(256)
+            .f64_support(true);
+
+        assert_eq!(meta.id, "com.test.reverb");
+        assert_eq!(meta.name, "Super Reverb");
+        assert_eq!(meta.vendor, "TestCo");
+        assert_eq!(meta.version, "2.1.0");
+        assert_eq!(meta.audio_io.inputs, 4);
+        assert_eq!(meta.audio_io.outputs, 8);
+        assert!(meta.receives_midi);
+        assert!(meta.has_editor);
+        assert_eq!(meta.editor_size, Some((800, 600)));
+        assert_eq!(meta.latency_samples, 256);
+        assert!(meta.supports_f64);
+    }
+
+    #[test]
+    fn test_audio_io_stereo() {
+        let io = AudioIO::stereo();
+        assert_eq!(io.inputs, 2);
+        assert_eq!(io.outputs, 2);
+    }
+
+    #[test]
+    fn test_metadata_default() {
+        let meta = PluginMetadata::default();
+        assert_eq!(meta.id, "");
+        assert_eq!(meta.name, "");
+        assert!(!meta.receives_midi);
+        assert!(!meta.has_editor);
+        assert_eq!(meta.latency_samples, 0);
+        assert!(!meta.supports_f64);
+    }
+
+    #[test]
+    fn test_author_sets_vendor() {
+        let meta = PluginMetadata::new("test", "Test").author("Jane Doe");
+        assert_eq!(meta.vendor, "Jane Doe");
+    }
 }

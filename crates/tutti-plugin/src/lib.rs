@@ -21,6 +21,15 @@ pub use error::{BridgeError, LoadStage, Result};
 mod client;
 pub use client::{PluginClient, PluginClientHandle};
 
+mod handle;
+pub use handle::PluginHandle;
+
+pub mod bridge;
+pub use bridge::PluginBridge;
+
+pub mod instance;
+pub use instance::{PluginInstance, ProcessContext, ProcessOutput};
+
 mod metadata;
 pub use metadata::{AudioIO, PluginMetadata};
 
@@ -40,6 +49,9 @@ pub mod shared_memory;
 
 mod registry;
 pub use registry::{register_all_system_plugins, register_plugin, register_plugin_directory};
+
+pub mod inprocess_bridge;
+pub use inprocess_bridge::{InProcessBridge, InProcessThreadHandle};
 
 mod lockfree_bridge;
 mod transport;

@@ -26,34 +26,32 @@ use crate::neural::NeuralSystem;
 /// corresponding Cargo features are compiled. MIDI requires explicit opt-in via
 /// `.midi()` to connect hardware devices.
 ///
+/// The sample rate is determined by the audio output device and cannot be
+/// overridden. Use `engine.sample_rate()` after building to query the actual rate.
+///
 /// # Example
 ///
 /// ```ignore
 /// use tutti::prelude::*;
 ///
-/// // Enable features in Cargo.toml:
-/// // tutti = { version = "...", features = ["sampler", "neural"] }
-///
 /// let engine = TuttiEngine::builder()
-///     .sample_rate(48000.0)
 ///     .outputs(2)
 ///     .build()?;
+///
+/// // Query the device sample rate
+/// let sr = engine.sample_rate(); // e.g. 44100.0 or 48000.0
 ///
 /// // Subsystems are ready to use
 /// let sampler = engine.sampler();
 /// let neural = engine.neural();
 /// ```
 pub struct TuttiEngineBuilder {
-    sample_rate: Option<f64>,
     output_device: Option<usize>,
     inputs: usize,
     outputs: usize,
 
     #[cfg(feature = "midi")]
     enable_midi: bool,
-
-    #[cfg(feature = "plugin")]
-    plugin_runtime: Option<tokio::runtime::Handle>,
 
     #[cfg(feature = "neural")]
     neural_backend_factory: Option<tutti_core::BackendFactory>,
@@ -62,16 +60,12 @@ pub struct TuttiEngineBuilder {
 impl Default for TuttiEngineBuilder {
     fn default() -> Self {
         Self {
-            sample_rate: None,
             output_device: None,
             inputs: 0,
             outputs: 2,
 
             #[cfg(feature = "midi")]
             enable_midi: false,
-
-            #[cfg(feature = "plugin")]
-            plugin_runtime: None,
 
             #[cfg(feature = "neural")]
             neural_backend_factory: None,
@@ -80,12 +74,6 @@ impl Default for TuttiEngineBuilder {
 }
 
 impl TuttiEngineBuilder {
-    /// Set sample rate (if not set, uses device default)
-    pub fn sample_rate(mut self, rate: f64) -> Self {
-        self.sample_rate = Some(rate);
-        self
-    }
-
     /// Set output device index
     pub fn output_device(mut self, index: usize) -> Self {
         self.output_device = Some(index);
@@ -131,23 +119,6 @@ impl TuttiEngineBuilder {
         self
     }
 
-    /// Set plugin runtime handle for async plugin loading
-    ///
-    /// Required for loading VST2, VST3, and CLAP plugins.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let runtime = tokio::runtime::Runtime::new()?;
-    /// let engine = TuttiEngine::builder()
-    ///     .plugin_runtime(runtime.handle().clone())
-    ///     .build()?;
-    /// ```
-    #[cfg(feature = "plugin")]
-    pub fn plugin_runtime(mut self, handle: tokio::runtime::Handle) -> Self {
-        self.plugin_runtime = Some(handle);
-        self
-    }
-
     /// Build and start the engine
     pub fn build(self) -> Result<TuttiEngine> {
         // Build MIDI subsystem first (if enabled) so we can pass port manager to core
@@ -190,7 +161,7 @@ impl TuttiEngineBuilder {
         let core = core_builder.build()?;
 
         #[cfg(any(feature = "sampler", feature = "soundfont"))]
-        let sample_rate = self.sample_rate.unwrap_or_else(|| core.sample_rate());
+        let sample_rate = core.sample_rate();
 
         // Build sampler subsystem (always enabled when feature is compiled)
         #[cfg(feature = "sampler")]
@@ -236,8 +207,6 @@ impl TuttiEngineBuilder {
             neural,
             #[cfg(feature = "soundfont")]
             soundfont,
-            #[cfg(feature = "plugin")]
-            self.plugin_runtime,
         ))
     }
 }

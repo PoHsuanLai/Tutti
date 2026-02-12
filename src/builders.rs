@@ -8,7 +8,7 @@
 //! ```ignore
 //! // SoundFont
 //! let piano = engine.sf2("piano.sf2").preset(0).build()?;
-//! engine.graph(|net| net.add(piano).to_master());
+//! engine.graph(|net| net.add(piano).master());
 //!
 //! // Audio samples
 //! let kick = engine.wav("kick.wav").build()?;
@@ -39,7 +39,7 @@ use std::path::PathBuf;
 ///     .preset(0)
 ///     .channel(0)
 ///     .build()?;
-/// engine.graph(|net| net.add(piano).to_master());
+/// engine.graph(|net| net.add(piano).master());
 /// ```
 #[cfg(feature = "soundfont")]
 pub struct Sf2Builder<'a> {
@@ -130,7 +130,7 @@ impl<'a> Sf2Builder<'a> {
 ///     .speed(1.2)
 ///     .looping(true)
 ///     .build()?;
-/// engine.graph(|net| net.add(kick).to_master());
+/// engine.graph(|net| net.add(kick).master());
 /// ```
 #[cfg(all(feature = "sampler", feature = "wav"))]
 pub struct WavBuilder<'a> {
@@ -356,30 +356,125 @@ impl<'a> OggBuilder<'a> {
 // Plugin Builders
 // ============================================================================
 
+/// Load a plugin in-process. The plugin runs on a dedicated thread
+/// in the same process, enabling GUI editor support.
+#[cfg(feature = "plugin")]
+fn load_plugin(
+    engine: &crate::TuttiEngine,
+    path: PathBuf,
+    params: &std::collections::HashMap<String, f32>,
+) -> Result<(Box<dyn crate::AudioUnit>, crate::plugin::PluginHandle)> {
+    let sample_rate = engine.sample_rate();
+    let block_size = 512;
+
+    // Determine plugin format from file extension and load
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let instance: Box<dyn crate::plugin::PluginInstance> = match ext.as_str() {
+        #[cfg(feature = "clap")]
+        "clap" => {
+            let mut inst = tutti_plugin_server::clap_loader::ClapInstance::load(
+                &path,
+                sample_rate,
+                block_size,
+            )
+            .map_err(|e| crate::Error::InvalidConfig(format!("CLAP load failed: {e}")))?;
+            // Activate on the main thread (CLAP requirement).
+            // start_processing() will be called lazily on the bridge thread
+            // by the first process_f32() call.
+            inst.activate()
+                .map_err(|e| crate::Error::InvalidConfig(format!("CLAP activate failed: {e}")))?;
+            Box::new(inst)
+        }
+        #[cfg(feature = "vst3")]
+        "vst3" => {
+            let inst = tutti_plugin_server::vst3_loader::Vst3Instance::load(
+                &path,
+                sample_rate,
+                block_size,
+            )
+            .map_err(|e| crate::Error::InvalidConfig(format!("VST3 load failed: {e}")))?;
+            Box::new(inst)
+        }
+        #[cfg(feature = "vst2")]
+        "dll" | "so" | "vst" => {
+            let inst = tutti_plugin_server::vst2_loader::Vst2Instance::load(
+                &path,
+                sample_rate,
+                block_size,
+            )
+            .map_err(|e| crate::Error::InvalidConfig(format!("VST2 load failed: {e}")))?;
+            Box::new(inst)
+        }
+        _ => {
+            return Err(crate::Error::InvalidConfig(format!(
+                "Unsupported plugin format: .{ext}"
+            )));
+        }
+    };
+
+    let metadata = instance.metadata().clone();
+    let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs).max(2);
+
+    let (bridge, thread_handle) =
+        crate::plugin::InProcessBridge::new(instance, num_channels, block_size);
+
+    let bridge_arc: std::sync::Arc<dyn crate::plugin::PluginBridge> = std::sync::Arc::new(bridge);
+
+    // Apply initial parameters
+    for (name, value) in params {
+        if let Ok(param_id) = name.parse::<u32>() {
+            bridge_arc.set_parameter_rt(param_id, *value);
+        }
+    }
+
+    // Create PluginClient for AudioUnit impl
+    let mut client = crate::plugin::PluginClient::from_bridge(
+        bridge_arc.clone(),
+        metadata.clone(),
+        block_size,
+    );
+
+    // Inject MIDI registry so engine.note_on() reaches the plugin
+    #[cfg(feature = "midi")]
+    {
+        let midi_registry = engine.graph(|net| net.midi_registry().clone());
+        client.set_midi_registry(midi_registry);
+    }
+
+    let plugin_handle =
+        crate::plugin::PluginHandle::from_bridge_and_metadata(bridge_arc, metadata);
+
+    engine.store_inprocess_handle(thread_handle, plugin_handle.clone());
+
+    Ok((Box::new(client), plugin_handle))
+}
+
 /// Fluent builder for VST3 plugins.
 ///
-/// Created via `engine.vst3(path)`. Loads the plugin (cached) and creates
-/// an instance.
+/// Created via `engine.vst3(path)`. Loads the plugin in-process (GUI editor works).
 ///
 /// # Example
 ///
 /// ```ignore
-/// let reverb = engine.vst3("Reverb.vst3")
+/// let (reverb, handle) = engine.vst3("Reverb.vst3")
 ///     .param("room_size", 0.8)
-///     .param("damping", 0.5)
 ///     .build()?;
-/// engine.graph(|net| net.add(reverb).to_master());
+/// handle.open_editor(window_handle);
 /// ```
-#[cfg(feature = "plugin")]
+#[cfg(all(feature = "plugin", feature = "vst3"))]
 pub struct Vst3Builder<'a> {
     engine: &'a crate::TuttiEngine,
     path: PathBuf,
     params: std::collections::HashMap<String, f32>,
 }
 
-#[cfg(feature = "plugin")]
+#[cfg(all(feature = "plugin", feature = "vst3"))]
 impl<'a> Vst3Builder<'a> {
-    /// Create a new VST3 builder.
     pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
         Self {
             engine,
@@ -388,30 +483,15 @@ impl<'a> Vst3Builder<'a> {
         }
     }
 
-    /// Set a plugin parameter.
+    /// Set a plugin parameter by numeric ID.
     pub fn param(mut self, name: impl Into<String>, value: f32) -> Self {
         self.params.insert(name.into(), value);
         self
     }
 
     /// Build the plugin instance.
-    ///
-    /// Returns a boxed `AudioUnit` that can be added to the audio graph.
-    ///
-    /// Note: Plugin instances are currently created via the registry pattern.
-    /// Use `engine.load_vst3()` + `engine.create()` for now.
-    pub fn build(self) -> Result<Box<dyn crate::AudioUnit>> {
-        let _runtime = self.engine.plugin_runtime().ok_or_else(|| {
-            crate::Error::InvalidConfig(
-                "Plugin runtime not set. Use .plugin_runtime() in builder.".into(),
-            )
-        })?;
-
-        // TODO: Implement direct plugin instantiation
-        // For now, plugins use the registry pattern: load_vst3() + create()
-        Err(crate::Error::InvalidConfig(
-            "Direct plugin instantiation not yet implemented. Use load_vst3() + create() pattern.".into(),
-        ))
+    pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::plugin::PluginHandle)> {
+        load_plugin(self.engine, self.path, &self.params)
     }
 }
 
@@ -425,7 +505,6 @@ pub struct Vst2Builder<'a> {
 
 #[cfg(all(feature = "plugin", feature = "vst2"))]
 impl<'a> Vst2Builder<'a> {
-    /// Create a new VST2 builder.
     pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
         Self {
             engine,
@@ -434,24 +513,15 @@ impl<'a> Vst2Builder<'a> {
         }
     }
 
-    /// Set a plugin parameter.
+    /// Set a plugin parameter by numeric ID.
     pub fn param(mut self, name: impl Into<String>, value: f32) -> Self {
         self.params.insert(name.into(), value);
         self
     }
 
     /// Build the plugin instance.
-    pub fn build(self) -> Result<Box<dyn crate::AudioUnit>> {
-        let _runtime = self.engine.plugin_runtime().ok_or_else(|| {
-            crate::Error::InvalidConfig(
-                "Plugin runtime not set. Use .plugin_runtime() in builder.".into(),
-            )
-        })?;
-
-        // TODO: Implement direct plugin instantiation
-        Err(crate::Error::InvalidConfig(
-            "Direct plugin instantiation not yet implemented. Use load_vst2() + create() pattern.".into(),
-        ))
+    pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::plugin::PluginHandle)> {
+        load_plugin(self.engine, self.path, &self.params)
     }
 }
 
@@ -465,7 +535,6 @@ pub struct ClapBuilder<'a> {
 
 #[cfg(all(feature = "plugin", feature = "clap"))]
 impl<'a> ClapBuilder<'a> {
-    /// Create a new CLAP builder.
     pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
         Self {
             engine,
@@ -474,24 +543,15 @@ impl<'a> ClapBuilder<'a> {
         }
     }
 
-    /// Set a plugin parameter.
+    /// Set a plugin parameter by numeric ID.
     pub fn param(mut self, name: impl Into<String>, value: f32) -> Self {
         self.params.insert(name.into(), value);
         self
     }
 
     /// Build the plugin instance.
-    pub fn build(self) -> Result<Box<dyn crate::AudioUnit>> {
-        let _runtime = self.engine.plugin_runtime().ok_or_else(|| {
-            crate::Error::InvalidConfig(
-                "Plugin runtime not set. Use .plugin_runtime() in builder.".into(),
-            )
-        })?;
-
-        // TODO: Implement direct plugin instantiation
-        Err(crate::Error::InvalidConfig(
-            "Direct plugin instantiation not yet implemented. Use load_clap() + create() pattern.".into(),
-        ))
+    pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::plugin::PluginHandle)> {
+        load_plugin(self.engine, self.path, &self.params)
     }
 }
 
@@ -508,7 +568,7 @@ impl<'a> ClapBuilder<'a> {
 ///
 /// ```ignore
 /// let violin = engine.neural_synth("violin.mpk").build()?;
-/// engine.graph(|net| net.add_neural(violin, model_id).to_master());
+/// engine.graph(|net| net.add_neural(violin, model_id).master());
 /// ```
 #[cfg(all(feature = "neural", feature = "midi"))]
 pub struct NeuralSynthBuilder<'a> {

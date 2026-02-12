@@ -45,7 +45,7 @@ use crate::neural::{NeuralHandle, NeuralSystem};
 /// - Sampler subsystem (feature "sampler") - automatically initialized
 /// - Neural subsystem (feature "neural") - automatically initialized
 /// - SoundFont support (feature "soundfont") - automatically initialized
-/// - Plugin hosting (feature "plugin") - requires tokio runtime handle
+/// - Plugin hosting (feature "plugin") - in-process loading, GUI editor support
 ///
 /// # Example
 ///
@@ -93,9 +93,13 @@ pub struct TuttiEngine {
     #[cfg(feature = "soundfont")]
     soundfont: Arc<crate::synth::SoundFontSystem>,
 
-    /// Plugin runtime handle for async plugin loading (optional)
+    /// Control handles for loaded plugins (editor, state, params).
     #[cfg(feature = "plugin")]
-    plugin_runtime: Option<tokio::runtime::Handle>,
+    plugin_control_handles: Mutex<Vec<tutti_plugin::PluginHandle>>,
+
+    /// Keeps in-process plugin threads alive for the lifetime of the engine.
+    #[cfg(feature = "plugin")]
+    inprocess_handles: Mutex<Vec<tutti_plugin::InProcessThreadHandle>>,
 
     /// Live analysis state + thread handle (opt-in via enable_live_analysis)
     #[cfg(feature = "analysis")]
@@ -264,7 +268,7 @@ impl TuttiEngine {
     ///     .adsr(0.01, 0.2, 0.6, 0.3)     // envelope
     ///     .build()?;
     ///
-    /// let synth_id = engine.graph(|net| net.add(synth).to_master());
+    /// let synth_id = engine.graph(|net| net.add(synth).master());
     ///
     /// engine.note_on(synth_id, 0, 60, 100);  // Play middle C
     /// ```
@@ -288,7 +292,7 @@ impl TuttiEngine {
     ///
     /// ```ignore
     /// let piano = engine.sf2("piano.sf2").preset(0).build()?;
-    /// engine.graph(|net| net.add(piano).to_master());
+    /// engine.graph(|net| net.add(piano).master());
     /// ```
     #[cfg(feature = "soundfont")]
     pub fn sf2(&self, path: impl AsRef<Path>) -> crate::builders::Sf2Builder<'_> {
@@ -304,7 +308,7 @@ impl TuttiEngine {
     ///
     /// ```ignore
     /// let kick = engine.wav("kick.wav").gain(0.8).build()?;
-    /// engine.graph(|net| net.add(kick).to_master());
+    /// engine.graph(|net| net.add(kick).master());
     /// ```
     #[cfg(all(feature = "sampler", feature = "wav"))]
     pub fn wav(&self, path: impl AsRef<Path>) -> crate::builders::WavBuilder<'_> {
@@ -346,12 +350,12 @@ impl TuttiEngine {
     /// # Example
     ///
     /// ```ignore
-    /// let reverb = engine.vst3("Reverb.vst3")
+    /// let (reverb, _handle) = engine.vst3("Reverb.vst3")
     ///     .param("room_size", 0.8)
     ///     .build()?;
-    /// engine.graph(|net| net.add_boxed(reverb).to_master());
+    /// engine.graph(|net| net.add_boxed(reverb).master());
     /// ```
-    #[cfg(feature = "plugin")]
+    #[cfg(all(feature = "plugin", feature = "vst3"))]
     pub fn vst3(&self, path: impl AsRef<Path>) -> crate::builders::Vst3Builder<'_> {
         crate::builders::Vst3Builder::new(self, path.as_ref().to_path_buf())
     }
@@ -377,7 +381,7 @@ impl TuttiEngine {
     ///
     /// ```ignore
     /// let (violin, model_id) = engine.neural_synth("violin.mpk").build()?;
-    /// engine.graph(|net| net.add_neural(violin, model_id).to_master());
+    /// engine.graph(|net| net.add_neural(violin, model_id).master());
     /// ```
     #[cfg(all(feature = "neural", feature = "midi"))]
     pub fn neural_synth(&self, path: impl AsRef<Path>) -> crate::builders::NeuralSynthBuilder<'_> {
@@ -402,7 +406,7 @@ impl TuttiEngine {
     /// let (synth, model_id) = engine.neural_synth_fn(|features| {
     ///     my_model.infer(features)
     /// }).build()?;
-    /// engine.graph(|net| net.add_neural(synth, model_id).to_master());
+    /// engine.graph(|net| net.add_neural(synth, model_id).master());
     /// ```
     #[cfg(all(feature = "neural", feature = "midi"))]
     pub fn neural_synth_fn<F>(&self, infer_fn: F) -> crate::builders::NeuralSynthFnBuilder<'_, F>
@@ -638,10 +642,29 @@ impl TuttiEngine {
         &self.soundfont
     }
 
-    /// Get the plugin runtime handle (for builders).
+    /// Store an in-process plugin thread handle to keep it alive.
     #[cfg(feature = "plugin")]
-    pub(crate) fn plugin_runtime(&self) -> Option<&tokio::runtime::Handle> {
-        self.plugin_runtime.as_ref()
+    pub(crate) fn store_inprocess_handle(
+        &self,
+        handle: tutti_plugin::InProcessThreadHandle,
+        control_handle: tutti_plugin::PluginHandle,
+    ) {
+        self.inprocess_handles.lock().push(handle);
+        self.plugin_control_handles.lock().push(control_handle);
+    }
+
+    /// Get a control handle for a loaded plugin by index.
+    ///
+    /// Index corresponds to the order in which plugins were loaded.
+    #[cfg(feature = "plugin")]
+    pub fn plugin(&self, index: usize) -> Option<tutti_plugin::PluginHandle> {
+        self.plugin_control_handles.lock().get(index).cloned()
+    }
+
+    /// Get the number of loaded plugins.
+    #[cfg(feature = "plugin")]
+    pub fn plugin_count(&self) -> usize {
+        self.plugin_control_handles.lock().len()
     }
 
     /// Load a Wave from file, using cache for repeated loads.
@@ -884,7 +907,6 @@ impl TuttiEngine {
         #[cfg(feature = "sampler")] sampler: Arc<SamplerSystem>,
         #[cfg(feature = "neural")] neural: Arc<NeuralSystem>,
         #[cfg(feature = "soundfont")] soundfont: Arc<crate::synth::SoundFontSystem>,
-        #[cfg(feature = "plugin")] plugin_runtime: Option<tokio::runtime::Handle>,
     ) -> Self {
         Self {
             core,
@@ -898,7 +920,9 @@ impl TuttiEngine {
             #[cfg(feature = "soundfont")]
             soundfont,
             #[cfg(feature = "plugin")]
-            plugin_runtime,
+            plugin_control_handles: Mutex::new(Vec::new()),
+            #[cfg(feature = "plugin")]
+            inprocess_handles: Mutex::new(Vec::new()),
             #[cfg(feature = "analysis")]
             live_analysis: Mutex::new(None),
             #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]

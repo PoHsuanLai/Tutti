@@ -6,7 +6,6 @@ use crate::instance::{PluginInstance, ProcessContext};
 use crate::transport::{MessageTransport, TransportListener};
 use std::path::PathBuf;
 
-// Import from tutti-plugin (shared types)
 use tutti_plugin::{BridgeConfig, BridgeError, LoadStage, PluginMetadata, Result, SampleFormat};
 use tutti_plugin::protocol::{BridgeMessage, HostMessage, IpcMidiEvent};
 use tutti_plugin::shared_memory::SharedAudioBuffer;
@@ -25,12 +24,10 @@ pub struct PluginServer {
     config: BridgeConfig,
     transport: Option<MessageTransport>,
 
-    // Plugin state (enum to support multiple formats)
     plugin: Option<LoadedPlugin>,
 
     shared_buffer: Option<SharedAudioBuffer>,
 
-    // Editor state
     editor_open: bool,
 
     /// Negotiated sample format for processing
@@ -40,16 +37,11 @@ pub struct PluginServer {
     sample_rate: f64,
 
     // Pre-allocated audio buffers (RT-safe: resize only on config change)
-    /// Pre-allocated f32 input buffers (one per channel)
     input_buffers_f32: Vec<Vec<f32>>,
-    /// Pre-allocated f32 output buffers (one per channel)
     output_buffers_f32: Vec<Vec<f32>>,
-    /// Pre-allocated f64 input buffers (one per channel)
     input_buffers_f64: Vec<Vec<f64>>,
-    /// Pre-allocated f64 output buffers (one per channel)
     output_buffers_f64: Vec<Vec<f64>>,
 
-    /// Current buffer configuration
     current_num_channels: usize,
     current_buffer_size: usize,
 
@@ -57,13 +49,11 @@ pub struct PluginServer {
     midi_output_buffer: tutti_plugin::protocol::MidiEventVec,
 }
 
-// Compile-time error if no plugin formats enabled
 #[cfg(not(any(feature = "vst2", feature = "vst3", feature = "clap")))]
 compile_error!(
     "tutti-plugin requires at least one plugin format. Enable with: --features vst2,vst3,clap"
 );
 
-/// Loaded plugin instance (supports multiple formats)
 enum LoadedPlugin {
     #[cfg(feature = "vst2")]
     Vst2(Vst2Instance),
@@ -76,7 +66,6 @@ enum LoadedPlugin {
 }
 
 impl LoadedPlugin {
-    /// Get mutable reference to plugin as trait object
     fn as_instance_mut(&mut self) -> &mut dyn PluginInstance {
         match self {
             #[cfg(feature = "vst2")]
@@ -88,7 +77,6 @@ impl LoadedPlugin {
         }
     }
 
-    /// Get immutable reference to plugin as trait object
     fn as_instance(&self) -> &dyn PluginInstance {
         match self {
             #[cfg(feature = "vst2")]
@@ -102,7 +90,6 @@ impl LoadedPlugin {
 }
 
 impl PluginServer {
-    /// Create new bridge server
     pub async fn new(config: BridgeConfig) -> Result<Self> {
         Ok(Self {
             config,
@@ -112,7 +99,6 @@ impl PluginServer {
             editor_open: false,
             negotiated_format: SampleFormat::Float32,
             sample_rate: 44100.0, // Default, updated when plugin is loaded
-            // Initialize empty buffers (will resize on first process call)
             input_buffers_f32: Vec::new(),
             output_buffers_f32: Vec::new(),
             input_buffers_f64: Vec::new(),
@@ -145,7 +131,6 @@ impl PluginServer {
         }
     }
 
-    /// Run the bridge server.
     pub async fn run(&mut self) -> Result<()> {
         let listener = TransportListener::bind(&self.config.socket_path).await?;
         let mut transport = listener.accept().await?;
@@ -180,7 +165,6 @@ impl PluginServer {
         Ok(())
     }
 
-    /// Handle a single host message
     async fn handle_message(&mut self, msg: HostMessage) -> Result<Option<BridgeMessage>> {
         match msg {
             HostMessage::LoadPlugin {
@@ -188,8 +172,9 @@ impl PluginServer {
                 sample_rate,
                 block_size,
                 preferred_format,
+                shm_name,
             } => {
-                let metadata = self.load_plugin(path, sample_rate, block_size, preferred_format)?;
+                let metadata = self.load_plugin(path, sample_rate, block_size, preferred_format, &shm_name)?;
 
                 Ok(Some(BridgeMessage::PluginLoaded {
                     metadata: Box::new(metadata),
@@ -210,40 +195,31 @@ impl PluginServer {
                 return self.handle_process_audio(buffer_id, num_samples, &[]).await;
             }
 
-            HostMessage::ProcessAudioMidi {
-                buffer_id,
-                num_samples,
-                midi_events,
-            } => {
-                let midi: tutti_plugin::protocol::MidiEventVec = midi_events
+            HostMessage::ProcessAudioMidi(data) => {
+                let midi: tutti_plugin::protocol::MidiEventVec = data
+                    .midi_events
                     .iter()
                     .filter_map(|e| e.to_midi_event())
                     .collect();
                 return self
-                    .handle_process_audio(buffer_id, num_samples, &midi)
+                    .handle_process_audio(data.buffer_id, data.num_samples, &midi)
                     .await;
             }
 
-            HostMessage::ProcessAudioFull {
-                buffer_id,
-                num_samples,
-                midi_events,
-                param_changes,
-                note_expression,
-                transport,
-            } => {
-                let midi: tutti_plugin::protocol::MidiEventVec = midi_events
+            HostMessage::ProcessAudioFull(data) => {
+                let midi: tutti_plugin::protocol::MidiEventVec = data
+                    .midi_events
                     .iter()
                     .filter_map(|e| e.to_midi_event())
                     .collect();
                 return self
                     .handle_process_audio_full(
-                        buffer_id,
-                        num_samples,
+                        data.buffer_id,
+                        data.num_samples,
                         &midi,
-                        &param_changes,
-                        &note_expression,
-                        &transport,
+                        &data.param_changes,
+                        &data.note_expression,
+                        &data.transport,
                     )
                     .await;
             }
@@ -372,7 +348,6 @@ impl PluginServer {
         }
     }
 
-    /// Handle audio processing with MIDI
     async fn handle_process_audio(
         &mut self,
         _buffer_id: u32,
@@ -484,20 +459,21 @@ impl PluginServer {
         let latency_us = start.elapsed().as_micros() as u64;
 
         if !self.midi_output_buffer.is_empty() {
-            Ok(Some(BridgeMessage::AudioProcessedMidi {
-                latency_us,
-                midi_output: self
-                    .midi_output_buffer
-                    .iter()
-                    .map(IpcMidiEvent::from)
-                    .collect(),
-            }))
+            Ok(Some(BridgeMessage::AudioProcessedMidi(Box::new(
+                tutti_plugin::protocol::AudioProcessedMidiData {
+                    latency_us,
+                    midi_output: self
+                        .midi_output_buffer
+                        .iter()
+                        .map(IpcMidiEvent::from)
+                        .collect(),
+                },
+            ))))
         } else {
             Ok(Some(BridgeMessage::AudioProcessed { latency_us }))
         }
     }
 
-    /// Handle audio processing with full automation (MIDI + parameters + note expression + transport)
     async fn handle_process_audio_full(
         &mut self,
         _buffer_id: u32,
@@ -518,6 +494,13 @@ impl PluginServer {
         self.midi_output_buffer.clear();
         let mut param_output = tutti_plugin::protocol::ParameterChanges::new();
         let mut note_expression_output = tutti_plugin::protocol::NoteExpressionChanges::new();
+
+        // Pre-size buffers before borrowing shared_buffer and plugin
+        if let Some(ref plugin) = self.plugin {
+            let metadata = plugin.as_instance().metadata();
+            let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
+            self.ensure_buffers_sized(num_channels, num_samples);
+        }
 
         if let (Some(ref mut shared_buffer), Some(ref mut plugin)) =
             (&mut self.shared_buffer, &mut self.plugin)
@@ -615,19 +598,20 @@ impl PluginServer {
 
         let latency_us = start.elapsed().as_micros() as u64;
 
-        Ok(Some(BridgeMessage::AudioProcessedFull {
-            latency_us,
-            midi_output: self
-                .midi_output_buffer
-                .iter()
-                .map(IpcMidiEvent::from)
-                .collect(),
-            param_output,
-            note_expression_output,
-        }))
+        Ok(Some(BridgeMessage::AudioProcessedFull(Box::new(
+            tutti_plugin::protocol::AudioProcessedFullData {
+                latency_us,
+                midi_output: self
+                    .midi_output_buffer
+                    .iter()
+                    .map(IpcMidiEvent::from)
+                    .collect(),
+                param_output,
+                note_expression_output,
+            },
+        ))))
     }
 
-    /// Poll for parameter changes from plugin automation
     async fn poll_parameter_changes(&mut self) -> Result<()> {
         #[cfg(feature = "vst2")]
         if let Some(LoadedPlugin::Vst2(vst2)) = &self.plugin {
@@ -644,13 +628,13 @@ impl PluginServer {
         Ok(())
     }
 
-    /// Load plugin (VST2, VST3, or CLAP).
     fn load_plugin(
         &mut self,
         path: PathBuf,
         sample_rate: f64,
         block_size: usize,
         preferred_format: SampleFormat,
+        shm_name: &str,
     ) -> Result<PluginMetadata> {
         self.sample_rate = sample_rate;
 
@@ -712,7 +696,12 @@ impl PluginServer {
             };
         self.negotiated_format = negotiated_format;
 
-        let buffer_name = format!("dawai_vst_buffer_{}", std::process::id());
+        // Use the shared memory name provided by the client
+        let buffer_name = if shm_name.is_empty() {
+            format!("dawai_plugin_{}", std::process::id())
+        } else {
+            shm_name.to_string()
+        };
         let max_samples = 8192;
         let shared_buffer = SharedAudioBuffer::open_with_format(
             buffer_name,
@@ -731,5 +720,809 @@ impl PluginServer {
 impl Drop for PluginServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.config.socket_path);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tutti_plugin::protocol::{
+        BridgeMessage, HostMessage, IpcMidiEventVec, NoteExpressionChanges, ParameterChanges,
+        TransportInfo,
+    };
+
+    /// Create a PluginServer for testing with a unique socket path per call site.
+    async fn test_server(name: &str) -> PluginServer {
+        let config = BridgeConfig {
+            socket_path: std::env::temp_dir()
+                .join(format!("test_server_{}_{}.sock", name, std::process::id())),
+            ..Default::default()
+        };
+        PluginServer::new(config).await.unwrap()
+    }
+
+    // -----------------------------------------------------------------------
+    // Server creation
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_new_server_defaults() {
+        let server = test_server("defaults").await;
+        assert_eq!(server.negotiated_format, SampleFormat::Float32);
+        assert_eq!(server.sample_rate, 44100.0);
+        assert!(server.plugin.is_none());
+        assert!(server.transport.is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Message handling without plugin loaded
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_get_parameter_no_plugin() {
+        let mut server = test_server("get_param").await;
+        let result = server
+            .handle_message(HostMessage::GetParameter { param_id: 0 })
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::ParameterValue { value }) => {
+                assert!(value.is_none());
+            }
+            other => panic!("Expected ParameterValue {{ value: None }}, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_parameter_list_no_plugin() {
+        let mut server = test_server("get_param_list").await;
+        let result = server
+            .handle_message(HostMessage::GetParameterList)
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::ParameterList { parameters }) => {
+                assert!(parameters.is_empty());
+            }
+            other => panic!("Expected ParameterList with empty vec, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_get_parameter_info_no_plugin() {
+        let mut server = test_server("get_param_info").await;
+        let result = server
+            .handle_message(HostMessage::GetParameterInfo { param_id: 0 })
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::ParameterInfoResponse { info }) => {
+                assert!(info.is_none());
+            }
+            other => panic!(
+                "Expected ParameterInfoResponse {{ info: None }}, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_audio_no_plugin() {
+        let mut server = test_server("proc_audio").await;
+        let result = server
+            .handle_message(HostMessage::ProcessAudio {
+                buffer_id: 0,
+                num_samples: 256,
+            })
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::Error { message }) => {
+                assert!(
+                    message.contains("No plugin loaded"),
+                    "Expected 'No plugin loaded', got: {}",
+                    message
+                );
+            }
+            other => panic!("Expected Error message, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_audio_midi_no_plugin() {
+        let mut server = test_server("proc_audio_midi").await;
+        let result = server
+            .handle_message(HostMessage::ProcessAudioMidi(Box::new(
+                tutti_plugin::protocol::ProcessAudioMidiData {
+                    buffer_id: 0,
+                    num_samples: 256,
+                    midi_events: IpcMidiEventVec::new(),
+                },
+            )))
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::Error { message }) => {
+                assert!(
+                    message.contains("No plugin loaded"),
+                    "Expected 'No plugin loaded', got: {}",
+                    message
+                );
+            }
+            other => panic!("Expected Error message, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_audio_full_no_plugin() {
+        let mut server = test_server("proc_audio_full").await;
+        let result = server
+            .handle_message(HostMessage::ProcessAudioFull(Box::new(
+                tutti_plugin::protocol::ProcessAudioFullData {
+                    buffer_id: 0,
+                    num_samples: 256,
+                    midi_events: IpcMidiEventVec::new(),
+                    param_changes: ParameterChanges::new(),
+                    note_expression: NoteExpressionChanges::new(),
+                    transport: TransportInfo::default(),
+                },
+            )))
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::Error { message }) => {
+                assert!(
+                    message.contains("No plugin loaded"),
+                    "Expected 'No plugin loaded', got: {}",
+                    message
+                );
+            }
+            other => panic!("Expected Error message, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_parameter_no_plugin() {
+        let mut server = test_server("set_param").await;
+        let result = server
+            .handle_message(HostMessage::SetParameter {
+                param_id: 0,
+                value: 0.5,
+            })
+            .await
+            .unwrap();
+        assert!(result.is_none(), "SetParameter with no plugin should return None");
+    }
+
+    #[tokio::test]
+    async fn test_set_sample_rate_no_plugin() {
+        let mut server = test_server("set_sr").await;
+        let result = server
+            .handle_message(HostMessage::SetSampleRate { rate: 96000.0 })
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "SetSampleRate with no plugin should return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_save_state_no_plugin() {
+        let mut server = test_server("save_state").await;
+        let result = server
+            .handle_message(HostMessage::SaveState)
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::StateData { data }) => {
+                assert!(data.is_empty());
+            }
+            other => panic!("Expected StateData with empty data, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_state_no_plugin() {
+        let mut server = test_server("load_state").await;
+        let result = server
+            .handle_message(HostMessage::LoadState {
+                data: vec![1, 2, 3],
+            })
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "LoadState with no plugin should return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_open_editor_no_plugin() {
+        let mut server = test_server("open_editor").await;
+        let result = server
+            .handle_message(HostMessage::OpenEditor { parent_handle: 0 })
+            .await
+            .unwrap();
+        match result {
+            Some(BridgeMessage::Error { message }) => {
+                assert!(
+                    message.contains("No plugin loaded"),
+                    "Expected 'No plugin loaded', got: {}",
+                    message
+                );
+            }
+            other => panic!("Expected Error message, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_close_editor_no_plugin() {
+        let mut server = test_server("close_editor").await;
+        let result = server
+            .handle_message(HostMessage::CloseEditor)
+            .await
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "CloseEditor with no plugin should return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_unload_plugin() {
+        let mut server = test_server("unload").await;
+        let result = server
+            .handle_message(HostMessage::UnloadPlugin)
+            .await
+            .unwrap();
+        assert!(result.is_none(), "UnloadPlugin should return None");
+        assert!(server.plugin.is_none(), "Plugin should be None after unload");
+        assert!(
+            server.shared_buffer.is_none(),
+            "SharedBuffer should be None after unload"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reset_no_plugin() {
+        let mut server = test_server("reset").await;
+        let result = server
+            .handle_message(HostMessage::Reset)
+            .await
+            .unwrap();
+        assert!(result.is_none(), "Reset should return None");
+    }
+
+    #[tokio::test]
+    async fn test_shutdown_clears_transport() {
+        let mut server = test_server("shutdown").await;
+        let result = server
+            .handle_message(HostMessage::Shutdown)
+            .await
+            .unwrap();
+        assert!(result.is_none(), "Shutdown should return None");
+        assert!(
+            server.transport.is_none(),
+            "Transport should be None after shutdown"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Buffer sizing
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_ensure_buffers_sized() {
+        let mut server = test_server("buf_sized").await;
+        server.ensure_buffers_sized(2, 512);
+
+        assert_eq!(server.input_buffers_f32.len(), 2);
+        assert_eq!(server.output_buffers_f32.len(), 2);
+        assert_eq!(server.input_buffers_f64.len(), 2);
+        assert_eq!(server.output_buffers_f64.len(), 2);
+
+        for ch in 0..2 {
+            assert_eq!(server.input_buffers_f32[ch].len(), 512);
+            assert_eq!(server.output_buffers_f32[ch].len(), 512);
+            assert_eq!(server.input_buffers_f64[ch].len(), 512);
+            assert_eq!(server.output_buffers_f64[ch].len(), 512);
+        }
+
+        assert_eq!(server.current_num_channels, 2);
+        assert_eq!(server.current_buffer_size, 512);
+    }
+
+    #[tokio::test]
+    async fn test_ensure_buffers_no_realloc() {
+        let mut server = test_server("buf_no_realloc").await;
+        server.ensure_buffers_sized(2, 512);
+
+        // Record pointers to the inner Vecs.
+        let ptr_in_0 = server.input_buffers_f32[0].as_ptr();
+        let ptr_out_0 = server.output_buffers_f32[0].as_ptr();
+
+        // Call again with the same dimensions -- should not reallocate.
+        server.ensure_buffers_sized(2, 512);
+
+        assert_eq!(server.current_num_channels, 2);
+        assert_eq!(server.current_buffer_size, 512);
+        // Pointers should be the same because the early return skips reallocation.
+        assert_eq!(
+            server.input_buffers_f32[0].as_ptr(),
+            ptr_in_0,
+            "Input buffer should not reallocate when size is unchanged"
+        );
+        assert_eq!(
+            server.output_buffers_f32[0].as_ptr(),
+            ptr_out_0,
+            "Output buffer should not reallocate when size is unchanged"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ensure_buffers_resize() {
+        let mut server = test_server("buf_resize").await;
+        server.ensure_buffers_sized(2, 256);
+        assert_eq!(server.input_buffers_f32.len(), 2);
+        assert_eq!(server.input_buffers_f32[0].len(), 256);
+        assert_eq!(server.current_num_channels, 2);
+        assert_eq!(server.current_buffer_size, 256);
+
+        // Resize to larger dimensions.
+        server.ensure_buffers_sized(4, 512);
+        assert_eq!(server.input_buffers_f32.len(), 4);
+        assert_eq!(server.output_buffers_f32.len(), 4);
+        assert_eq!(server.input_buffers_f64.len(), 4);
+        assert_eq!(server.output_buffers_f64.len(), 4);
+
+        for ch in 0..4 {
+            assert_eq!(server.input_buffers_f32[ch].len(), 512);
+            assert_eq!(server.output_buffers_f32[ch].len(), 512);
+            assert_eq!(server.input_buffers_f64[ch].len(), 512);
+            assert_eq!(server.output_buffers_f64[ch].len(), 512);
+        }
+
+        assert_eq!(server.current_num_channels, 4);
+        assert_eq!(server.current_buffer_size, 512);
+    }
+
+    // -----------------------------------------------------------------------
+    // Plugin loading error paths
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn test_load_plugin_not_found() {
+        let mut server = test_server("load_not_found").await;
+        let result = server.load_plugin(
+            PathBuf::from("/nonexistent/path/plugin.vst3"),
+            44100.0,
+            512,
+            SampleFormat::Float32,
+            "",
+        );
+        match result {
+            Err(BridgeError::LoadFailed {
+                path,
+                stage,
+                reason,
+            }) => {
+                assert_eq!(path, PathBuf::from("/nonexistent/path/plugin.vst3"));
+                assert_eq!(stage, LoadStage::Scanning);
+                assert!(
+                    reason.contains("Plugin not found"),
+                    "Expected 'Plugin not found', got: {}",
+                    reason
+                );
+            }
+            other => panic!("Expected LoadFailed error, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_plugin_unsupported_format() {
+        let tmp = std::env::temp_dir().join(format!(
+            "fake_plugin_{}.xyz",
+            std::process::id()
+        ));
+        std::fs::write(&tmp, b"fake").unwrap();
+
+        let mut server = test_server("load_unsupported").await;
+        let result = server.load_plugin(tmp.clone(), 44100.0, 512, SampleFormat::Float32, "");
+
+        let _ = std::fs::remove_file(&tmp);
+
+        match result {
+            Err(BridgeError::LoadFailed {
+                path,
+                stage,
+                reason,
+            }) => {
+                assert_eq!(path, tmp);
+                assert_eq!(stage, LoadStage::Opening);
+                assert!(
+                    reason.contains("Unsupported plugin format"),
+                    "Expected 'Unsupported plugin format', got: {}",
+                    reason
+                );
+            }
+            other => panic!("Expected LoadFailed error, got {:?}", other),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Integration tests (require TAL-NoiseMaker CLAP plugin installed)
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "clap")]
+    const CLAP_PLUGIN: &str = "/Library/Audio/Plug-Ins/CLAP/TAL-NoiseMaker.clap";
+
+    /// Pre-create shared memory and load the CLAP plugin into a server.
+    ///
+    /// Returns (server, metadata, shared_memory_guard). The guard keeps the
+    /// creator-side mmap alive, though the server also holds its own mapping.
+    #[cfg(feature = "clap")]
+    async fn load_clap_into_server(
+        name: &str,
+        preferred_format: SampleFormat,
+    ) -> (PluginServer, PluginMetadata, SharedAudioBuffer) {
+        let config = BridgeConfig {
+            socket_path: std::env::temp_dir()
+                .join(format!("integ_{}_{}.sock", name, std::process::id())),
+            ..Default::default()
+        };
+        let mut server = PluginServer::new(config).await.unwrap();
+
+        // Pre-create shared memory (load_plugin calls open_with_format)
+        let buffer_name = format!("dawai_vst_buffer_{}", std::process::id());
+        let shm = SharedAudioBuffer::create_with_format(
+            buffer_name.clone(),
+            2,
+            8192,
+            preferred_format,
+        )
+        .unwrap();
+
+        let metadata = server
+            .load_plugin(
+                PathBuf::from(CLAP_PLUGIN),
+                44100.0,
+                512,
+                preferred_format,
+                &buffer_name,
+            )
+            .unwrap();
+
+        (server, metadata, shm)
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_load_clap_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (_server, metadata, _shm) =
+            load_clap_into_server("load_clap", SampleFormat::Float32).await;
+        assert!(
+            !metadata.name.is_empty(),
+            "Plugin name should be non-empty, got: {:?}",
+            metadata.name
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_load_clap_plugin_f64() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (server, metadata, _shm) =
+            load_clap_into_server("load_clap_f64", SampleFormat::Float64).await;
+        assert!(
+            !metadata.name.is_empty(),
+            "Plugin name should be non-empty"
+        );
+        // If the plugin supports f64, the negotiated format should be Float64.
+        if metadata.supports_f64 {
+            assert_eq!(
+                server.negotiated_format,
+                SampleFormat::Float64,
+                "Negotiated format should be Float64 when plugin supports it"
+            );
+        } else {
+            // Plugin doesn't support f64 -- server falls back to f32.
+            assert_eq!(
+                server.negotiated_format,
+                SampleFormat::Float32,
+                "Negotiated format should fall back to Float32"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_get_parameter_list_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("get_param_list_clap", SampleFormat::Float32).await;
+
+        let result = server
+            .handle_message(HostMessage::GetParameterList)
+            .await
+            .unwrap();
+
+        match result {
+            Some(BridgeMessage::ParameterList { parameters }) => {
+                assert!(
+                    !parameters.is_empty(),
+                    "TAL-NoiseMaker should expose parameters"
+                );
+            }
+            other => panic!("Expected ParameterList, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_get_parameter_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("get_param_clap", SampleFormat::Float32).await;
+
+        // First, get the parameter list to find a valid param_id.
+        let list_result = server
+            .handle_message(HostMessage::GetParameterList)
+            .await
+            .unwrap();
+
+        let param_id = match list_result {
+            Some(BridgeMessage::ParameterList { ref parameters }) => {
+                assert!(!parameters.is_empty(), "Need at least one parameter");
+                parameters[0].id
+            }
+            other => panic!("Expected ParameterList, got {:?}", other),
+        };
+
+        // Now get the parameter value.
+        let result = server
+            .handle_message(HostMessage::GetParameter { param_id })
+            .await
+            .unwrap();
+
+        match result {
+            Some(BridgeMessage::ParameterValue { value }) => {
+                assert!(
+                    value.is_some(),
+                    "Parameter value should be Some for a loaded plugin"
+                );
+            }
+            other => panic!("Expected ParameterValue with Some(v), got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_get_parameter_info_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("get_param_info_clap", SampleFormat::Float32).await;
+
+        // Get parameter list to find a valid id.
+        let list_result = server
+            .handle_message(HostMessage::GetParameterList)
+            .await
+            .unwrap();
+
+        let param_id = match list_result {
+            Some(BridgeMessage::ParameterList { ref parameters }) => {
+                assert!(!parameters.is_empty(), "Need at least one parameter");
+                parameters[0].id
+            }
+            other => panic!("Expected ParameterList, got {:?}", other),
+        };
+
+        let result = server
+            .handle_message(HostMessage::GetParameterInfo { param_id })
+            .await
+            .unwrap();
+
+        match result {
+            Some(BridgeMessage::ParameterInfoResponse { info }) => {
+                assert!(
+                    info.is_some(),
+                    "ParameterInfo should be Some for a valid param_id"
+                );
+                let info = info.unwrap();
+                assert_eq!(info.id, param_id);
+            }
+            other => panic!("Expected ParameterInfoResponse, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_set_parameter_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("set_param_clap", SampleFormat::Float32).await;
+
+        // Query valid param_id from the plugin (CLAP uses opaque IDs, not indices)
+        let list_result = server
+            .handle_message(HostMessage::GetParameterList)
+            .await
+            .unwrap();
+
+        let param_id = match list_result {
+            Some(BridgeMessage::ParameterList { ref parameters }) => {
+                assert!(!parameters.is_empty(), "Need at least one parameter");
+                parameters[0].id
+            }
+            other => panic!("Expected ParameterList, got {:?}", other),
+        };
+
+        let result = server
+            .handle_message(HostMessage::SetParameter {
+                param_id,
+                value: 0.5,
+            })
+            .await
+            .unwrap();
+
+        assert!(
+            result.is_none(),
+            "SetParameter should return None (no crash)"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_save_load_state() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("save_load_state_clap", SampleFormat::Float32).await;
+
+        // Save state.
+        let save_result = server
+            .handle_message(HostMessage::SaveState)
+            .await
+            .unwrap();
+
+        let state_data = match save_result {
+            Some(BridgeMessage::StateData { data }) => {
+                assert!(
+                    !data.is_empty(),
+                    "State data should be non-empty for a loaded plugin"
+                );
+                data
+            }
+            other => panic!("Expected StateData, got {:?}", other),
+        };
+
+        // Load state back.
+        let load_result = server
+            .handle_message(HostMessage::LoadState { data: state_data })
+            .await
+            .unwrap();
+
+        assert!(
+            load_result.is_none(),
+            "LoadState should return None on success"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_set_sample_rate_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("set_sr_clap", SampleFormat::Float32).await;
+
+        let result = server
+            .handle_message(HostMessage::SetSampleRate { rate: 96000.0 })
+            .await
+            .unwrap();
+
+        assert!(
+            result.is_none(),
+            "SetSampleRate should return None"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_unload_loaded_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("unload_clap", SampleFormat::Float32).await;
+
+        // Verify plugin is loaded.
+        assert!(server.plugin.is_some(), "Plugin should be loaded");
+        assert!(server.shared_buffer.is_some(), "Shared buffer should exist");
+
+        let result = server
+            .handle_message(HostMessage::UnloadPlugin)
+            .await
+            .unwrap();
+
+        assert!(result.is_none(), "UnloadPlugin should return None");
+        assert!(
+            server.plugin.is_none(),
+            "Plugin should be None after unload"
+        );
+        assert!(
+            server.shared_buffer.is_none(),
+            "Shared buffer should be None after unload"
+        );
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_process_audio_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("proc_audio_clap", SampleFormat::Float32).await;
+
+        let result = server
+            .handle_message(HostMessage::ProcessAudio {
+                buffer_id: 0,
+                num_samples: 512,
+            })
+            .await
+            .unwrap();
+
+        match result {
+            Some(BridgeMessage::AudioProcessed { .. })
+            | Some(BridgeMessage::AudioProcessedMidi(..)) => {
+                // Either variant is acceptable (plugin may or may not output MIDI).
+            }
+            other => panic!(
+                "Expected AudioProcessed or AudioProcessedMidi, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_process_audio_full_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("proc_audio_full_clap", SampleFormat::Float32).await;
+
+        let result = server
+            .handle_message(HostMessage::ProcessAudioFull(Box::new(
+                tutti_plugin::protocol::ProcessAudioFullData {
+                    buffer_id: 0,
+                    num_samples: 512,
+                    midi_events: IpcMidiEventVec::new(),
+                    param_changes: ParameterChanges::new(),
+                    note_expression: NoteExpressionChanges::new(),
+                    transport: TransportInfo::default(),
+                },
+            )))
+            .await
+            .unwrap();
+
+        match result {
+            Some(BridgeMessage::AudioProcessedFull(..)) => {
+                // Success -- AudioProcessedFull is always returned by handle_process_audio_full.
+            }
+            other => panic!("Expected AudioProcessedFull, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(feature = "clap")]
+    async fn test_editor_check_with_plugin() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let (mut server, _metadata, _shm) =
+            load_clap_into_server("editor_check_clap", SampleFormat::Float32).await;
+
+        // Access the plugin instance directly to check has_editor().
+        let plugin = server
+            .plugin
+            .as_mut()
+            .expect("Plugin should be loaded");
+
+        let _has_editor: bool = plugin.as_instance_mut().has_editor();
+        // We only check it returns a bool without crashing. TAL-NoiseMaker
+        // has an editor, but we do not open it in a headless test environment.
     }
 }

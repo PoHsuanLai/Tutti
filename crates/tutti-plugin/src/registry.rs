@@ -113,7 +113,7 @@ pub fn register_all_system_plugins(
 fn is_plugin_file(path: &Path) -> bool {
     path.extension()
         .and_then(|s| s.to_str())
-        .map_or(false, |ext| matches!(ext, "vst" | "vst3" | "clap" | "component"))
+        .is_some_and(|ext| matches!(ext, "vst" | "vst3" | "clap" | "component"))
 }
 
 fn system_plugin_paths() -> Vec<PathBuf> {

@@ -20,37 +20,30 @@
 //! ```ignore
 //! use tutti::prelude::*;
 //!
-//! // Create tokio runtime for plugin loading (optional)
-//! let runtime = tokio::runtime::Runtime::new()?;
-//!
-//! // Create engine (subsystems enabled via Cargo features)
+//! // Create engine (sample rate determined by audio device)
 //! let engine = TuttiEngine::builder()
-//!     .sample_rate(44100.0)
-//!     .plugin_runtime(runtime.handle().clone())  // Optional: for plugin loading
 //!     .build()?;
 //!
-//! // Load nodes once (explicit format methods = compile-time type safety)
-//! engine.load_synth_mpk("my_synth", "model.mpk")?; // Neural model
-//! engine.load_vst3("reverb", "plugin.vst3")?;     // VST3 plugin
+//! // Load resources with fluent builders (returns AudioUnit)
+//! let piano = engine.sf2("piano.sf2").preset(0).build()?;
+//! let sample = engine.wav("kick.wav").build()?;
 //!
-//! // Add custom DSP nodes programmatically
-//! engine.add_node("my_filter", |params| {
-//!     let cutoff = params.get("cutoff")?.as_f32().unwrap_or(1000.0);
-//!     Ok(Box::new(lowpass_hz(cutoff)))
-//! })?;
+//! // Add nodes to graph
+//! let piano_id = engine.graph(|net| net.add(piano).master());
+//! let sample_id = engine.graph(|net| net.add(sample).master());
 //!
-//! // Instantiate nodes (creates instances and adds to graph)
-//! let synth = engine.create("my_synth", &params! {})?;
-//! let filter = engine.create("my_filter", &params! { "cutoff" => 2000.0 })?;
-//! let reverb = engine.create("reverb", &params! { "room_size" => 0.9 })?;
-//!
-//! // Build audio graph with node IDs
+//! // Or create DSP nodes directly
 //! engine.graph(|net| {
-//!     chain!(net, synth, filter, reverb => output);
+//!     let osc = net.add(sine_hz::<f32>(440.0)).id();
+//!     let filter = net.add(lowpass_hz::<f32>(2000.0, 1.0)).id();
+//!     chain!(net, osc, filter => output);
 //! });
 //!
 //! // Control transport
 //! engine.transport().play();
+//!
+//! // Play MIDI notes
+//! engine.note_on(piano_id, Note::C4, 100);
 //! ```
 //!
 //! ## Built-in Audio Nodes
@@ -187,7 +180,7 @@ pub use tutti_synth as synth;
 
 // SoundFont synthesis
 #[cfg(feature = "soundfont")]
-pub use tutti_synth::{SoundFontHandle, SoundFontSynth, SoundFontSystem, SoundFontUnit};
+pub use tutti_synth::{SoundFontHandle, SoundFontSystem, SoundFontUnit};
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
@@ -234,7 +227,7 @@ pub use tutti_plugin as plugin;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::{
     register_all_system_plugins, register_plugin, register_plugin_directory, BridgeConfig,
-    PluginClient,
+    PluginClient, PluginHandle,
 };
 
 // Neural audio
@@ -293,7 +286,7 @@ pub use builders::FlacBuilder;
 pub use builders::Mp3Builder;
 #[cfg(all(feature = "sampler", feature = "ogg"))]
 pub use builders::OggBuilder;
-#[cfg(feature = "plugin")]
+#[cfg(all(feature = "plugin", feature = "vst3"))]
 pub use builders::Vst3Builder;
 #[cfg(all(feature = "plugin", feature = "vst2"))]
 pub use builders::Vst2Builder;
