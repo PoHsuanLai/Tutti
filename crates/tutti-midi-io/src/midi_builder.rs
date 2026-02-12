@@ -37,12 +37,7 @@ impl<'a> MidiBuilder<'a> {
         }
     }
 
-    /// Send a Note On message.
-    ///
-    /// # Arguments
-    /// * `channel` - MIDI channel (0-15)
-    /// * `note` - Note number (0-127)
-    /// * `velocity` - Velocity (0-127)
+    /// Channel 0-15, note 0-127, velocity 0-127.
     #[cfg(feature = "midi-io")]
     pub fn note_on(self, channel: u8, note: u8, velocity: u8) -> Self {
         if let Some(midi) = self.midi {
@@ -56,12 +51,7 @@ impl<'a> MidiBuilder<'a> {
         self
     }
 
-    /// Send a Note Off message.
-    ///
-    /// # Arguments
-    /// * `channel` - MIDI channel (0-15)
-    /// * `note` - Note number (0-127)
-    /// * `velocity` - Release velocity (0-127)
+    /// Channel 0-15, note 0-127, release velocity 0-127.
     #[cfg(feature = "midi-io")]
     pub fn note_off(self, channel: u8, note: u8, velocity: u8) -> Self {
         if let Some(midi) = self.midi {
@@ -75,12 +65,7 @@ impl<'a> MidiBuilder<'a> {
         self
     }
 
-    /// Send a Control Change (CC) message.
-    ///
-    /// # Arguments
-    /// * `channel` - MIDI channel (0-15)
-    /// * `cc` - Controller number (0-127)
-    /// * `value` - Controller value (0-127)
+    /// Channel 0-15, controller 0-127, value 0-127.
     #[cfg(feature = "midi-io")]
     pub fn cc(self, channel: u8, cc: u8, value: u8) -> Self {
         if let Some(midi) = self.midi {
@@ -94,11 +79,7 @@ impl<'a> MidiBuilder<'a> {
         self
     }
 
-    /// Send a Pitch Bend message.
-    ///
-    /// # Arguments
-    /// * `channel` - MIDI channel (0-15)
-    /// * `value` - Pitch bend value (-8192 to 8191, 0 = center)
+    /// Channel 0-15, value -8192..=8191 (0 = center).
     #[cfg(feature = "midi-io")]
     pub fn pitch_bend(self, channel: u8, value: i16) -> Self {
         if let Some(midi) = self.midi {
@@ -112,11 +93,7 @@ impl<'a> MidiBuilder<'a> {
         self
     }
 
-    /// Send Program Change message.
-    ///
-    /// # Arguments
-    /// * `channel` - MIDI channel (0-15)
-    /// * `program` - Program number (0-127)
+    /// Channel 0-15, program 0-127.
     #[cfg(feature = "midi-io")]
     pub fn program_change(self, channel: u8, program: u8) -> Self {
         if let Some(midi) = self.midi {

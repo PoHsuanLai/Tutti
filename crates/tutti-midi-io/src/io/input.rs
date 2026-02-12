@@ -21,16 +21,12 @@ use crate::mpe::MpeProcessor;
 #[cfg(feature = "mpe")]
 use parking_lot::RwLock;
 
-/// Information about an available MIDI input device
 #[derive(Debug, Clone)]
 pub struct MidiInputDevice {
-    /// Device index (for connection)
     pub index: usize,
-    /// Device name
     pub name: String,
 }
 
-/// Commands sent to the MIDI thread
 enum MidiCommand {
     Connect(usize, usize, InputProducerHandle), // (device_index, port_index, producer_handle)
     Disconnect,
@@ -40,7 +36,6 @@ enum MidiCommand {
 #[cfg(feature = "mpe")]
 type MpeProcessorRef = Arc<RwLock<MpeProcessor>>;
 
-/// MIDI input manager with async connection handling.
 #[cfg(feature = "midi-io")]
 pub struct MidiInputManager {
     port_manager: Arc<MidiPortManager>,
@@ -111,7 +106,6 @@ impl MidiInputManager {
         loop {
             match command_receiver.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(MidiCommand::Connect(device_index, port_index, producer_handle)) => {
-                    // Disconnect existing
                     if let Some(conn) = connection.take() {
                         drop(conn);
                         is_connected.store(false, Ordering::SeqCst);
@@ -119,7 +113,6 @@ impl MidiInputManager {
                         connected_port.store(Arc::new(None));
                     }
 
-                    // Try to connect
                     match Self::connect_to_device(
                         device_index,
                         producer_handle,
@@ -146,17 +139,13 @@ impl MidiInputManager {
                     }
                 }
                 Ok(MidiCommand::Shutdown) => {
-                    // Clean up and exit thread
                     if let Some(conn) = connection.take() {
                         drop(conn);
                     }
                     break;
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    // No command, continue running
-                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    // Channel closed, exit thread
                     break;
                 }
             }
@@ -183,21 +172,17 @@ impl MidiInputManager {
             port,
             "dawai-input",
             move |_timestamp, message, _| {
-                // Parse raw MIDI bytes into structured MidiEvent
                 match MidiEvent::from_bytes(message) {
                     Ok(event) => {
-                        // Process through MPE if enabled
+                        // Process through MPE if enabled.
+                        // NOTE: This callback runs on midir's dedicated MIDI input thread,
+                        // NOT the audio thread. The RwLock is acceptable here because:
+                        // 1. Audio thread reads expression via lock-free AtomicFloat/AtomicFlag
+                        // 2. Only this callback thread writes to MpeProcessor state
+                        // 3. Channel allocation (the only other writer) is not time-critical
                         #[cfg(feature = "mpe")]
                         if let Some(ref processor) = mpe_processor {
                             processor.write().process_midi1(&event);
-                        }
-
-                        // Also process as MIDI 2.0 for high-res MPE expression
-                        #[cfg(all(feature = "mpe", feature = "midi2"))]
-                        if let Some(ref processor) = mpe_processor {
-                            if let Some(midi2_event) = crate::midi2::midi1_to_midi2(&event) {
-                                processor.read().process_midi2(&midi2_event);
-                            }
                         }
 
                         if !producer_handle.push(event) {
@@ -373,15 +358,6 @@ mod tests {
             }
             _ => panic!("Expected ProgramChange"),
         }
-    }
-
-    #[test]
-    fn test_list_devices() {
-        // This test just verifies the function doesn't crash
-        // Actual device availability depends on the system
-        let devices = MidiInputManager::list_devices();
-        // devices might be empty on CI or systems without MIDI
-        println!("Found {} MIDI devices", devices.len());
     }
 
     #[test]

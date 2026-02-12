@@ -15,7 +15,6 @@ use parking_lot::RwLock;
 
 use super::{MidiSystem, MidiSystemInner};
 
-/// Builder for configuring MidiSystem
 pub struct MidiSystemBuilder {
     #[cfg(feature = "midi-io")]
     pub(super) enable_io: bool,
@@ -40,37 +39,33 @@ impl Default for MidiSystemBuilder {
 }
 
 impl MidiSystemBuilder {
-    /// Enable hardware MIDI I/O
     #[cfg(feature = "midi-io")]
     pub fn io(mut self) -> Self {
         self.enable_io = true;
         self
     }
 
-    /// Enable MPE with the given mode
     #[cfg(feature = "mpe")]
     pub fn mpe(mut self, mode: MpeMode) -> Self {
         self.mpe_mode = Some(mode);
         self
     }
 
-    /// Enable CC mapping manager
     pub fn cc_mapping(mut self) -> Self {
         self.enable_cc_mapping = true;
         self
     }
 
-    /// Enable MIDI output collector (for collecting MIDI from audio nodes)
+    /// Collects MIDI output from audio nodes.
     pub fn output_collector(mut self) -> Self {
         self.enable_output_collector = true;
         self
     }
 
-    /// Build the MIDI system
     pub fn build(self) -> Result<MidiSystem> {
         let port_manager = Arc::new(MidiPortManager::new(256));
 
-        // Create MPE processor before input manager so it can be passed in
+        // MPE processor must exist before input manager (needs a clone)
         #[cfg(feature = "mpe")]
         let mpe_processor = self
             .mpe_mode
@@ -116,5 +111,53 @@ impl MidiSystemBuilder {
                 output_collector,
             }),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_build() {
+        let midi = MidiSystemBuilder::default().build().unwrap();
+
+        // Port manager should always be present
+        let ports = midi.list_ports();
+        assert!(ports.is_empty(), "No ports should exist by default");
+
+        // CC manager should be None by default
+        assert!(midi.cc_manager().is_none());
+
+        // Output collector should be None by default
+        assert!(midi.output_collector().is_none());
+    }
+
+    #[test]
+    fn test_build_with_cc_mapping() {
+        let midi = MidiSystemBuilder::default()
+            .cc_mapping()
+            .build()
+            .unwrap();
+
+        // CC manager should be present
+        let cc = midi.cc_manager();
+        assert!(cc.is_some(), "CC manager should be enabled");
+
+        // Should be able to add mappings and retrieve them
+        let manager = cc.unwrap();
+        manager.add_mapping(None, 74, crate::cc::CCTarget::MasterVolume, 0.0, 1.0);
+        assert_eq!(manager.get_all_mappings().len(), 1);
+    }
+
+    #[test]
+    fn test_build_with_output_collector() {
+        let midi = MidiSystemBuilder::default()
+            .output_collector()
+            .build()
+            .unwrap();
+
+        // Output collector should be present
+        assert!(midi.output_collector().is_some());
     }
 }

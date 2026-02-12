@@ -6,25 +6,20 @@ use parking_lot::RwLock;
 
 use crate::mpe::{MpeMode, MpeProcessor, PerNoteExpression};
 
-/// Handle for MPE functionality
 pub struct MpeHandle {
     processor: Option<Arc<RwLock<MpeProcessor>>>,
 }
 
 impl MpeHandle {
-    /// Create a new MPE handle (internal use only)
     pub(crate) fn new(processor: Option<Arc<RwLock<MpeProcessor>>>) -> Self {
         Self { processor }
     }
 
-    /// Get the shared per-note expression state
     pub fn expression(&self) -> Option<Arc<PerNoteExpression>> {
         self.processor.as_ref().map(|p| p.read().expression())
     }
 
-    /// Get pitch bend for a note (combined per-note + global)
-    ///
-    /// Returns normalized value: -1.0 (max down) to 1.0 (max up)
+    /// Combined per-note + global pitch bend, normalized to -1.0..1.0.
     #[inline]
     pub fn pitch_bend(&self, note: u8) -> f32 {
         self.processor
@@ -33,7 +28,7 @@ impl MpeHandle {
             .unwrap_or(0.0)
     }
 
-    /// Get per-note pitch bend only (without global)
+    /// Per-note only (excludes global/master channel bend).
     #[inline]
     pub fn pitch_bend_per_note(&self, note: u8) -> f32 {
         self.processor
@@ -42,7 +37,6 @@ impl MpeHandle {
             .unwrap_or(0.0)
     }
 
-    /// Get global pitch bend (from master channel)
     #[inline]
     pub fn pitch_bend_global(&self) -> f32 {
         self.processor
@@ -51,9 +45,7 @@ impl MpeHandle {
             .unwrap_or(0.0)
     }
 
-    /// Get pressure for a note (max of per-note and global)
-    ///
-    /// Returns normalized value: 0.0 to 1.0
+    /// Max of per-note and global pressure, normalized to 0.0..1.0.
     #[inline]
     pub fn pressure(&self, note: u8) -> f32 {
         self.processor
@@ -62,7 +54,6 @@ impl MpeHandle {
             .unwrap_or(0.0)
     }
 
-    /// Get per-note pressure only
     #[inline]
     pub fn pressure_per_note(&self, note: u8) -> f32 {
         self.processor
@@ -71,9 +62,7 @@ impl MpeHandle {
             .unwrap_or(0.0)
     }
 
-    /// Get slide (CC74) for a note
-    ///
-    /// Returns normalized value: 0.0 to 1.0
+    /// CC74 slide, normalized to 0.0..1.0.
     #[inline]
     pub fn slide(&self, note: u8) -> f32 {
         self.processor
@@ -82,7 +71,6 @@ impl MpeHandle {
             .unwrap_or(0.5)
     }
 
-    /// Check if a note is currently active
     #[inline]
     pub fn is_note_active(&self, note: u8) -> bool {
         self.processor
@@ -91,7 +79,6 @@ impl MpeHandle {
             .unwrap_or(false)
     }
 
-    /// Get the current MPE mode
     pub fn mode(&self) -> MpeMode {
         self.processor
             .as_ref()
@@ -99,7 +86,6 @@ impl MpeHandle {
             .unwrap_or(MpeMode::Disabled)
     }
 
-    /// Check if MPE is enabled
     pub fn is_enabled(&self) -> bool {
         self.processor
             .as_ref()
@@ -107,10 +93,7 @@ impl MpeHandle {
             .unwrap_or(false)
     }
 
-    /// Process a unified MIDI event (MIDI 1.0 or 2.0)
-    ///
-    /// Dispatches to the appropriate handler based on the event type.
-    /// This allows external callers to feed events into the MPE processor.
+    /// Feed an external event into the MPE processor (MIDI 1.0 or 2.0).
     #[cfg(feature = "midi2")]
     pub fn process_event(&self, event: &crate::UnifiedMidiEvent) {
         if let Some(ref p) = self.processor {
@@ -118,42 +101,27 @@ impl MpeHandle {
         }
     }
 
-    /// Allocate a channel for outgoing MPE note
-    ///
-    /// Call this before sending a Note On to allocate an MPE channel.
-    /// Returns the channel to use, or None if MPE is disabled.
-    ///
-    /// # Example
-    /// ```ignore
-    /// if let Some(channel) = midi.mpe().allocate_channel(60) {
-    ///     midi.send_note_on(channel, 60, 100)?;
-    /// }
-    /// ```
+    /// Call before sending a Note On to allocate an MPE member channel.
+    /// Returns None if MPE is disabled or no channels are free.
     pub fn allocate_channel(&self, note: u8) -> Option<u8> {
         self.processor
             .as_ref()
             .and_then(|p| p.write().allocate_channel_for_note(note))
     }
 
-    /// Release a channel after Note Off
-    ///
-    /// Frees the channel for reuse by other notes.
+    /// Frees the member channel for reuse by other notes.
     pub fn release_channel(&self, note: u8) {
         if let Some(ref p) = self.processor {
             p.write().release_channel_for_note(note);
         }
     }
 
-    /// Get the channel currently assigned to a note
-    ///
-    /// Returns None if the note is not currently playing or MPE is disabled.
     pub fn get_channel(&self, note: u8) -> Option<u8> {
         self.processor
             .as_ref()
             .and_then(|p| p.read().get_channel_for_note(note))
     }
 
-    /// Check if using lower zone
     pub fn has_lower_zone(&self) -> bool {
         self.processor
             .as_ref()
@@ -166,7 +134,6 @@ impl MpeHandle {
             .unwrap_or(false)
     }
 
-    /// Check if using upper zone
     pub fn has_upper_zone(&self) -> bool {
         self.processor
             .as_ref()
@@ -179,13 +146,117 @@ impl MpeHandle {
             .unwrap_or(false)
     }
 
-    /// Reset all MPE state
-    ///
     /// Clears all channel allocations and resets expression values.
-    /// Call this when stopping playback or changing MPE configuration.
+    /// Call when stopping playback or changing MPE configuration.
     pub fn reset(&self) {
         if let Some(ref p) = self.processor {
             p.write().reset();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mpe::{MpeMode, MpeZoneConfig};
+
+    #[test]
+    fn test_disabled_handle_defaults() {
+        let handle = MpeHandle::new(None);
+
+        // All reads should return safe defaults
+        assert_eq!(handle.pitch_bend(60), 0.0);
+        assert_eq!(handle.pitch_bend_per_note(60), 0.0);
+        assert_eq!(handle.pitch_bend_global(), 0.0);
+        assert_eq!(handle.pressure(60), 0.0);
+        assert_eq!(handle.pressure_per_note(60), 0.0);
+        assert_eq!(handle.slide(60), 0.5); // slide defaults to 0.5
+        assert!(!handle.is_note_active(60));
+        assert!(!handle.is_enabled());
+        assert!(matches!(handle.mode(), MpeMode::Disabled));
+        assert!(!handle.has_lower_zone());
+        assert!(!handle.has_upper_zone());
+        assert!(handle.expression().is_none());
+        assert!(handle.allocate_channel(60).is_none());
+        assert!(handle.get_channel(60).is_none());
+    }
+
+    #[test]
+    fn test_enabled_expression_reads() {
+        let processor = Arc::new(RwLock::new(
+            MpeProcessor::new(MpeMode::LowerZone(MpeZoneConfig::lower(15))),
+        ));
+        let handle = MpeHandle::new(Some(processor.clone()));
+
+        assert!(handle.is_enabled());
+
+        // Process a note on via the processor directly (simulating MIDI input)
+        {
+            let mut p = processor.write();
+            let note_on = crate::MidiEvent::note_on(0, 1, 60, 100); // Channel 1 = member
+            p.process_midi1(&note_on);
+        }
+
+        assert!(handle.is_note_active(60));
+
+        // Process pitch bend on the same member channel
+        {
+            let mut p = processor.write();
+            let bend = crate::MidiEvent::pitch_bend(0, 1, 16383); // Max bend
+            p.process_midi1(&bend);
+        }
+
+        let bend = handle.pitch_bend(60);
+        assert!((bend - 1.0).abs() < 0.01, "Expected ~1.0, got {bend}");
+    }
+
+    #[test]
+    fn test_channel_allocation_and_release() {
+        let processor = Arc::new(RwLock::new(
+            MpeProcessor::new(MpeMode::LowerZone(MpeZoneConfig::lower(5))),
+        ));
+        let handle = MpeHandle::new(Some(processor));
+
+        // Allocate a channel for note 60
+        let ch = handle.allocate_channel(60);
+        assert!(ch.is_some(), "Should allocate a member channel");
+        let ch = ch.unwrap();
+        assert!(ch >= 1 && ch <= 5, "Channel should be in member range 1-5, got {ch}");
+
+        // Should be able to look up the channel
+        let found = handle.get_channel(60);
+        assert_eq!(found, Some(ch));
+
+        // Release and verify it's gone
+        handle.release_channel(60);
+        assert_eq!(handle.get_channel(60), None);
+    }
+
+    #[test]
+    fn test_zone_detection() {
+        // Lower zone only
+        let proc_lower = Arc::new(RwLock::new(
+            MpeProcessor::new(MpeMode::LowerZone(MpeZoneConfig::lower(15))),
+        ));
+        let handle = MpeHandle::new(Some(proc_lower));
+        assert!(handle.has_lower_zone());
+        assert!(!handle.has_upper_zone());
+
+        // Upper zone only
+        let proc_upper = Arc::new(RwLock::new(
+            MpeProcessor::new(MpeMode::UpperZone(MpeZoneConfig::upper(5))),
+        ));
+        let handle = MpeHandle::new(Some(proc_upper));
+        assert!(!handle.has_lower_zone());
+        assert!(handle.has_upper_zone());
+
+        // Dual zone
+        let proc_dual = Arc::new(RwLock::new(MpeProcessor::new(MpeMode::DualZone {
+            lower: MpeZoneConfig::lower(7),
+            upper: MpeZoneConfig::upper(7),
+        })));
+        let handle = MpeHandle::new(Some(proc_dual));
+        assert!(handle.has_lower_zone());
+        assert!(handle.has_upper_zone());
     }
 }

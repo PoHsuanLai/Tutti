@@ -6,4 +6,4 @@
 pub(crate) mod async_port;
 mod manager;
 
-pub use manager::{MidiPortManager, PortInfo};
+pub use manager::{MidiPortManager, PortInfo, PortType};

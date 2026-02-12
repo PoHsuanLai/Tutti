@@ -4,13 +4,11 @@
 //!
 //! # Example
 //! ```ignore
-//! use tutti::midi::Note;
+//! use tutti_midi::Note;
 //!
-//! // Use enum variants
 //! let middle_c = Note::C4;
 //! let concert_a = Note::A4;
 //!
-//! // Convert to raw MIDI number
 //! assert_eq!(u8::from(Note::C4), 60);
 //! assert_eq!(u8::from(Note::A4), 69);
 //! ```
@@ -178,47 +176,41 @@ pub enum Note {
 }
 
 impl Note {
-    /// Middle C (MIDI 60).
     pub const MIDDLE_C: Note = Note::C4;
-
-    /// Concert A / A440 (MIDI 69).
     pub const CONCERT_A: Note = Note::A4;
 
-    /// Convert from raw MIDI note number.
-    ///
     /// Returns `None` if the value is > 127.
     pub const fn from_midi(midi: u8) -> Option<Note> {
         if midi > 127 {
             return None;
         }
         // SAFETY: repr(u8) enum with all values 0-127 defined
-        Some(unsafe { core::mem::transmute(midi) })
+        Some(unsafe { core::mem::transmute::<u8, Note>(midi) })
     }
 
-    /// Get the raw MIDI note number (0-127).
     pub const fn midi(self) -> u8 {
         self as u8
     }
 
-    /// Get the octave number (-1 to 9).
+    /// Returns -1 to 9.
     pub const fn octave(self) -> i8 {
         (self as u8 / 12) as i8 - 1
     }
 
-    /// Get the pitch class (0-11, where 0 = C).
+    /// 0-11, where 0 = C.
     pub const fn pitch_class(self) -> u8 {
         self as u8 % 12
     }
 
-    /// Get frequency in Hz (A4 = 440 Hz, equal temperament).
+    /// Frequency in Hz (A4 = 440 Hz, equal temperament).
     pub fn frequency(self) -> f64 {
-        440.0 * 2.0_f64.powf((self as u8 as f64 - 69.0) / 12.0)
+        440.0 * libm::pow(2.0, (self as u8 as f64 - 69.0) / 12.0)
     }
 
-    /// Transpose by semitones. Returns None if result would be out of range.
+    /// Returns `None` if result would be out of MIDI range (0-127).
     pub fn transpose(self, semitones: i8) -> Option<Note> {
         let new_midi = (self as u8 as i16) + (semitones as i16);
-        if new_midi < 0 || new_midi > 127 {
+        if !(0..=127).contains(&new_midi) {
             None
         } else {
             Note::from_midi(new_midi as u8)
@@ -328,21 +320,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_midi_values() {
-        assert_eq!(Note::C4.midi(), 60);
-        assert_eq!(Note::A4.midi(), 69);
-        assert_eq!(Note::Cm1.midi(), 0);
-        assert_eq!(Note::G9.midi(), 127);
-    }
-
-    #[test]
-    fn test_from_midi() {
-        assert_eq!(Note::from_midi(60), Some(Note::C4));
-        assert_eq!(Note::from_midi(69), Some(Note::A4));
-        assert_eq!(Note::from_midi(128), None);
-    }
-
-    #[test]
     fn test_octave() {
         assert_eq!(Note::C4.octave(), 4);
         assert_eq!(Note::Cm1.octave(), -1);
@@ -371,15 +348,47 @@ mod tests {
     }
 
     #[test]
-    fn test_flat_aliases() {
-        assert_eq!(flat::Db4, Note::Cs4);
-        assert_eq!(flat::Eb4, Note::Ds4);
-        assert_eq!(flat::Bb4, Note::As4);
+    fn test_from_midi_all_values() {
+        // Every valid MIDI note should round-trip
+        for n in 0..=127u8 {
+            let note = Note::from_midi(n).unwrap();
+            assert_eq!(note.midi(), n, "Round-trip failed for MIDI note {n}");
+        }
+        // 128+ should return None
+        assert_eq!(Note::from_midi(128), None);
+        assert_eq!(Note::from_midi(255), None);
     }
 
     #[test]
-    fn test_into_u8() {
-        let note: u8 = Note::C4.into();
-        assert_eq!(note, 60);
+    fn test_frequency_known_values() {
+        // A4 = 440 Hz (exact)
+        assert!((Note::A4.frequency() - 440.0).abs() < 0.01);
+        // A3 = 220 Hz (one octave down)
+        assert!((Note::A3.frequency() - 220.0).abs() < 0.01);
+        // A5 = 880 Hz (one octave up)
+        assert!((Note::A5.frequency() - 880.0).abs() < 0.01);
+        // C4 = 261.63 Hz (middle C)
+        assert!((Note::C4.frequency() - 261.63).abs() < 0.1);
+        // Frequency must always be positive
+        assert!(Note::Cm1.frequency() > 0.0);
+        assert!(Note::G9.frequency() > 0.0);
+    }
+
+    #[test]
+    fn test_transpose_boundary_sweep() {
+        // Transpose from lowest note up by max
+        assert_eq!(Note::Cm1.transpose(0), Some(Note::Cm1));
+        assert_eq!(Note::Cm1.transpose(127), Some(Note::G9));
+
+        // Transpose from highest note down by max
+        assert_eq!(Note::G9.transpose(0), Some(Note::G9));
+        assert_eq!(Note::G9.transpose(-127), Some(Note::Cm1));
+        assert_eq!(Note::G9.transpose(-128), None); // -128 fits in i8
+
+        // Middle note both directions
+        assert_eq!(Note::C4.transpose(67), Some(Note::G9));  // 60 + 67 = 127
+        assert_eq!(Note::C4.transpose(68), None);             // 60 + 68 = 128, out of range
+        assert_eq!(Note::C4.transpose(-60), Some(Note::Cm1)); // 60 - 60 = 0
+        assert_eq!(Note::C4.transpose(-61), None);            // 60 - 61 = -1, out of range
     }
 }

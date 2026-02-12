@@ -26,14 +26,11 @@ pub fn midi1_velocity_to_midi2(v: u8) -> u16 {
 }
 
 /// Convert 16-bit MIDI 2.0 velocity to 7-bit MIDI 1.0.
-///
-/// Uses the inverse of the MIDI 2.0 specification's scaling.
 #[inline]
 pub fn midi2_velocity_to_midi1(v: u16) -> u8 {
     if v == 0 {
         0
     } else {
-        // Inverse of midi1_velocity_to_midi2
         let v16 = v as u32;
         ((v16 * 127 + 32767) / 65535).min(127) as u8
     }
@@ -47,7 +44,6 @@ pub fn midi1_cc_to_midi2(v: u8) -> u32 {
     } else if v == 127 {
         0xFFFF_FFFF
     } else {
-        // Linear scaling for perfect round-trip
         let v7 = v as u64;
         ((v7 * 0xFFFF_FFFF + 63) / 127) as u32
     }
@@ -59,7 +55,6 @@ pub fn midi2_cc_to_midi1(v: u32) -> u8 {
     if v == 0 {
         0
     } else {
-        // Inverse scaling
         let v32 = v as u64;
         ((v32 * 127 + 0x7FFF_FFFF) / 0xFFFF_FFFF).min(127) as u8
     }
@@ -190,16 +185,12 @@ mod tests {
 
     #[test]
     fn test_pitch_bend_conversion_roundtrip() {
-        // Test key values
-        assert_eq!(midi2_pitch_bend_to_midi1(midi1_pitch_bend_to_midi2(0)), 0);
-        assert_eq!(
-            midi2_pitch_bend_to_midi1(midi1_pitch_bend_to_midi2(8192)),
-            8192
-        );
-        assert_eq!(
-            midi2_pitch_bend_to_midi1(midi1_pitch_bend_to_midi2(16383)),
-            16383
-        );
+        // Test all 14-bit values roundtrip correctly
+        for v in 0..=16383u16 {
+            let midi2 = midi1_pitch_bend_to_midi2(v);
+            let back = midi2_pitch_bend_to_midi1(midi2);
+            assert_eq!(back, v, "pitch bend {} failed roundtrip", v);
+        }
     }
 
     #[test]

@@ -40,13 +40,11 @@ pub use error::{Error, Result};
 mod system;
 pub use system::{MidiSystem, MidiSystemBuilder};
 
-// Fluent builder and handle
 mod midi_builder;
 mod midi_handle;
 pub use midi_builder::MidiBuilder;
 pub use midi_handle::MidiHandle;
 
-// Sub-handles (feature-gated)
 #[cfg(feature = "midi2")]
 pub use system::Midi2Handle;
 #[cfg(feature = "mpe")]
@@ -55,14 +53,13 @@ pub use system::MpeHandle;
 pub(crate) mod event;
 pub use event::{MidiEvent, RawMidiEvent};
 
-// Re-export essential upstream types from tutti-midi (users shouldn't need to import midi-msg directly)
 pub use tutti_midi::{
     Channel, ChannelModeMsg, ChannelVoiceMsg, ControlChange, MidiMsg, SystemCommonMsg,
     SystemRealTimeMsg,
 };
 
 pub(crate) mod port;
-pub use port::PortInfo;
+pub use port::{PortInfo, PortType};
 
 #[cfg(feature = "midi-io")]
 pub(crate) mod io;
@@ -84,8 +81,8 @@ pub use output_collector::{
 pub(crate) mod file;
 pub use file::{MidiEventType, ParsedMidiFile, TimedMidiEvent};
 
-pub mod note;
-pub use note::Note;
+pub use tutti_midi::note;
+pub use tutti_midi::Note;
 
 pub use tutti_midi::{gain_to_velocity, hz_to_note, note_to_hz, velocity_to_gain};
 

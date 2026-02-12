@@ -4,43 +4,37 @@ use crate::event::MidiEvent;
 use parking_lot::Mutex;
 use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
 
-/// Default capacity for the MIDI output ring buffer
 const DEFAULT_CAPACITY: usize = 256;
 
-/// Producer for pushing MIDI events from audio thread.
+/// Producer side -- push MIDI events from the audio thread.
 pub struct MidiOutputProducer {
     producer: HeapProd<MidiEvent>,
 }
 
 impl MidiOutputProducer {
-    /// Push a MIDI event to the output buffer
-    ///
-    /// Returns true if the event was successfully pushed, false if buffer is full.
+    /// Returns `false` if the ring buffer is full.
     #[inline]
     pub fn push(&mut self, event: MidiEvent) -> bool {
         self.producer.try_push(event).is_ok()
     }
 
-    /// Push multiple MIDI events
     #[inline]
     pub fn push_slice(&mut self, events: &[MidiEvent]) -> usize {
         self.producer.push_slice(events)
     }
 }
 
-/// Consumer for draining MIDI events from output thread.
+/// Consumer side -- drain MIDI events from the output thread.
 pub struct MidiOutputConsumer {
     consumer: HeapCons<MidiEvent>,
 }
 
 impl MidiOutputConsumer {
-    /// Pop a single event
     #[inline]
     pub fn pop(&mut self) -> Option<MidiEvent> {
         self.consumer.try_pop()
     }
 
-    /// Drain all pending events into a vector
     pub fn drain_all(&mut self) -> Vec<MidiEvent> {
         let count = self.consumer.occupied_len();
         let mut events = Vec::with_capacity(count);
@@ -50,25 +44,21 @@ impl MidiOutputConsumer {
         events
     }
 
-    /// Check if there are pending events
     #[inline]
     pub fn has_pending(&self) -> bool {
         !self.consumer.is_empty()
     }
 
-    /// Get number of pending events
     #[inline]
     pub fn pending_count(&self) -> usize {
         self.consumer.occupied_len()
     }
 }
 
-/// Create a new MIDI output channel
 pub fn midi_output_channel() -> (MidiOutputProducer, MidiOutputConsumer) {
     midi_output_channel_with_capacity(DEFAULT_CAPACITY)
 }
 
-/// Create a new MIDI output channel with specified capacity
 pub fn midi_output_channel_with_capacity(
     capacity: usize,
 ) -> (MidiOutputProducer, MidiOutputConsumer) {
@@ -80,38 +70,41 @@ pub fn midi_output_channel_with_capacity(
     )
 }
 
-/// Aggregates multiple MIDI output consumers.
+/// Merges multiple `MidiOutputConsumer`s into a single drain point.
 pub struct MidiOutputAggregator {
     consumers: Mutex<Vec<MidiOutputConsumer>>,
 }
 
 impl MidiOutputAggregator {
-    /// Create a new empty aggregator
     pub fn new() -> Self {
         Self {
             consumers: Mutex::new(Vec::new()),
         }
     }
 
-    /// Add a consumer to the aggregator
     pub fn add_consumer(&self, consumer: MidiOutputConsumer) {
         self.consumers.lock().push(consumer);
     }
 
-    /// Drain all events from all consumers
+    /// Uses `try_lock` to avoid blocking the audio thread.
     pub fn drain_all(&self) -> Vec<MidiEvent> {
+        let mut consumers = match self.consumers.try_lock() {
+            Some(guard) => guard,
+            None => return Vec::new(),
+        };
         let mut all_events = Vec::new();
-        let mut consumers = self.consumers.lock();
         for consumer in consumers.iter_mut() {
             all_events.extend(consumer.drain_all());
         }
         all_events
     }
 
-    /// Check if any consumer has pending events
+    /// Uses `try_lock` to avoid blocking the audio thread.
     pub fn has_pending(&self) -> bool {
-        let consumers = self.consumers.lock();
-        consumers.iter().any(|c| c.has_pending())
+        match self.consumers.try_lock() {
+            Some(consumers) => consumers.iter().any(|c| c.has_pending()),
+            None => false,
+        }
     }
 }
 

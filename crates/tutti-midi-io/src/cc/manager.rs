@@ -6,28 +6,22 @@ use dashmap::DashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// Result of processing a CC message
 #[derive(Debug, Clone)]
 pub struct CCProcessResult {
-    /// Target and mapped value pairs to apply
     pub targets: Vec<(CCTarget, f32)>,
-    /// Whether MIDI learn was completed (and the new mapping ID)
     pub learn_completed: Option<MappingId>,
 }
 
-/// MIDI learn mode state
 #[derive(Debug, Clone)]
 struct LearnState {
-    /// The target we're learning for
     target: CCTarget,
-    /// Min/max values for the mapping
     min_value: f32,
     max_value: f32,
-    /// Channel filter (None = any channel)
+    /// `None` = any channel.
     channel_filter: Option<MidiChannel>,
 }
 
-/// Lock-free MIDI CC mapping manager with MIDI learn mode.
+/// Lock-free MIDI CC mapping manager with MIDI learn support.
 pub struct CCMappingManager {
     mappings: Arc<DashMap<MappingId, CCMapping>>,
     next_id: AtomicU64,
@@ -35,7 +29,6 @@ pub struct CCMappingManager {
 }
 
 impl CCMappingManager {
-    /// Create a new CC mapping manager
     pub fn new() -> Self {
         Self {
             mappings: Arc::new(DashMap::new()),
@@ -44,12 +37,10 @@ impl CCMappingManager {
         }
     }
 
-    /// Get shared access to the mappings
     pub fn mappings_arc(&self) -> Arc<DashMap<MappingId, CCMapping>> {
         Arc::clone(&self.mappings)
     }
 
-    /// Add a MIDI CC mapping
     pub fn add_mapping(
         &self,
         channel: Option<MidiChannel>,
@@ -64,12 +55,10 @@ impl CCMappingManager {
         id
     }
 
-    /// Remove a MIDI CC mapping
     pub fn remove_mapping(&self, mapping_id: MappingId) -> bool {
         self.mappings.remove(&mapping_id).is_some()
     }
 
-    /// Get all MIDI CC mappings
     pub fn get_all_mappings(&self) -> Vec<(MappingId, CCMapping)> {
         self.mappings
             .iter()
@@ -77,14 +66,12 @@ impl CCMappingManager {
             .collect()
     }
 
-    /// Get a specific MIDI CC mapping by ID
     pub fn get_mapping(&self, mapping_id: MappingId) -> Option<CCMapping> {
         self.mappings
             .get(&mapping_id)
             .map(|entry| entry.value().clone())
     }
 
-    /// Find all mappings for a specific channel and CC number
     pub fn find_mappings(
         &self,
         channel: MidiChannel,
@@ -100,7 +87,6 @@ impl CCMappingManager {
             .collect()
     }
 
-    /// Enable/disable a MIDI CC mapping
     pub fn set_mapping_enabled(&self, mapping_id: MappingId, enabled: bool) -> bool {
         if let Some(mut entry) = self.mappings.get_mut(&mapping_id) {
             entry.enabled = enabled;
@@ -110,12 +96,10 @@ impl CCMappingManager {
         }
     }
 
-    /// Clear all MIDI CC mappings
     pub fn clear_all(&self) {
         self.mappings.clear();
     }
 
-    /// Start MIDI learn mode for a target
     pub fn start_learn(
         &self,
         target: CCTarget,
@@ -132,42 +116,31 @@ impl CCMappingManager {
         self.learn_state.store(Arc::new(Some(state)));
     }
 
-    /// Cancel MIDI learn mode
     pub fn cancel_learn(&self) {
         self.learn_state.store(Arc::new(None));
     }
 
-    /// Check if we're in MIDI learn mode
     pub fn is_learning(&self) -> bool {
         self.learn_state.load().is_some()
     }
 
-    /// Get the current MIDI learn target (if learning)
     pub fn get_learn_target(&self) -> Option<CCTarget> {
         let guard = self.learn_state.load();
         guard.as_ref().as_ref().map(|state| state.target.clone())
     }
 
-    /// Process a MIDI CC message and return targets to apply (lock-free!)
+    /// Process a CC message: completes MIDI learn if active, otherwise maps to targets.
     ///
-    /// This handles MIDI learn mode and returns the mapped targets.
-    /// The caller is responsible for actually applying the values to
-    /// track controls, effects, transport, etc.
-    ///
-    /// Returns `CCProcessResult` with targets to apply and learn status.
-    ///
-    /// **Lock-free**: Uses ArcSwap for learn state, DashMap for mappings.
+    /// The caller applies the returned target values. **Lock-free**.
     pub fn process_cc(
         &self,
         channel: MidiChannel,
         cc_number: CCNumber,
         cc_value: u8,
     ) -> CCProcessResult {
-        // Check if we're in learn mode
         let learn_guard = self.learn_state.load();
         if let Some(ref state) = **learn_guard {
             if state.channel_filter.is_none() || state.channel_filter == Some(channel) {
-                // Complete the learn - create new mapping
                 let mapping_id = self.add_mapping(
                     Some(channel),
                     cc_number,
@@ -176,7 +149,6 @@ impl CCMappingManager {
                     state.max_value,
                 );
 
-                // Exit learn mode
                 self.cancel_learn();
 
                 return CCProcessResult {
@@ -184,14 +156,12 @@ impl CCMappingManager {
                     learn_completed: Some(mapping_id),
                 };
             }
-            // Still learning, waiting for right channel
             return CCProcessResult {
                 targets: vec![],
                 learn_completed: None,
             };
         }
 
-        // Find and collect matching mappings (lock-free iteration over DashMap)
         let targets: Vec<(CCTarget, f32)> = self
             .mappings
             .iter()

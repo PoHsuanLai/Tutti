@@ -6,7 +6,6 @@ use midi2::prelude::*;
 use super::convert::midi2_velocity_to_midi1;
 use super::Midi2MessageType;
 
-/// Helper to extract [u32; 2] from a message's data slice
 #[inline]
 fn data_to_array(data: &[u32]) -> [u32; 2] {
     [data[0], data[1]]
@@ -22,7 +21,6 @@ pub struct Midi2Event {
 }
 
 impl Midi2Event {
-    /// Create a MIDI 2.0 Note On event
     #[inline]
     pub fn note_on(frame: usize, group: u4, channel: u4, note: u7, velocity: u16) -> Self {
         let mut msg = midi2::channel_voice2::NoteOn::<[u32; 2]>::new();
@@ -36,7 +34,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Note On event with attribute
     #[inline]
     pub fn note_on_with_attribute(
         frame: usize,
@@ -58,7 +55,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Note Off event
     #[inline]
     pub fn note_off(frame: usize, group: u4, channel: u4, note: u7, velocity: u16) -> Self {
         let mut msg = midi2::channel_voice2::NoteOff::<[u32; 2]>::new();
@@ -72,7 +68,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Per-Note Pitch Bend event
     #[inline]
     pub fn per_note_pitch_bend(frame: usize, group: u4, channel: u4, note: u7, bend: u32) -> Self {
         let mut msg = midi2::channel_voice2::PerNotePitchBend::<[u32; 2]>::new();
@@ -86,7 +81,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Control Change event
     #[inline]
     pub fn control_change(
         frame: usize,
@@ -106,7 +100,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Channel Pitch Bend event
     #[inline]
     pub fn channel_pitch_bend(frame: usize, group: u4, channel: u4, bend: u32) -> Self {
         let mut msg = midi2::channel_voice2::ChannelPitchBend::<[u32; 2]>::new();
@@ -119,7 +112,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Channel Pressure event
     #[inline]
     pub fn channel_pressure(frame: usize, group: u4, channel: u4, pressure: u32) -> Self {
         let mut msg = midi2::channel_voice2::ChannelPressure::<[u32; 2]>::new();
@@ -132,7 +124,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Per-Note Pressure event
     #[inline]
     pub fn key_pressure(frame: usize, group: u4, channel: u4, note: u7, pressure: u32) -> Self {
         let mut msg = midi2::channel_voice2::KeyPressure::<[u32; 2]>::new();
@@ -146,7 +137,6 @@ impl Midi2Event {
         }
     }
 
-    /// Create a MIDI 2.0 Program Change event
     #[inline]
     pub fn program_change(
         frame: usize,
@@ -166,7 +156,6 @@ impl Midi2Event {
         }
     }
 
-    /// Try to create a Midi2Event from raw UMP data
     #[inline]
     pub fn try_from_ump(frame: usize, data: &[u32]) -> Option<Self> {
         if data.len() < 2 {
@@ -184,25 +173,24 @@ impl Midi2Event {
         })
     }
 
-    /// Get the UMP group (0-15).
+    /// UMP group (0-15).
     #[inline]
     pub fn group(&self) -> u8 {
         ((self.data[0] >> 24) & 0x0F) as u8
     }
 
-    /// Get the MIDI channel (0-15).
+    /// MIDI channel (0-15).
     #[inline]
     pub fn channel(&self) -> u8 {
         ((self.data[0] >> 16) & 0x0F) as u8
     }
 
-    /// Get the opcode (message type within channel voice 2).
+    /// Opcode nibble (message type within channel voice 2).
     #[inline]
     fn opcode(&self) -> u8 {
         ((self.data[0] >> 20) & 0x0F) as u8
     }
 
-    /// Parse the message type and extract relevant data.
     pub fn message_type(&self) -> Midi2MessageType {
         match self.opcode() {
             0x9 => {
@@ -259,11 +247,12 @@ impl Midi2Event {
             0xC => {
                 // Program Change
                 let program = ((self.data[1] >> 24) & 0x7F) as u8;
-                let bank_valid = (self.data[0] >> 31) != 0; // Bit 31 of first word
+                let bank_valid = (self.data[0] & 0x01) != 0; // Bank valid flag is bit 0
                 let bank = if bank_valid {
                     // Bank is stored in octets 2 and 3 of second word as 7-bit values
-                    let msb = ((self.data[1] >> 8) & 0x7F) as u8;
-                    let lsb = (self.data[1] & 0x7F) as u8;
+                    // midi2 crate stores LSB in octet 2, MSB in octet 3
+                    let lsb = ((self.data[1] >> 8) & 0x7F) as u8;
+                    let msb = (self.data[1] & 0x7F) as u8;
                     Some(((msb as u16) << 7) | (lsb as u16))
                 } else {
                     None
@@ -315,13 +304,12 @@ impl Midi2Event {
         }
     }
 
-    /// Check if this is a note on event.
     #[inline]
     pub fn is_note_on(&self) -> bool {
         matches!(self.message_type(), Midi2MessageType::NoteOn { velocity, .. } if velocity > 0)
     }
 
-    /// Check if this is a note off event.
+    /// Treats velocity-0 NoteOn as NoteOff per MIDI spec.
     #[inline]
     pub fn is_note_off(&self) -> bool {
         matches!(
@@ -330,7 +318,6 @@ impl Midi2Event {
         )
     }
 
-    /// Get note number (for note-related events).
     #[inline]
     pub fn note(&self) -> Option<u8> {
         match self.message_type() {
@@ -345,7 +332,7 @@ impl Midi2Event {
         }
     }
 
-    /// Get 16-bit velocity (for note on/off events).
+    /// 16-bit velocity, or `None` for non-note events.
     #[inline]
     pub fn velocity_16bit(&self) -> Option<u16> {
         match self.message_type() {
@@ -355,13 +342,13 @@ impl Midi2Event {
         }
     }
 
-    /// Get velocity as normalized f32 (0.0-1.0).
+    /// Velocity as normalized f32 (0.0 to 1.0).
     #[inline]
     pub fn velocity_normalized(&self) -> Option<f32> {
         self.velocity_16bit().map(|v| v as f32 / 65535.0)
     }
 
-    /// Get velocity as 7-bit MIDI 1.0 value (downsampled).
+    /// Velocity downsampled to 7-bit MIDI 1.0 range.
     #[inline]
     pub fn velocity(&self) -> Option<u8> {
         self.velocity_16bit().map(midi2_velocity_to_midi1)
@@ -415,9 +402,7 @@ impl Midi2Event {
                 ))
             }
             Midi2MessageType::ChannelPitchBend { bend } => {
-                // MIDI 2.0 pitch bend is 32-bit unsigned, center at 0x80000000
-                // MIDI 1.0 pitch bend is 14-bit unsigned, center at 8192
-                let bend_14 = (bend >> 18) as u16; // Scale 32-bit to 14-bit
+                let bend_14 = super::convert::midi2_pitch_bend_to_midi1(bend);
                 Some(crate::MidiEvent::new(
                     frame,
                     channel,
@@ -425,8 +410,7 @@ impl Midi2Event {
                 ))
             }
             Midi2MessageType::ChannelPressure { pressure } => {
-                // 32-bit to 7-bit
-                let press = (pressure >> 25) as u8;
+                let press = midi2_cc_to_midi1(pressure);
                 Some(crate::MidiEvent::new(
                     frame,
                     channel,
@@ -434,7 +418,7 @@ impl Midi2Event {
                 ))
             }
             Midi2MessageType::KeyPressure { note, pressure } => {
-                let press = (pressure >> 25) as u8;
+                let press = midi2_cc_to_midi1(pressure);
                 Some(crate::MidiEvent::new(
                     frame,
                     channel,
@@ -571,5 +555,354 @@ mod tests {
 
         // Too short
         assert!(Midi2Event::try_from_ump(0, &[0x40906000]).is_none());
+    }
+
+    #[test]
+    fn test_to_midi1_pitch_bend_roundtrip() {
+        use crate::midi2::convert::midi1_pitch_bend_to_midi2;
+
+        // Test all 14-bit pitch bend values survive the MIDI 1.0 → 2.0 → to_midi1() roundtrip
+        for v in 0..=16383u16 {
+            let midi2_event = Midi2Event::channel_pitch_bend(
+                0,
+                u4::new(0),
+                u4::new(0),
+                midi1_pitch_bend_to_midi2(v),
+            );
+            let midi1 = midi2_event.to_midi1().unwrap();
+            match midi1.msg {
+                crate::ChannelVoiceMsg::PitchBend { bend } => {
+                    assert_eq!(
+                        bend, v,
+                        "to_midi1() pitch bend roundtrip failed for value {}",
+                        v
+                    );
+                }
+                _ => panic!("Expected PitchBend"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_to_midi1_control_change() {
+        use crate::midi2::convert::midi1_cc_to_midi2;
+
+        // CC7 value 100 on channel 3
+        let midi2_event = Midi2Event::control_change(
+            42,
+            u4::new(0),
+            u4::new(3),
+            u7::new(7),
+            midi1_cc_to_midi2(100),
+        );
+        let midi1 = midi2_event.to_midi1().unwrap();
+        assert_eq!(midi1.frame_offset, 42);
+        assert_eq!(midi1.channel_num(), 3);
+        match midi1.msg {
+            crate::ChannelVoiceMsg::ControlChange { control } => match control {
+                crate::event::ControlChange::CC { control: cc, value } => {
+                    assert_eq!(cc, 7);
+                    assert_eq!(value, 100);
+                }
+                _ => panic!("Expected CC variant"),
+            },
+            _ => panic!("Expected ControlChange"),
+        }
+
+        // Boundary: CC value 0 and 127
+        for v in [0u8, 1, 64, 127] {
+            let midi2_event = Midi2Event::control_change(
+                0,
+                u4::new(0),
+                u4::new(0),
+                u7::new(1),
+                midi1_cc_to_midi2(v),
+            );
+            let midi1 = midi2_event.to_midi1().unwrap();
+            match midi1.msg {
+                crate::ChannelVoiceMsg::ControlChange { control } => match control {
+                    crate::event::ControlChange::CC { value, .. } => {
+                        assert_eq!(value, v, "CC roundtrip failed for value {}", v);
+                    }
+                    _ => panic!("Expected CC variant"),
+                },
+                _ => panic!("Expected ControlChange"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_to_midi1_channel_pressure() {
+        // Channel pressure uses >> 25 to convert 32-bit to 7-bit
+        // 127 << 25 = 0xFE000000, so max 7-bit maps to near-max 32-bit
+        let midi2_event = Midi2Event::channel_pressure(
+            10,
+            u4::new(0),
+            u4::new(5),
+            0xFFFFFFFF,
+        );
+        let midi1 = midi2_event.to_midi1().unwrap();
+        assert_eq!(midi1.frame_offset, 10);
+        assert_eq!(midi1.channel_num(), 5);
+        match midi1.msg {
+            crate::ChannelVoiceMsg::ChannelPressure { pressure } => {
+                assert_eq!(pressure, 127, "Max 32-bit should map to 127");
+            }
+            _ => panic!("Expected ChannelPressure"),
+        }
+
+        // Zero pressure
+        let midi2_event = Midi2Event::channel_pressure(
+            0,
+            u4::new(0),
+            u4::new(0),
+            0,
+        );
+        let midi1 = midi2_event.to_midi1().unwrap();
+        match midi1.msg {
+            crate::ChannelVoiceMsg::ChannelPressure { pressure } => {
+                assert_eq!(pressure, 0);
+            }
+            _ => panic!("Expected ChannelPressure"),
+        }
+    }
+
+    #[test]
+    fn test_to_midi1_key_pressure() {
+        // Per-note pressure (poly aftertouch)
+        let midi2_event = Midi2Event::key_pressure(
+            20,
+            u4::new(0),
+            u4::new(2),
+            u7::new(72),
+            0xFFFFFFFF,
+        );
+        let midi1 = midi2_event.to_midi1().unwrap();
+        assert_eq!(midi1.frame_offset, 20);
+        assert_eq!(midi1.channel_num(), 2);
+        match midi1.msg {
+            crate::ChannelVoiceMsg::PolyPressure { note, pressure } => {
+                assert_eq!(note, 72);
+                assert_eq!(pressure, 127);
+            }
+            _ => panic!("Expected PolyPressure"),
+        }
+
+        // Mid-value
+        let mid_32 = 0x80000000u32; // ~64 in 7-bit
+        let midi2_event = Midi2Event::key_pressure(
+            0,
+            u4::new(0),
+            u4::new(0),
+            u7::new(60),
+            mid_32,
+        );
+        let midi1 = midi2_event.to_midi1().unwrap();
+        match midi1.msg {
+            crate::ChannelVoiceMsg::PolyPressure { note, pressure } => {
+                assert_eq!(note, 60);
+                assert_eq!(pressure, 64, "0x80000000 should map to 64");
+            }
+            _ => panic!("Expected PolyPressure"),
+        }
+    }
+
+    #[test]
+    fn test_to_midi1_pressure_roundtrip() {
+        use crate::midi2::convert::midi1_cc_to_midi2;
+
+        // All 7-bit pressure values should survive MIDI 1.0 → 2.0 → to_midi1() roundtrip
+        for v in 0..=127u8 {
+            let midi2_val = midi1_cc_to_midi2(v);
+
+            // Channel pressure
+            let event = Midi2Event::channel_pressure(0, u4::new(0), u4::new(0), midi2_val);
+            let midi1 = event.to_midi1().unwrap();
+            match midi1.msg {
+                crate::ChannelVoiceMsg::ChannelPressure { pressure } => {
+                    assert_eq!(pressure, v, "Channel pressure roundtrip failed for {}", v);
+                }
+                _ => panic!("Expected ChannelPressure"),
+            }
+
+            // Key pressure
+            let event = Midi2Event::key_pressure(0, u4::new(0), u4::new(0), u7::new(60), midi2_val);
+            let midi1 = event.to_midi1().unwrap();
+            match midi1.msg {
+                crate::ChannelVoiceMsg::PolyPressure { pressure, .. } => {
+                    assert_eq!(pressure, v, "Key pressure roundtrip failed for {}", v);
+                }
+                _ => panic!("Expected PolyPressure"),
+            }
+        }
+    }
+
+    #[test]
+    fn test_to_midi1_program_change() {
+        // Program change without bank select
+        let midi2_event = Midi2Event::program_change(
+            5,
+            u4::new(0),
+            u4::new(9),
+            u7::new(42),
+            None,
+        );
+        let midi1 = midi2_event.to_midi1().unwrap();
+        assert_eq!(midi1.frame_offset, 5);
+        assert_eq!(midi1.channel_num(), 9);
+        match midi1.msg {
+            crate::ChannelVoiceMsg::ProgramChange { program } => {
+                assert_eq!(program, 42);
+            }
+            _ => panic!("Expected ProgramChange"),
+        }
+
+        // Program change with bank select (bank is dropped in MIDI 1.0 conversion)
+        let midi2_event = Midi2Event::program_change(
+            0,
+            u4::new(0),
+            u4::new(0),
+            u7::new(0),
+            Some(u14::new(128)),
+        );
+        let midi1 = midi2_event.to_midi1().unwrap();
+        match midi1.msg {
+            crate::ChannelVoiceMsg::ProgramChange { program } => {
+                assert_eq!(program, 0);
+            }
+            _ => panic!("Expected ProgramChange"),
+        }
+    }
+
+    #[test]
+    fn test_program_change_bank_roundtrip() {
+        // Create a ProgramChange with bank select
+        let event = Midi2Event::program_change(
+            0,
+            u4::new(0),
+            u4::new(0),
+            u7::new(42),
+            Some(u14::new(128)),
+        );
+
+        // Verify bank_valid flag is detected
+        match event.message_type() {
+            Midi2MessageType::ProgramChange { program, bank } => {
+                assert_eq!(program, 42);
+                assert!(bank.is_some(), "Bank should be Some when set via program_change constructor");
+                let bank_val = bank.unwrap();
+                assert_eq!(bank_val, 128, "Bank value should roundtrip correctly, got {}", bank_val);
+            }
+            _ => panic!("Expected ProgramChange"),
+        }
+
+        // Without bank
+        let event = Midi2Event::program_change(
+            0,
+            u4::new(0),
+            u4::new(0),
+            u7::new(0),
+            None,
+        );
+        match event.message_type() {
+            Midi2MessageType::ProgramChange { bank, .. } => {
+                assert!(bank.is_none(), "Bank should be None when not set");
+            }
+            _ => panic!("Expected ProgramChange"),
+        }
+    }
+
+    #[test]
+    fn test_to_midi1_returns_none_for_midi2_only_types() {
+        // Per-note pitch bend
+        let event = Midi2Event::per_note_pitch_bend(0, u4::new(0), u4::new(0), u7::new(60), 0x80000000);
+        assert!(event.to_midi1().is_none());
+
+        // Registered per-note controller (raw UMP)
+        let event = Midi2Event::try_from_ump(0, &[0x4000_3C4A, 0xFFFFFFFF]).unwrap();
+        assert!(event.to_midi1().is_none());
+
+        // Assignable per-note controller (raw UMP)
+        let event = Midi2Event::try_from_ump(0, &[0x4010_3C4A, 0xFFFFFFFF]).unwrap();
+        assert!(event.to_midi1().is_none());
+
+        // RPN (raw UMP: opcode 0x2)
+        let event = Midi2Event::try_from_ump(0, &[0x4020_0100, 0x12345678]).unwrap();
+        assert!(event.to_midi1().is_none());
+
+        // NRPN (raw UMP: opcode 0x3)
+        let event = Midi2Event::try_from_ump(0, &[0x4030_0100, 0x12345678]).unwrap();
+        assert!(event.to_midi1().is_none());
+    }
+
+    #[test]
+    fn test_note_on_with_attribute() {
+        let event = Midi2Event::note_on_with_attribute(
+            100,
+            u4::new(0),
+            u4::new(5),
+            u7::new(60),
+            32768,
+            NoteAttribute::ManufacturerSpecific(0x1234),
+        );
+        assert_eq!(event.frame_offset, 100);
+        assert_eq!(event.channel(), 5);
+        assert!(event.is_note_on());
+        assert_eq!(event.note(), Some(60));
+        assert_eq!(event.velocity_16bit(), Some(32768));
+
+        // Verify attribute is present
+        match event.message_type() {
+            Midi2MessageType::NoteOn { attribute, .. } => {
+                assert!(attribute.is_some(), "Attribute should be present");
+            }
+            _ => panic!("Expected NoteOn"),
+        }
+
+        // Without attribute — attr_type byte should be 0
+        let event_no_attr = Midi2Event::note_on(
+            0,
+            u4::new(0),
+            u4::new(0),
+            u7::new(60),
+            32768,
+        );
+        match event_no_attr.message_type() {
+            Midi2MessageType::NoteOn { attribute, .. } => {
+                assert!(attribute.is_none(), "No attribute should be present");
+            }
+            _ => panic!("Expected NoteOn"),
+        }
+    }
+
+    #[test]
+    fn test_message_type_per_note_management() {
+        // Per-note management: opcode 0xF, detach + reset flags
+        // UMP format: 0x40F0_NNDD where NN=note, DD=flags (bit 1=detach, bit 0=reset)
+        let event = Midi2Event::try_from_ump(0, &[0x40F0_3C03, 0x00000000]).unwrap();
+        match event.message_type() {
+            Midi2MessageType::PerNoteManagement { note, detach, reset } => {
+                assert_eq!(note, 60);
+                assert!(detach);
+                assert!(reset);
+            }
+            _ => panic!("Expected PerNoteManagement"),
+        }
+
+        // Note is extracted from to_midi1() as None (MIDI 2.0 only)
+        assert!(event.to_midi1().is_none());
+    }
+
+    #[test]
+    fn test_message_type_unknown_opcode() {
+        // Opcode 0x7 is not defined → Unknown
+        let event = Midi2Event::try_from_ump(0, &[0x4070_0000, 0x00000000]).unwrap();
+        match event.message_type() {
+            Midi2MessageType::Unknown { opcode } => {
+                assert_eq!(opcode, 0x7);
+            }
+            _ => panic!("Expected Unknown"),
+        }
+        assert!(event.to_midi1().is_none());
     }
 }

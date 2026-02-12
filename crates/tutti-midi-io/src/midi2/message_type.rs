@@ -1,6 +1,5 @@
 //! Parsed MIDI 2.0 message types.
 
-/// Parsed MIDI 2.0 message type with extracted data.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Midi2MessageType {
     /// Note On with 16-bit velocity and optional attribute

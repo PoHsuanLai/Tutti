@@ -17,11 +17,13 @@ pub(crate) mod compat;
 
 pub mod event;
 pub mod input_source;
+pub mod note;
 pub mod utils;
 
 // Re-export commonly used types
 pub use event::{MidiEvent, MidiEventBuilder, RawMidiEvent};
 pub use input_source::{MidiInputSource, NoMidiInput};
+pub use note::Note;
 pub use utils::{gain_to_velocity, hz_to_note, note_to_hz, velocity_to_gain};
 
 // Re-export midi-msg types that users need

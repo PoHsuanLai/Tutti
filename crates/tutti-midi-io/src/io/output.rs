@@ -15,15 +15,12 @@ use std::sync::Arc;
 use std::thread;
 use tracing::debug;
 
-/// MIDI message to send to output device
 #[derive(Debug, Clone)]
 pub struct MidiOutputMessage {
-    /// Raw MIDI bytes to send
     pub bytes: Vec<u8>,
 }
 
 impl MidiOutputMessage {
-    /// Create a Control Change message
     pub fn control_change(channel: u8, cc_number: u8, value: u8) -> Self {
         let channel = channel.min(15); // MIDI channels are 0-15
         let status = 0xB0 | channel;
@@ -32,7 +29,6 @@ impl MidiOutputMessage {
         }
     }
 
-    /// Create a Note On message
     pub fn note_on(channel: u8, note: u8, velocity: u8) -> Self {
         let channel = channel.min(15);
         let status = 0x90 | channel;
@@ -41,7 +37,6 @@ impl MidiOutputMessage {
         }
     }
 
-    /// Create a Note Off message
     pub fn note_off(channel: u8, note: u8, velocity: u8) -> Self {
         let channel = channel.min(15);
         let status = 0x80 | channel;
@@ -50,7 +45,6 @@ impl MidiOutputMessage {
         }
     }
 
-    /// Create a Program Change message
     pub fn program_change(channel: u8, program: u8) -> Self {
         let channel = channel.min(15);
         let status = 0xC0 | channel;
@@ -59,7 +53,7 @@ impl MidiOutputMessage {
         }
     }
 
-    /// Create a Pitch Bend message
+    /// `value`: signed 14-bit (-8192 to 8191).
     pub fn pitch_bend(channel: u8, value: i16) -> Self {
         let channel = channel.min(15);
         let status = 0xE0 | channel;
@@ -72,7 +66,6 @@ impl MidiOutputMessage {
         }
     }
 
-    /// Create from a MidiEvent (using midi-msg serialization)
     pub fn from_event(event: &MidiEvent) -> Self {
         let msg = MidiMsg::ChannelVoice {
             channel: event.channel,
@@ -96,16 +89,12 @@ impl From<MidiEvent> for MidiOutputMessage {
     }
 }
 
-/// Information about an available MIDI output device
 #[derive(Debug, Clone)]
 pub struct MidiOutputDevice {
-    /// Device index (for connection)
     pub index: usize,
-    /// Device name
     pub name: String,
 }
 
-/// Commands sent to the MIDI output thread
 enum MidiOutputCommand {
     Connect(usize),
     Disconnect,
@@ -113,7 +102,6 @@ enum MidiOutputCommand {
     Shutdown,
 }
 
-/// MIDI output manager with async message sending.
 #[derive(Clone)]
 #[cfg(feature = "midi-io")]
 pub struct MidiOutputManager {
@@ -160,12 +148,10 @@ impl MidiOutputManager {
         loop {
             match command_receiver.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(MidiOutputCommand::Connect(device_index)) => {
-                    // Disconnect existing connection if any
                     if let Some(conn) = connection.take() {
                         drop(conn);
                     }
 
-                    // Attempt to connect to new device
                     match Self::connect_to_device(device_index) {
                         Ok((conn, name)) => {
                             connection = Some(conn);
@@ -193,17 +179,13 @@ impl MidiOutputManager {
                     }
                 }
                 Ok(MidiOutputCommand::Shutdown) => {
-                    // Clean up and exit thread
                     if let Some(conn) = connection.take() {
                         drop(conn);
                     }
                     break;
                 }
-                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
-                    // No command, continue running
-                }
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => {}
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => {
-                    // Channel closed, exit thread
                     break;
                 }
             }
@@ -352,12 +334,106 @@ mod tests {
     }
 
     #[test]
-    fn test_list_devices() {
-        // This test may fail if no MIDI devices are available, but shouldn't crash
-        let devices = MidiOutputManager::list_devices();
-        println!("Found {} MIDI output devices", devices.len());
-        for device in &devices {
-            println!("  {}: {}", device.index, device.name);
-        }
+    fn test_program_change_message() {
+        let msg = MidiOutputMessage::program_change(0, 42);
+        assert_eq!(msg.bytes, vec![0xC0, 42]);
+
+        let msg = MidiOutputMessage::program_change(9, 0);
+        assert_eq!(msg.bytes, vec![0xC9, 0]);
+
+        let msg = MidiOutputMessage::program_change(15, 127);
+        assert_eq!(msg.bytes, vec![0xCF, 127]);
+    }
+
+    #[test]
+    fn test_channel_clamping_all_constructors() {
+        // Channel > 15 should clamp to 15
+        let msg = MidiOutputMessage::control_change(200, 7, 127);
+        assert_eq!(msg.bytes[0], 0xBF); // 0xB0 | 15
+
+        let msg = MidiOutputMessage::note_on(255, 60, 100);
+        assert_eq!(msg.bytes[0], 0x9F); // 0x90 | 15
+
+        let msg = MidiOutputMessage::note_off(16, 60, 0);
+        assert_eq!(msg.bytes[0], 0x8F); // 0x80 | 15
+
+        let msg = MidiOutputMessage::program_change(200, 42);
+        assert_eq!(msg.bytes[0], 0xCF); // 0xC0 | 15
+
+        let msg = MidiOutputMessage::pitch_bend(128, 0);
+        assert_eq!(msg.bytes[0], 0xEF); // 0xE0 | 15
+    }
+
+    #[test]
+    fn test_data_byte_masking() {
+        // Data bytes > 127 should be masked to 7-bit
+        let msg = MidiOutputMessage::control_change(0, 0xFF, 0xFF);
+        assert_eq!(msg.bytes[1], 0x7F);
+        assert_eq!(msg.bytes[2], 0x7F);
+
+        let msg = MidiOutputMessage::note_on(0, 0xFF, 0xFF);
+        assert_eq!(msg.bytes[1], 0x7F);
+        assert_eq!(msg.bytes[2], 0x7F);
+
+        let msg = MidiOutputMessage::program_change(0, 0xFF);
+        assert_eq!(msg.bytes[1], 0x7F);
+    }
+
+    #[test]
+    fn test_from_event_note_on() {
+        let event = MidiEvent::note_on(0, 5, 60, 100);
+        let msg = MidiOutputMessage::from_event(&event);
+
+        // Status: 0x90 | 5 = 0x95
+        assert_eq!(msg.bytes[0], 0x95);
+        assert_eq!(msg.bytes[1], 60);
+        assert_eq!(msg.bytes[2], 100);
+    }
+
+    #[test]
+    fn test_from_event_note_off() {
+        let event = MidiEvent::note_off(0, 3, 64, 0);
+        let msg = MidiOutputMessage::from_event(&event);
+
+        assert_eq!(msg.bytes[0], 0x83); // 0x80 | 3
+        assert_eq!(msg.bytes[1], 64);
+        assert_eq!(msg.bytes[2], 0);
+    }
+
+    #[test]
+    fn test_from_event_cc() {
+        let event = MidiEvent::control_change(0, 0, 7, 127);
+        let msg = MidiOutputMessage::from_event(&event);
+
+        assert_eq!(msg.bytes[0], 0xB0);
+        assert_eq!(msg.bytes[1], 7);
+        assert_eq!(msg.bytes[2], 127);
+    }
+
+    #[test]
+    fn test_from_trait_impls() {
+        let event = MidiEvent::note_on(0, 0, 60, 100);
+
+        // From<&MidiEvent>
+        let msg: MidiOutputMessage = (&event).into();
+        assert_eq!(msg.bytes[0], 0x90);
+        assert_eq!(msg.bytes[1], 60);
+
+        // From<MidiEvent>
+        let msg: MidiOutputMessage = event.into();
+        assert_eq!(msg.bytes[0], 0x90);
+        assert_eq!(msg.bytes[1], 60);
+    }
+
+    #[test]
+    fn test_pitch_bend_clamping() {
+        // Values beyond range should clamp
+        let msg = MidiOutputMessage::pitch_bend(0, 10000);
+        let unsigned = (msg.bytes[1] as u16) | ((msg.bytes[2] as u16) << 7);
+        assert_eq!(unsigned, 16383, "Should clamp to max");
+
+        let msg = MidiOutputMessage::pitch_bend(0, -10000);
+        let unsigned = (msg.bytes[1] as u16) | ((msg.bytes[2] as u16) << 7);
+        assert_eq!(unsigned, 0, "Should clamp to min");
     }
 }

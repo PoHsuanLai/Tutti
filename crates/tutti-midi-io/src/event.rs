@@ -3,18 +3,15 @@
 //! Core types (`MidiEvent`, `RawMidiEvent`, `MidiEventBuilder`) are defined in
 //! `tutti-core` and re-exported here. This module adds MIDI 2.0 extensions.
 
-// Re-export core MIDI types from tutti-midi
 pub use tutti_midi::{MidiEvent, RawMidiEvent};
 
-// Re-export ControlChange for tests
 #[cfg(test)]
 pub(crate) use tutti_midi::ControlChange;
 
-// Import ChannelVoiceMsg for midi2 feature functions
-#[cfg(feature = "midi2")]
+#[cfg(any(feature = "midi2", test))]
 use tutti_midi::ChannelVoiceMsg;
 
-/// Get velocity as 16-bit MIDI 2.0 value
+/// Upscale 7-bit MIDI 1.0 velocity to 16-bit MIDI 2.0 range.
 #[cfg(feature = "midi2")]
 #[inline]
 pub fn velocity_16bit(event: &MidiEvent) -> Option<u16> {
@@ -31,7 +28,6 @@ pub fn velocity_16bit(event: &MidiEvent) -> Option<u16> {
     }
 }
 
-/// Convert MIDI 1.0 event to MIDI 2.0 event
 #[cfg(feature = "midi2")]
 #[inline]
 pub fn to_midi2(event: &MidiEvent) -> Option<super::midi2::Midi2Event> {
@@ -42,15 +38,12 @@ pub fn to_midi2(event: &MidiEvent) -> Option<super::midi2::Midi2Event> {
 #[cfg(feature = "midi2")]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum UnifiedMidiEvent {
-    /// MIDI 1.0 channel voice message
     V1(MidiEvent),
-    /// MIDI 2.0 channel voice message
     V2(super::midi2::Midi2Event),
 }
 
 #[cfg(feature = "midi2")]
 impl UnifiedMidiEvent {
-    /// Get the frame offset
     #[inline]
     pub fn frame_offset(&self) -> usize {
         match self {
@@ -59,7 +52,6 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Get the MIDI channel
     #[inline]
     pub fn channel(&self) -> u8 {
         match self {
@@ -68,7 +60,6 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Check if this is a note on event
     #[inline]
     pub fn is_note_on(&self) -> bool {
         match self {
@@ -77,7 +68,6 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Check if this is a note off event
     #[inline]
     pub fn is_note_off(&self) -> bool {
         match self {
@@ -86,7 +76,6 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Get the note number
     #[inline]
     pub fn note(&self) -> Option<u8> {
         match self {
@@ -95,7 +84,7 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Get velocity as normalized f32
+    /// Velocity scaled to 0.0..=1.0.
     #[inline]
     pub fn velocity_normalized(&self) -> Option<f32> {
         match self {
@@ -104,7 +93,7 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Get velocity as 7-bit value
+    /// Velocity as 7-bit value (0-127).
     #[inline]
     pub fn velocity(&self) -> Option<u8> {
         match self {
@@ -113,7 +102,7 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Get velocity as 16-bit value
+    /// Velocity as 16-bit value (0-65535).
     #[inline]
     pub fn velocity_16bit(&self) -> Option<u16> {
         match self {
@@ -122,7 +111,6 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Convert to MIDI 1.0 event
     #[inline]
     pub fn to_midi1(&self) -> Option<MidiEvent> {
         match self {
@@ -131,7 +119,6 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Convert to MIDI 2.0 event
     #[inline]
     pub fn to_midi2(&self) -> Option<super::midi2::Midi2Event> {
         match self {
@@ -140,13 +127,11 @@ impl UnifiedMidiEvent {
         }
     }
 
-    /// Check if this is a MIDI 1.0 event.
     #[inline]
     pub fn is_v1(&self) -> bool {
         matches!(self, UnifiedMidiEvent::V1(_))
     }
 
-    /// Check if this is a MIDI 2.0 event.
     #[inline]
     pub fn is_v2(&self) -> bool {
         matches!(self, UnifiedMidiEvent::V2(_))
@@ -171,147 +156,7 @@ impl From<super::midi2::Midi2Event> for UnifiedMidiEvent {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_note_on() {
-        let event = MidiEvent::note_on(100, 0, 60, 100);
-        assert!(event.is_note_on());
-        assert!(!event.is_note_off());
-        assert_eq!(event.note(), Some(60));
-        assert_eq!(event.velocity(), Some(100));
-        assert_eq!(event.channel_num(), 0);
-        assert_eq!(event.frame_offset, 100);
-    }
-
-    #[test]
-    fn test_note_off() {
-        let event = MidiEvent::note_off(50, 3, 64, 0);
-        assert!(event.is_note_off());
-        assert!(!event.is_note_on());
-        assert_eq!(event.note(), Some(64));
-        assert_eq!(event.channel_num(), 3);
-    }
-
-    #[test]
-    fn test_note_on_zero_velocity_is_note_off() {
-        let event = MidiEvent::note_on(0, 0, 60, 0);
-        assert!(event.is_note_off());
-        assert!(!event.is_note_on());
-    }
-
-    #[test]
-    fn test_control_change() {
-        let event = MidiEvent::control_change(0, 5, 7, 127);
-        assert_eq!(event.channel_num(), 5);
-        match event.msg {
-            ChannelVoiceMsg::ControlChange { control } => match control {
-                ControlChange::CC { control: cc, value } => {
-                    assert_eq!(cc, 7);
-                    assert_eq!(value, 127);
-                }
-                _ => panic!("Expected CC"),
-            },
-            _ => panic!("Expected ControlChange"),
-        }
-    }
-
-    #[test]
-    fn test_pitch_bend() {
-        let event = MidiEvent::pitch_bend(0, 0, 8192); // Center
-        match event.msg {
-            ChannelVoiceMsg::PitchBend { bend } => {
-                assert_eq!(bend, 8192);
-            }
-            _ => panic!("Expected PitchBend"),
-        }
-    }
-
-    #[test]
-    fn test_serialization_roundtrip() {
-        let event = MidiEvent::note_on(0, 5, 60, 100);
-        let bytes = event.to_bytes();
-        let parsed = MidiEvent::from_bytes(&bytes).unwrap();
-        assert_eq!(event.channel, parsed.channel);
-        assert_eq!(event.msg, parsed.msg);
-    }
-
-    #[test]
-    fn test_raw_midi_event() {
-        let event = MidiEvent::note_on(100, 0, 60, 100);
-        let raw: RawMidiEvent = event.into();
-        assert_eq!(raw.frame_offset, 100);
-        assert_eq!(raw.status(), 0x90);
-        assert_eq!(raw.channel(), 0);
-
-        let back = raw.to_midi_event().unwrap();
-        assert_eq!(back.channel, event.channel);
-        assert_eq!(back.msg, event.msg);
-    }
-
-    #[test]
-    fn test_builder_simple() {
-        let event = MidiEvent::note_on_builder(60, 100).build();
-        assert_eq!(event.note(), Some(60));
-        assert_eq!(event.velocity(), Some(100));
-        assert_eq!(event.channel_num(), 0);
-        assert_eq!(event.frame_offset, 0);
-    }
-
-    #[test]
-    fn test_builder_with_channel() {
-        let event = MidiEvent::note_on_builder(64, 80).channel(5).build();
-        assert_eq!(event.note(), Some(64));
-        assert_eq!(event.velocity(), Some(80));
-        assert_eq!(event.channel_num(), 5);
-        assert_eq!(event.frame_offset, 0);
-    }
-
-    #[test]
-    fn test_builder_with_offset() {
-        let event = MidiEvent::note_on_builder(67, 120).offset(480).build();
-        assert_eq!(event.note(), Some(67));
-        assert_eq!(event.velocity(), Some(120));
-        assert_eq!(event.channel_num(), 0);
-        assert_eq!(event.frame_offset, 480);
-    }
-
-    #[test]
-    fn test_builder_with_both() {
-        let event = MidiEvent::note_on_builder(71, 90)
-            .channel(3)
-            .offset(960)
-            .build();
-        assert_eq!(event.note(), Some(71));
-        assert_eq!(event.velocity(), Some(90));
-        assert_eq!(event.channel_num(), 3);
-        assert_eq!(event.frame_offset, 960);
-    }
-
-    #[test]
-    fn test_builder_cc() {
-        let event = MidiEvent::cc_builder(7, 127).channel(2).build();
-        assert_eq!(event.channel_num(), 2);
-        match event.msg {
-            ChannelVoiceMsg::ControlChange { control } => match control {
-                ControlChange::CC { control: cc, value } => {
-                    assert_eq!(cc, 7);
-                    assert_eq!(value, 127);
-                }
-                _ => panic!("Expected CC"),
-            },
-            _ => panic!("Expected ControlChange"),
-        }
-    }
-
-    #[test]
-    fn test_builder_pitch_bend() {
-        let event = MidiEvent::bend_builder(8192).build();
-        match event.msg {
-            ChannelVoiceMsg::PitchBend { bend } => {
-                assert_eq!(bend, 8192);
-            }
-            _ => panic!("Expected PitchBend"),
-        }
-    }
+    // Base MidiEvent tests live in tutti-midi. Only MIDI 2.0 extension tests here.
 
     #[cfg(feature = "midi2")]
     mod midi2_tests {
