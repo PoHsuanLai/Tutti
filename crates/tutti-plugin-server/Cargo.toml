@@ -70,6 +70,6 @@ vst = { version = "0.3", optional = true }
 clap-host = { path = "../clap-host", optional = true }
 
 # VST3 plugin hosting (optional)
-vst3-host = { git = "https://github.com/PoHsuanLai/vst3-host", optional = true }
+vst3-host = { path = "../vst3-host", optional = true }
 
 libloading = "0.8"

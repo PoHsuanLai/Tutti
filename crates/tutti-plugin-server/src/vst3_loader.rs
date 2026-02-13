@@ -5,11 +5,11 @@
 
 use std::path::Path;
 
-use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
 use tutti_plugin::protocol::{
     AudioBuffer, AudioBuffer64, MidiEvent, MidiEventVec, NoteExpressionChanges, NoteExpressionType,
     ParameterChanges, ParameterPoint, ParameterQueue, TransportInfo,
 };
+use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
 
 use tutti_midi_io::{Channel, ChannelVoiceMsg, ControlChange};
 
@@ -73,7 +73,10 @@ impl Vst3Instance {
         self.inner.supports_f64()
     }
 
-    pub fn set_sample_format(&mut self, format: tutti_plugin::protocol::SampleFormat) -> Result<()> {
+    pub fn set_sample_format(
+        &mut self,
+        format: tutti_plugin::protocol::SampleFormat,
+    ) -> Result<()> {
         let use_f64 = matches!(format, tutti_plugin::protocol::SampleFormat::Float64);
         self.inner
             .set_use_f64(use_f64)
@@ -340,7 +343,10 @@ impl Vst3Instance {
         result
     }
 
-    pub fn get_parameter_info(&self, param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
+    pub fn get_parameter_info(
+        &self,
+        param_id: u32,
+    ) -> Option<tutti_plugin::protocol::ParameterInfo> {
         // VST3 getParameterInfo takes an index, not an ID.
         // We need to iterate to find the matching ID.
         let count = self.inner.get_parameter_count();
@@ -530,7 +536,7 @@ impl vst3_host::Vst3MidiEvent for TuttiMidiWrapper<'_> {
             ChannelVoiceMsg::PitchBend { bend } => {
                 let mut h = header;
                 h.event_type = K_DATA_EVENT;
-                let bend = (bend as u16).min(16383);
+                let bend = bend.min(16383);
                 let mut bytes = [0u8; 16];
                 bytes[0] = 0xE0 | (self.event.channel as u8);
                 bytes[1] = (bend & 0x7F) as u8;
@@ -785,10 +791,7 @@ impl crate::instance::PluginInstance for Vst3Instance {
         self.inner.has_editor()
     }
 
-    unsafe fn open_editor(
-        &mut self,
-        parent: *mut std::ffi::c_void,
-    ) -> Result<(u32, u32)> {
+    unsafe fn open_editor(&mut self, parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
         Vst3Instance::open_editor(self, parent)
     }
 
@@ -1009,6 +1012,192 @@ mod tests {
         assert!(
             has_nonzero,
             "Expected at least one non-zero output sample after NoteOn"
+        );
+    }
+
+    // =========================================================================
+    // Voxengo SPAN / Boogex — f64 support tests (local fixture plugins)
+    // =========================================================================
+
+    const SPAN_VST3: &str = "tests/fixtures/plugins/SPAN.vst3";
+    const BOOGEX_VST3: &str = "tests/fixtures/plugins/Boogex.vst3";
+
+    /// Resolve fixture path relative to workspace root.
+    fn fixture_path(relative: &str) -> std::path::PathBuf {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // Go up from crates/tutti-plugin-server to the workspace root (crates/tutti)
+        p.pop();
+        p.pop();
+        p.push(relative);
+        p
+    }
+
+    #[test]
+    fn test_voxengo_span_load_and_f64_support() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = fixture_path(SPAN_VST3);
+        if !path.exists() {
+            eprintln!("Skipping: SPAN.vst3 not found at {:?}", path);
+            return;
+        }
+        let instance = Vst3Instance::load(&path, 44100.0, 512);
+        assert!(
+            instance.is_ok(),
+            "Failed to load SPAN: {:?}",
+            instance.err()
+        );
+
+        let instance = instance.unwrap();
+        let meta = instance.metadata();
+        eprintln!(
+            "SPAN: name={}, supports_f64={}",
+            meta.name, meta.supports_f64
+        );
+        assert!(!meta.name.is_empty());
+    }
+
+    #[test]
+    fn test_voxengo_boogex_load_and_f64_support() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = fixture_path(BOOGEX_VST3);
+        if !path.exists() {
+            eprintln!("Skipping: Boogex.vst3 not found at {:?}", path);
+            return;
+        }
+        let instance = Vst3Instance::load(&path, 44100.0, 512);
+        assert!(
+            instance.is_ok(),
+            "Failed to load Boogex: {:?}",
+            instance.err()
+        );
+
+        let instance = instance.unwrap();
+        let meta = instance.metadata();
+        eprintln!(
+            "Boogex: name={}, supports_f64={}",
+            meta.name, meta.supports_f64
+        );
+        assert!(!meta.name.is_empty());
+    }
+
+    #[test]
+    fn test_voxengo_span_process_f64() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = fixture_path(SPAN_VST3);
+        if !path.exists() {
+            eprintln!("Skipping: SPAN.vst3 not found at {:?}", path);
+            return;
+        }
+        let mut instance = Vst3Instance::load(&path, 44100.0, 512).expect("Failed to load SPAN");
+
+        if !instance.supports_f64() {
+            eprintln!("SPAN does not report f64 support, skipping f64 test");
+            return;
+        }
+
+        // Enable f64 processing
+        instance
+            .set_sample_format(tutti_plugin::protocol::SampleFormat::Float64)
+            .expect("Failed to set f64 format");
+
+        let num_samples = 512;
+        // Feed a 440Hz sine wave to test pass-through
+        let input_data: Vec<Vec<f64>> = (0..2)
+            .map(|_| {
+                (0..num_samples)
+                    .map(|i| (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 44100.0).sin() * 0.5)
+                    .collect()
+            })
+            .collect();
+        let mut output_data = vec![vec![0.0f64; num_samples]; 2];
+
+        let input_slices: Vec<&[f64]> = input_data.iter().map(|v| v.as_slice()).collect();
+        let mut output_slices: Vec<&mut [f64]> =
+            output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        let mut buffer = AudioBuffer64 {
+            inputs: &input_slices,
+            outputs: &mut output_slices,
+            num_samples,
+            sample_rate: 44100.0,
+        };
+
+        let ctx = crate::instance::ProcessContext::new();
+        let _output = PluginInstance::process_f64(&mut instance, &mut buffer, &ctx);
+
+        // SPAN is an analyzer — it should pass audio through unchanged
+        let mut all_zero = true;
+        for ch in &output_data {
+            for &s in ch {
+                if s != 0.0 {
+                    all_zero = false;
+                    break;
+                }
+            }
+        }
+        eprintln!(
+            "SPAN f64 output: first sample = {}, all_zero = {}",
+            output_data[0][0], all_zero
+        );
+    }
+
+    #[test]
+    fn test_voxengo_boogex_process_f64() {
+        let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
+        let path = fixture_path(BOOGEX_VST3);
+        if !path.exists() {
+            eprintln!("Skipping: Boogex.vst3 not found at {:?}", path);
+            return;
+        }
+        let mut instance = Vst3Instance::load(&path, 44100.0, 512).expect("Failed to load Boogex");
+
+        if !instance.supports_f64() {
+            eprintln!("Boogex does not report f64 support, skipping f64 test");
+            return;
+        }
+
+        // Enable f64 processing
+        instance
+            .set_sample_format(tutti_plugin::protocol::SampleFormat::Float64)
+            .expect("Failed to set f64 format");
+
+        let num_samples = 512;
+        // Feed a sine wave — Boogex is an amp sim so it should transform the audio
+        let input_data: Vec<Vec<f64>> = (0..2)
+            .map(|_| {
+                (0..num_samples)
+                    .map(|i| (2.0 * std::f64::consts::PI * 440.0 * i as f64 / 44100.0).sin() * 0.5)
+                    .collect()
+            })
+            .collect();
+        let mut output_data = vec![vec![0.0f64; num_samples]; 2];
+
+        let input_slices: Vec<&[f64]> = input_data.iter().map(|v| v.as_slice()).collect();
+        let mut output_slices: Vec<&mut [f64]> =
+            output_data.iter_mut().map(|v| v.as_mut_slice()).collect();
+
+        let mut buffer = AudioBuffer64 {
+            inputs: &input_slices,
+            outputs: &mut output_slices,
+            num_samples,
+            sample_rate: 44100.0,
+        };
+
+        let ctx = crate::instance::ProcessContext::new();
+        let _output = PluginInstance::process_f64(&mut instance, &mut buffer, &ctx);
+
+        let mut has_nonzero = false;
+        for ch in &output_data {
+            for &s in ch {
+                if s != 0.0 {
+                    has_nonzero = true;
+                    break;
+                }
+            }
+        }
+        eprintln!(
+            "Boogex f64 output: first sample = {}, has_nonzero = {}",
+            output_data[0][0], has_nonzero
         );
     }
 }

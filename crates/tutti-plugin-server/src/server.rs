@@ -6,9 +6,9 @@ use crate::instance::{PluginInstance, ProcessContext};
 use crate::transport::{MessageTransport, TransportListener};
 use std::path::PathBuf;
 
-use tutti_plugin::{BridgeConfig, BridgeError, LoadStage, PluginMetadata, Result, SampleFormat};
 use tutti_plugin::protocol::{BridgeMessage, HostMessage, IpcMidiEvent};
 use tutti_plugin::shared_memory::SharedAudioBuffer;
+use tutti_plugin::{BridgeConfig, BridgeError, LoadStage, PluginMetadata, Result, SampleFormat};
 
 #[cfg(feature = "vst2")]
 use crate::vst2_loader::Vst2Instance;
@@ -87,6 +87,57 @@ impl LoadedPlugin {
             LoadedPlugin::Clap(p) => p,
         }
     }
+}
+
+/// Process audio through a plugin for a given sample format.
+///
+/// Reads input from shared memory, runs the plugin, writes output back.
+/// Returns the `ProcessOutput` from the plugin.
+macro_rules! process_format {
+    (
+        $self:expr, $shared_buffer:expr, $plugin:expr, $ctx:expr,
+        $num_channels:expr, $num_samples:expr,
+        input_bufs = $input_bufs:ident,
+        output_bufs = $output_bufs:ident,
+        read_channel = $read_channel:ident,
+        write_channel = $write_channel:ident,
+        buffer_type = $buffer_type:ident,
+        process_fn = $process_fn:ident
+    ) => {{
+        for ch in 0..$num_channels {
+            if let Ok(data) = $shared_buffer.$read_channel(ch) {
+                $self.$input_bufs[ch][..$num_samples].copy_from_slice(&data[..$num_samples]);
+                $self.$output_bufs[ch][..$num_samples].fill(0.0);
+            }
+        }
+
+        let input_slices: Vec<_> = $self.$input_bufs[..$num_channels]
+            .iter()
+            .map(|v| &v[..$num_samples])
+            .collect();
+        let mut output_slices: Vec<_> = $self.$output_bufs[..$num_channels]
+            .iter_mut()
+            .map(|v| &mut v[..$num_samples])
+            .collect();
+
+        let sample_rate = $self.sample_rate;
+        let mut audio_buffer = tutti_plugin::protocol::$buffer_type {
+            inputs: &input_slices,
+            outputs: &mut output_slices,
+            num_samples: $num_samples,
+            sample_rate,
+        };
+
+        let output = $plugin
+            .as_instance_mut()
+            .$process_fn(&mut audio_buffer, &$ctx);
+
+        for ch in 0..$num_channels {
+            let _ = $shared_buffer.$write_channel(ch, &$self.$output_bufs[ch][..$num_samples]);
+        }
+
+        output
+    }};
 }
 
 impl PluginServer {
@@ -174,7 +225,8 @@ impl PluginServer {
                 preferred_format,
                 shm_name,
             } => {
-                let metadata = self.load_plugin(path, sample_rate, block_size, preferred_format, &shm_name)?;
+                let metadata =
+                    self.load_plugin(path, sample_rate, block_size, preferred_format, &shm_name)?;
 
                 Ok(Some(BridgeMessage::PluginLoaded {
                     metadata: Box::new(metadata),
@@ -378,82 +430,37 @@ impl PluginServer {
 
             let ctx = ProcessContext::new().midi(midi_events);
 
-            match self.negotiated_format {
-                SampleFormat::Float64 => {
-                    for ch in 0..num_channels {
-                        if let Ok(data) = shared_buffer.read_channel_f64(ch) {
-                            self.input_buffers_f64[ch][..num_samples]
-                                .copy_from_slice(&data[..num_samples]);
-                            self.output_buffers_f64[ch][..num_samples].fill(0.0);
-                        }
-                    }
-
-                    let input_slices: Vec<&[f64]> = self.input_buffers_f64[..num_channels]
-                        .iter()
-                        .map(|v| &v[..num_samples])
-                        .collect();
-                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64
-                        [..num_channels]
-                        .iter_mut()
-                        .map(|v| &mut v[..num_samples])
-                        .collect();
-
-                    let sample_rate = self.sample_rate;
-                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer64 {
-                        inputs: &input_slices,
-                        outputs: &mut output_slices,
-                        num_samples,
-                        sample_rate,
-                    };
-
-                    let output = plugin
-                        .as_instance_mut()
-                        .process_f64(&mut audio_buffer, &ctx);
-                    self.midi_output_buffer = output.midi_events;
-
-                    for ch in 0..num_channels {
-                        let _ = shared_buffer
-                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]);
-                    }
-                }
-                SampleFormat::Float32 => {
-                    for ch in 0..num_channels {
-                        if let Ok(data) = shared_buffer.read_channel(ch) {
-                            self.input_buffers_f32[ch][..num_samples]
-                                .copy_from_slice(&data[..num_samples]);
-                            self.output_buffers_f32[ch][..num_samples].fill(0.0);
-                        }
-                    }
-
-                    let input_slices: Vec<&[f32]> = self.input_buffers_f32[..num_channels]
-                        .iter()
-                        .map(|v| &v[..num_samples])
-                        .collect();
-                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32
-                        [..num_channels]
-                        .iter_mut()
-                        .map(|v| &mut v[..num_samples])
-                        .collect();
-
-                    let sample_rate = self.sample_rate;
-                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer {
-                        inputs: &input_slices,
-                        outputs: &mut output_slices,
-                        num_samples,
-                        sample_rate,
-                    };
-
-                    let output = plugin
-                        .as_instance_mut()
-                        .process_f32(&mut audio_buffer, &ctx);
-                    self.midi_output_buffer = output.midi_events;
-
-                    for ch in 0..num_channels {
-                        let _ = shared_buffer
-                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples]);
-                    }
-                }
-            }
+            let output = match self.negotiated_format {
+                SampleFormat::Float64 => process_format!(
+                    self,
+                    shared_buffer,
+                    plugin,
+                    ctx,
+                    num_channels,
+                    num_samples,
+                    input_bufs = input_buffers_f64,
+                    output_bufs = output_buffers_f64,
+                    read_channel = read_channel_f64,
+                    write_channel = write_channel_f64,
+                    buffer_type = AudioBuffer64,
+                    process_fn = process_f64
+                ),
+                SampleFormat::Float32 => process_format!(
+                    self,
+                    shared_buffer,
+                    plugin,
+                    ctx,
+                    num_channels,
+                    num_samples,
+                    input_bufs = input_buffers_f32,
+                    output_bufs = output_buffers_f32,
+                    read_channel = read_channel,
+                    write_channel = write_channel,
+                    buffer_type = AudioBuffer,
+                    process_fn = process_f32
+                ),
+            };
+            self.midi_output_buffer = output.midi_events;
         }
 
         let latency_us = start.elapsed().as_micros() as u64;
@@ -514,86 +521,39 @@ impl PluginServer {
                 .note_expression(note_expression)
                 .transport(transport);
 
-            match self.negotiated_format {
-                SampleFormat::Float64 => {
-                    for ch in 0..num_channels {
-                        if let Ok(data) = shared_buffer.read_channel_f64(ch) {
-                            self.input_buffers_f64[ch][..num_samples]
-                                .copy_from_slice(&data[..num_samples]);
-                            self.output_buffers_f64[ch][..num_samples].fill(0.0);
-                        }
-                    }
-
-                    let input_slices: Vec<&[f64]> = self.input_buffers_f64[..num_channels]
-                        .iter()
-                        .map(|v| &v[..num_samples])
-                        .collect();
-                    let mut output_slices: Vec<&mut [f64]> = self.output_buffers_f64
-                        [..num_channels]
-                        .iter_mut()
-                        .map(|v| &mut v[..num_samples])
-                        .collect();
-
-                    let sample_rate = self.sample_rate;
-                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer64 {
-                        inputs: &input_slices,
-                        outputs: &mut output_slices,
-                        num_samples,
-                        sample_rate,
-                    };
-
-                    let output = plugin
-                        .as_instance_mut()
-                        .process_f64(&mut audio_buffer, &ctx);
-                    self.midi_output_buffer = output.midi_events;
-                    param_output = output.param_changes;
-                    note_expression_output = output.note_expression;
-
-                    for ch in 0..num_channels {
-                        let _ = shared_buffer
-                            .write_channel_f64(ch, &self.output_buffers_f64[ch][..num_samples]);
-                    }
-                }
-                SampleFormat::Float32 => {
-                    for ch in 0..num_channels {
-                        if let Ok(data) = shared_buffer.read_channel(ch) {
-                            self.input_buffers_f32[ch][..num_samples]
-                                .copy_from_slice(&data[..num_samples]);
-                            self.output_buffers_f32[ch][..num_samples].fill(0.0);
-                        }
-                    }
-
-                    let input_slices: Vec<&[f32]> = self.input_buffers_f32[..num_channels]
-                        .iter()
-                        .map(|v| &v[..num_samples])
-                        .collect();
-                    let mut output_slices: Vec<&mut [f32]> = self.output_buffers_f32
-                        [..num_channels]
-                        .iter_mut()
-                        .map(|v| &mut v[..num_samples])
-                        .collect();
-
-                    let sample_rate = self.sample_rate;
-                    let mut audio_buffer = tutti_plugin::protocol::AudioBuffer {
-                        inputs: &input_slices,
-                        outputs: &mut output_slices,
-                        num_samples,
-                        sample_rate,
-                    };
-
-                    let output = plugin
-                        .as_instance_mut()
-                        .process_f32(&mut audio_buffer, &ctx);
-                    self.midi_output_buffer = output.midi_events;
-                    param_output = output.param_changes;
-                    note_expression_output = output.note_expression;
-
-                    for ch in 0..num_channels {
-                        let _ = shared_buffer
-                            .write_channel(ch, &self.output_buffers_f32[ch][..num_samples]);
-                    }
-                }
-            }
+            let output = match self.negotiated_format {
+                SampleFormat::Float64 => process_format!(
+                    self,
+                    shared_buffer,
+                    plugin,
+                    ctx,
+                    num_channels,
+                    num_samples,
+                    input_bufs = input_buffers_f64,
+                    output_bufs = output_buffers_f64,
+                    read_channel = read_channel_f64,
+                    write_channel = write_channel_f64,
+                    buffer_type = AudioBuffer64,
+                    process_fn = process_f64
+                ),
+                SampleFormat::Float32 => process_format!(
+                    self,
+                    shared_buffer,
+                    plugin,
+                    ctx,
+                    num_channels,
+                    num_samples,
+                    input_bufs = input_buffers_f32,
+                    output_bufs = output_buffers_f32,
+                    read_channel = read_channel,
+                    write_channel = write_channel,
+                    buffer_type = AudioBuffer,
+                    process_fn = process_f32
+                ),
+            };
+            self.midi_output_buffer = output.midi_events;
+            param_output = output.param_changes;
+            note_expression_output = output.note_expression;
         }
 
         let latency_us = start.elapsed().as_micros() as u64;
@@ -734,8 +694,11 @@ mod tests {
     /// Create a PluginServer for testing with a unique socket path per call site.
     async fn test_server(name: &str) -> PluginServer {
         let config = BridgeConfig {
-            socket_path: std::env::temp_dir()
-                .join(format!("test_server_{}_{}.sock", name, std::process::id())),
+            socket_path: std::env::temp_dir().join(format!(
+                "test_server_{}_{}.sock",
+                name,
+                std::process::id()
+            )),
             ..Default::default()
         };
         PluginServer::new(config).await.unwrap()
@@ -891,7 +854,10 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(result.is_none(), "SetParameter with no plugin should return None");
+        assert!(
+            result.is_none(),
+            "SetParameter with no plugin should return None"
+        );
     }
 
     #[tokio::test]
@@ -910,10 +876,7 @@ mod tests {
     #[tokio::test]
     async fn test_save_state_no_plugin() {
         let mut server = test_server("save_state").await;
-        let result = server
-            .handle_message(HostMessage::SaveState)
-            .await
-            .unwrap();
+        let result = server.handle_message(HostMessage::SaveState).await.unwrap();
         match result {
             Some(BridgeMessage::StateData { data }) => {
                 assert!(data.is_empty());
@@ -977,7 +940,10 @@ mod tests {
             .await
             .unwrap();
         assert!(result.is_none(), "UnloadPlugin should return None");
-        assert!(server.plugin.is_none(), "Plugin should be None after unload");
+        assert!(
+            server.plugin.is_none(),
+            "Plugin should be None after unload"
+        );
         assert!(
             server.shared_buffer.is_none(),
             "SharedBuffer should be None after unload"
@@ -987,20 +953,14 @@ mod tests {
     #[tokio::test]
     async fn test_reset_no_plugin() {
         let mut server = test_server("reset").await;
-        let result = server
-            .handle_message(HostMessage::Reset)
-            .await
-            .unwrap();
+        let result = server.handle_message(HostMessage::Reset).await.unwrap();
         assert!(result.is_none(), "Reset should return None");
     }
 
     #[tokio::test]
     async fn test_shutdown_clears_transport() {
         let mut server = test_server("shutdown").await;
-        let result = server
-            .handle_message(HostMessage::Shutdown)
-            .await
-            .unwrap();
+        let result = server.handle_message(HostMessage::Shutdown).await.unwrap();
         assert!(result.is_none(), "Shutdown should return None");
         assert!(
             server.transport.is_none(),
@@ -1121,10 +1081,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_plugin_unsupported_format() {
-        let tmp = std::env::temp_dir().join(format!(
-            "fake_plugin_{}.xyz",
-            std::process::id()
-        ));
+        let tmp = std::env::temp_dir().join(format!("fake_plugin_{}.xyz", std::process::id()));
         std::fs::write(&tmp, b"fake").unwrap();
 
         let mut server = test_server("load_unsupported").await;
@@ -1167,21 +1124,20 @@ mod tests {
         preferred_format: SampleFormat,
     ) -> (PluginServer, PluginMetadata, SharedAudioBuffer) {
         let config = BridgeConfig {
-            socket_path: std::env::temp_dir()
-                .join(format!("integ_{}_{}.sock", name, std::process::id())),
+            socket_path: std::env::temp_dir().join(format!(
+                "integ_{}_{}.sock",
+                name,
+                std::process::id()
+            )),
             ..Default::default()
         };
         let mut server = PluginServer::new(config).await.unwrap();
 
         // Pre-create shared memory (load_plugin calls open_with_format)
         let buffer_name = format!("dawai_vst_buffer_{}", std::process::id());
-        let shm = SharedAudioBuffer::create_with_format(
-            buffer_name.clone(),
-            2,
-            8192,
-            preferred_format,
-        )
-        .unwrap();
+        let shm =
+            SharedAudioBuffer::create_with_format(buffer_name.clone(), 2, 8192, preferred_format)
+                .unwrap();
 
         let metadata = server
             .load_plugin(
@@ -1215,10 +1171,7 @@ mod tests {
         let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
         let (server, metadata, _shm) =
             load_clap_into_server("load_clap_f64", SampleFormat::Float64).await;
-        assert!(
-            !metadata.name.is_empty(),
-            "Plugin name should be non-empty"
-        );
+        assert!(!metadata.name.is_empty(), "Plugin name should be non-empty");
         // If the plugin supports f64, the negotiated format should be Float64.
         if metadata.supports_f64 {
             assert_eq!(
@@ -1379,10 +1332,7 @@ mod tests {
             load_clap_into_server("save_load_state_clap", SampleFormat::Float32).await;
 
         // Save state.
-        let save_result = server
-            .handle_message(HostMessage::SaveState)
-            .await
-            .unwrap();
+        let save_result = server.handle_message(HostMessage::SaveState).await.unwrap();
 
         let state_data = match save_result {
             Some(BridgeMessage::StateData { data }) => {
@@ -1419,10 +1369,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            result.is_none(),
-            "SetSampleRate should return None"
-        );
+        assert!(result.is_none(), "SetSampleRate should return None");
     }
 
     #[tokio::test]
@@ -1516,10 +1463,7 @@ mod tests {
             load_clap_into_server("editor_check_clap", SampleFormat::Float32).await;
 
         // Access the plugin instance directly to check has_editor().
-        let plugin = server
-            .plugin
-            .as_mut()
-            .expect("Plugin should be loaded");
+        let plugin = server.plugin.as_mut().expect("Plugin should be loaded");
 
         let _has_editor: bool = plugin.as_instance_mut().has_editor();
         // We only check it returns a bool without crashing. TAL-NoiseMaker

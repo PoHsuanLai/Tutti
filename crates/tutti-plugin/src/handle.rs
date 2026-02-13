@@ -16,7 +16,7 @@ use std::sync::Arc;
 ///
 /// ```ignore
 /// let (unit, handle) = engine.clap("Reverb.clap").build()?;
-/// engine.graph(|net| net.add(unit).master());
+/// engine.graph_mut(|net| net.add(unit).master());
 ///
 /// // Chainable actions
 /// handle
@@ -52,7 +52,10 @@ impl PluginHandle {
     /// Create a PluginHandle directly from a bridge and metadata.
     ///
     /// Useful for testing or when constructing a handle without a full PluginClient.
-    pub fn from_bridge_and_metadata(bridge: Arc<dyn PluginBridge>, metadata: PluginMetadata) -> Self {
+    pub fn from_bridge_and_metadata(
+        bridge: Arc<dyn PluginBridge>,
+        metadata: PluginMetadata,
+    ) -> Self {
         Self { bridge, metadata }
     }
 

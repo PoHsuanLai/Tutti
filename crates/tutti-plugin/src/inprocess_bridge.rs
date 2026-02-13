@@ -590,10 +590,7 @@ mod tests {
             true
         }
 
-        unsafe fn open_editor(
-            &mut self,
-            _parent: *mut std::ffi::c_void,
-        ) -> Result<(u32, u32)> {
+        unsafe fn open_editor(&mut self, _parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
             Ok((800, 600))
         }
 
@@ -653,19 +650,33 @@ mod tests {
         }
 
         fn set_sample_rate(&mut self, _rate: f64) {}
-        fn get_parameter_count(&self) -> usize { 0 }
-        fn get_parameter(&self, _id: u32) -> f64 { 0.0 }
+        fn get_parameter_count(&self) -> usize {
+            0
+        }
+        fn get_parameter(&self, _id: u32) -> f64 {
+            0.0
+        }
         fn set_parameter(&mut self, _id: u32, _value: f64) {}
-        fn get_parameter_list(&mut self) -> Vec<ParameterInfo> { vec![] }
-        fn get_parameter_info(&mut self, _id: u32) -> Option<ParameterInfo> { None }
-        fn has_editor(&mut self) -> bool { false }
+        fn get_parameter_list(&mut self) -> Vec<ParameterInfo> {
+            vec![]
+        }
+        fn get_parameter_info(&mut self, _id: u32) -> Option<ParameterInfo> {
+            None
+        }
+        fn has_editor(&mut self) -> bool {
+            false
+        }
         unsafe fn open_editor(&mut self, _parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
             Err(crate::error::BridgeError::EditorError("no editor".into()))
         }
         fn close_editor(&mut self) {}
         fn editor_idle(&mut self) {}
-        fn get_state(&mut self) -> Result<Vec<u8>> { Ok(vec![]) }
-        fn set_state(&mut self, _data: &[u8]) -> Result<()> { Ok(()) }
+        fn get_state(&mut self) -> Result<Vec<u8>> {
+            Ok(vec![])
+        }
+        fn set_state(&mut self, _data: &[u8]) -> Result<()> {
+            Ok(())
+        }
     }
 
     #[test]

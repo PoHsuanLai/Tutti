@@ -160,27 +160,34 @@ impl PluginClient {
         )
         .map_err(|e| BridgeError::Io(std::io::Error::other(e)))?;
 
-        let metadata =
-            Self::load_plugin_on_server(&mut transport, &config, &plugin_path, sample_rate, &shm_name).await?;
+        let metadata = Self::load_plugin_on_server(
+            &mut transport,
+            &config,
+            &plugin_path,
+            sample_rate,
+            &shm_name,
+        )
+        .await?;
 
         let negotiated_format = Self::negotiate_format(config.preferred_format, &metadata);
 
         // Re-create shared memory if channel count differs from pre-allocated
         let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs);
-        let audio_buffer = if num_channels != pre_channels || negotiated_format != config.preferred_format {
-            drop(pre_audio_buffer);
-            Arc::new(
-                SharedAudioBuffer::create_with_format(
-                    shm_name.clone(),
-                    num_channels,
-                    config.max_buffer_size,
-                    negotiated_format,
+        let audio_buffer =
+            if num_channels != pre_channels || negotiated_format != config.preferred_format {
+                drop(pre_audio_buffer);
+                Arc::new(
+                    SharedAudioBuffer::create_with_format(
+                        shm_name.clone(),
+                        num_channels,
+                        config.max_buffer_size,
+                        negotiated_format,
+                    )
+                    .map_err(|e| BridgeError::Io(std::io::Error::other(e)))?,
                 )
-                .map_err(|e| BridgeError::Io(std::io::Error::other(e)))?,
-            )
-        } else {
-            Arc::new(pre_audio_buffer)
-        };
+            } else {
+                Arc::new(pre_audio_buffer)
+            };
 
         let (bridge, bridge_thread) = LockFreeBridge::new(transport, audio_buffer)?;
         let bridge_arc: Arc<dyn PluginBridge> = Arc::new(bridge);
@@ -385,7 +392,10 @@ impl PluginClient {
         }
     }
 
-    pub(crate) fn negotiate_format(preferred: SampleFormat, metadata: &PluginMetadata) -> SampleFormat {
+    pub(crate) fn negotiate_format(
+        preferred: SampleFormat,
+        metadata: &PluginMetadata,
+    ) -> SampleFormat {
         if preferred == SampleFormat::Float64 && metadata.supports_f64 {
             SampleFormat::Float64
         } else {
@@ -589,7 +599,8 @@ impl PluginClient {
 
                 // Debug: log peak output from client side
                 {
-                    static LOG_COUNT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                    static LOG_COUNT: std::sync::atomic::AtomicU32 =
+                        std::sync::atomic::AtomicU32::new(0);
                     let count = LOG_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if count < 10 {
                         let peak: f32 = self.scratch_out.f32_buf[..size]
@@ -1129,9 +1140,10 @@ mod tests {
     #[test]
     fn test_queue_midi_no_panic() {
         let mut client = test_client(0, 2);
-        let events = vec![
-            MidiEvent::note_on_builder(60, 100).channel(0).offset(0).build(),
-        ];
+        let events = vec![MidiEvent::note_on_builder(60, 100)
+            .channel(0)
+            .offset(0)
+            .build()];
         client.queue_midi(&events);
     }
 
@@ -1145,8 +1157,14 @@ mod tests {
     fn test_queue_and_clear_midi() {
         let mut client = test_client(0, 2);
         let events = vec![
-            MidiEvent::note_on_builder(60, 100).channel(0).offset(0).build(),
-            MidiEvent::note_on_builder(64, 80).channel(0).offset(0).build(),
+            MidiEvent::note_on_builder(60, 100)
+                .channel(0)
+                .offset(0)
+                .build(),
+            MidiEvent::note_on_builder(64, 80)
+                .channel(0)
+                .offset(0)
+                .build(),
         ];
         client.queue_midi(&events);
         client.clear_midi();
@@ -1295,7 +1313,8 @@ mod tests {
         let config = crate::protocol::BridgeConfig::default();
 
         let bridge_arc: Arc<dyn crate::bridge::PluginBridge> = Arc::new(bridge.clone());
-        let client = PluginClient::create_client(bridge_arc, metadata, &config, SampleFormat::Float32);
+        let client =
+            PluginClient::create_client(bridge_arc, metadata, &config, SampleFormat::Float32);
 
         assert!(!client.is_crashed());
 
@@ -1411,9 +1430,9 @@ mod tests {
                     .set_read_timeout(Some(std::time::Duration::from_secs(30)))
                     .unwrap();
                 loop {
-                    let msg = match std::panic::catch_unwind(
-                        std::panic::AssertUnwindSafe(|| recv_host_msg_sync(&mut server_std)),
-                    ) {
+                    let msg = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        recv_host_msg_sync(&mut server_std)
+                    })) {
                         Ok(msg) => msg,
                         Err(_) => break, // stream closed or error
                     };
@@ -1448,7 +1467,8 @@ mod tests {
             .audio_io(2, 2)
             .editor(true, Some((800, 600)));
 
-        let bridge_arc: std::sync::Arc<dyn crate::bridge::PluginBridge> = std::sync::Arc::new(bridge);
+        let bridge_arc: std::sync::Arc<dyn crate::bridge::PluginBridge> =
+            std::sync::Arc::new(bridge);
         let plugin_handle =
             crate::handle::PluginHandle::from_bridge_and_metadata(bridge_arc, metadata);
 
@@ -1470,8 +1490,8 @@ mod tests {
 
     #[test]
     fn test_handle_metadata() {
-        let metadata = PluginMetadata::new("com.test.synth", "Test Synth")
-            .editor(true, Some((800, 600)));
+        let metadata =
+            PluginMetadata::new("com.test.synth", "Test Synth").editor(true, Some((800, 600)));
 
         // Create a dummy bridge for metadata-only tests
         let (client_std, _server_std) = std::os::unix::net::UnixStream::pair().unwrap();
@@ -1485,9 +1505,9 @@ mod tests {
             crate::lockfree_bridge::LockFreeBridge::new_from_std_stream(client_std, buffer)
                 .unwrap();
 
-        let bridge_arc: std::sync::Arc<dyn crate::bridge::PluginBridge> = std::sync::Arc::new(bridge);
-        let handle =
-            crate::handle::PluginHandle::from_bridge_and_metadata(bridge_arc, metadata);
+        let bridge_arc: std::sync::Arc<dyn crate::bridge::PluginBridge> =
+            std::sync::Arc::new(bridge);
+        let handle = crate::handle::PluginHandle::from_bridge_and_metadata(bridge_arc, metadata);
 
         assert_eq!(handle.name(), "Test Synth");
         assert!(handle.has_editor());
@@ -1498,16 +1518,17 @@ mod tests {
     fn test_handle_save_state_roundtrip() {
         use crate::protocol::BridgeMessage;
 
-        let (handle, _bridge_handle, _server_thread) = setup_handle_with_mock_server(|msg| match msg {
-            HostMessage::SaveState => Some(BridgeMessage::StateData {
-                data: vec![0xDE, 0xAD, 0xBE, 0xEF],
-            }),
-            HostMessage::LoadState { .. } => {
-                // LoadState is fire-and-forget in bridge, no response needed
-                None
-            }
-            _ => None,
-        });
+        let (handle, _bridge_handle, _server_thread) =
+            setup_handle_with_mock_server(|msg| match msg {
+                HostMessage::SaveState => Some(BridgeMessage::StateData {
+                    data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+                }),
+                HostMessage::LoadState { .. } => {
+                    // LoadState is fire-and-forget in bridge, no response needed
+                    None
+                }
+                _ => None,
+            });
 
         let state = handle.save_state();
         assert!(state.is_some(), "save_state should return Some");
@@ -1518,12 +1539,13 @@ mod tests {
     fn test_handle_load_state_chainable() {
         use crate::protocol::BridgeMessage;
 
-        let (handle, _bridge_handle, _server_thread) = setup_handle_with_mock_server(|msg| match msg {
-            HostMessage::SaveState => Some(BridgeMessage::StateData {
-                data: vec![1, 2, 3],
-            }),
-            _ => None,
-        });
+        let (handle, _bridge_handle, _server_thread) =
+            setup_handle_with_mock_server(|msg| match msg {
+                HostMessage::SaveState => Some(BridgeMessage::StateData {
+                    data: vec![1, 2, 3],
+                }),
+                _ => None,
+            });
 
         // Chainable: load_state returns &Self
         let same_handle = handle.load_state(&[1, 2, 3]);
@@ -1534,16 +1556,17 @@ mod tests {
     fn test_handle_get_parameter_list() {
         use crate::protocol::{BridgeMessage, ParameterInfo};
 
-        let (handle, _bridge_handle, _server_thread) = setup_handle_with_mock_server(|msg| match msg {
-            HostMessage::GetParameterList => Some(BridgeMessage::ParameterList {
-                parameters: vec![
-                    ParameterInfo::new(0, "Volume".to_string()),
-                    ParameterInfo::new(1, "Pan".to_string()),
-                    ParameterInfo::new(2, "Cutoff".to_string()),
-                ],
-            }),
-            _ => None,
-        });
+        let (handle, _bridge_handle, _server_thread) =
+            setup_handle_with_mock_server(|msg| match msg {
+                HostMessage::GetParameterList => Some(BridgeMessage::ParameterList {
+                    parameters: vec![
+                        ParameterInfo::new(0, "Volume".to_string()),
+                        ParameterInfo::new(1, "Pan".to_string()),
+                        ParameterInfo::new(2, "Cutoff".to_string()),
+                    ],
+                }),
+                _ => None,
+            });
 
         let params = handle.parameters();
         assert!(params.is_some());
@@ -1558,15 +1581,16 @@ mod tests {
     fn test_handle_get_parameter_value() {
         use crate::protocol::BridgeMessage;
 
-        let (handle, _bridge_handle, _server_thread) = setup_handle_with_mock_server(|msg| match msg {
-            HostMessage::GetParameter { param_id: 42 } => {
-                Some(BridgeMessage::ParameterValue { value: Some(0.75) })
-            }
-            HostMessage::GetParameter { .. } => {
-                Some(BridgeMessage::ParameterValue { value: None })
-            }
-            _ => None,
-        });
+        let (handle, _bridge_handle, _server_thread) =
+            setup_handle_with_mock_server(|msg| match msg {
+                HostMessage::GetParameter { param_id: 42 } => {
+                    Some(BridgeMessage::ParameterValue { value: Some(0.75) })
+                }
+                HostMessage::GetParameter { .. } => {
+                    Some(BridgeMessage::ParameterValue { value: None })
+                }
+                _ => None,
+            });
 
         assert_eq!(handle.get_parameter(42), Some(0.75));
     }
@@ -1587,13 +1611,14 @@ mod tests {
     fn test_handle_open_editor() {
         use crate::protocol::BridgeMessage;
 
-        let (handle, _bridge_handle, _server_thread) = setup_handle_with_mock_server(|msg| match msg {
-            HostMessage::OpenEditor { .. } => Some(BridgeMessage::EditorOpened {
-                width: 1024,
-                height: 768,
-            }),
-            _ => None,
-        });
+        let (handle, _bridge_handle, _server_thread) =
+            setup_handle_with_mock_server(|msg| match msg {
+                HostMessage::OpenEditor { .. } => Some(BridgeMessage::EditorOpened {
+                    width: 1024,
+                    height: 768,
+                }),
+                _ => None,
+            });
 
         let result = handle.open_editor(0x12345678);
         assert_eq!(result, Some((1024, 768)));
@@ -1603,10 +1628,11 @@ mod tests {
     fn test_handle_close_editor_chainable() {
         use crate::protocol::BridgeMessage;
 
-        let (handle, _bridge_handle, _server_thread) = setup_handle_with_mock_server(|msg| match msg {
-            HostMessage::CloseEditor => Some(BridgeMessage::EditorClosed),
-            _ => None,
-        });
+        let (handle, _bridge_handle, _server_thread) =
+            setup_handle_with_mock_server(|msg| match msg {
+                HostMessage::CloseEditor => Some(BridgeMessage::EditorClosed),
+                _ => None,
+            });
 
         let h = handle.close_editor();
         assert_eq!(h.name(), "Test Plugin");

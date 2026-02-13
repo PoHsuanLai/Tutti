@@ -2,12 +2,12 @@
 //!
 //! This module defines a unified interface for all plugin formats (VST2, VST3, CLAP).
 
-use crate::Result;
 use crate::protocol::{
     AudioBuffer, AudioBuffer64, MidiEvent, MidiEventVec, NoteExpressionChanges, ParameterChanges,
     ParameterInfo, TransportInfo,
 };
 use crate::PluginMetadata;
+use crate::Result;
 
 #[derive(Default)]
 pub struct ProcessContext<'a> {

@@ -30,8 +30,7 @@ pub(crate) mod test_utils {
 }
 
 pub use tutti_plugin::{
-    AudioIO, BridgeConfig, BridgeError, LoadStage, MidiEvent, MidiEventVec,
-    NoteExpressionChanges, NoteExpressionType, NoteExpressionValue, ParameterChanges,
-    ParameterFlags, ParameterInfo, ParameterPoint, ParameterQueue, PluginMetadata, Result,
-    SampleFormat, TransportInfo,
+    AudioIO, BridgeConfig, BridgeError, LoadStage, MidiEvent, MidiEventVec, NoteExpressionChanges,
+    NoteExpressionType, NoteExpressionValue, ParameterChanges, ParameterFlags, ParameterInfo,
+    ParameterPoint, ParameterQueue, PluginMetadata, Result, SampleFormat, TransportInfo,
 };

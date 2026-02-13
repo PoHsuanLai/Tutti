@@ -194,12 +194,11 @@ impl LockFreeBridge {
                     };
                     runtime.block_on(async {
                         // Convert std stream to tokio inside THIS runtime's reactor
-                        let Ok(mut transport) =
-                            MessageTransport::from_std_stream(stream)
-                        else {
+                        let Ok(mut transport) = MessageTransport::from_std_stream(stream) else {
                             return;
                         };
-                        Self::run(cmd_q, resp_q, ctrl_q, recycle_q, run, crash, &mut transport).await;
+                        Self::run(cmd_q, resp_q, ctrl_q, recycle_q, run, crash, &mut transport)
+                            .await;
                     });
                 })
                 .expect("failed to spawn bridge thread")
@@ -335,9 +334,7 @@ impl LockFreeBridge {
                 // EditorIdle is fire-and-forget, no response expected
             }
             BridgeCommand::SaveState => {
-                transport
-                    .send_host_message(&HostMessage::SaveState)
-                    .await?;
+                transport.send_host_message(&HostMessage::SaveState).await?;
                 match transport.recv_with_timeout(Duration::from_secs(10)).await? {
                     BridgeMessage::StateData { data } => {
                         let _ = control_responses.push(ControlResponse::StateSaved { data });
@@ -384,12 +381,12 @@ impl LockFreeBridge {
                         let _ = control_responses.push(ControlResponse::ParameterValue { value });
                     }
                     BridgeMessage::Error { .. } => {
-                        let _ = control_responses
-                            .push(ControlResponse::ParameterValue { value: None });
+                        let _ =
+                            control_responses.push(ControlResponse::ParameterValue { value: None });
                     }
                     _ => {
-                        let _ = control_responses
-                            .push(ControlResponse::ParameterValue { value: None });
+                        let _ =
+                            control_responses.push(ControlResponse::ParameterValue { value: None });
                     }
                 }
             }
@@ -438,7 +435,11 @@ impl LockFreeBridge {
         self.audio_buffer.write_channel_f64(channel, data)
     }
 
-    pub fn read_output_channel_into_f64(&self, channel: usize, output: &mut [f64]) -> Result<usize> {
+    pub fn read_output_channel_into_f64(
+        &self,
+        channel: usize,
+        output: &mut [f64],
+    ) -> Result<usize> {
         self.audio_buffer.read_channel_into_f64(channel, output)
     }
 
@@ -482,7 +483,10 @@ impl LockFreeBridge {
             return false;
         }
 
-        matches!(self.response_queue.pop(), Some(BridgeResponse::AudioProcessed))
+        matches!(
+            self.response_queue.pop(),
+            Some(BridgeResponse::AudioProcessed)
+        )
     }
 
     /// Wait for a control response with timeout.
@@ -522,11 +526,7 @@ impl LockFreeBridge {
         if self.crashed.load(Ordering::Acquire) {
             return false;
         }
-        if self
-            .command_queue
-            .push(BridgeCommand::CloseEditor)
-            .is_err()
-        {
+        if self.command_queue.push(BridgeCommand::CloseEditor).is_err() {
             return false;
         }
         matches!(
@@ -623,7 +623,13 @@ impl crate::bridge::PluginBridge for LockFreeBridge {
         note_expression: crate::protocol::NoteExpressionChanges,
         transport: crate::protocol::TransportInfo,
     ) -> bool {
-        self.process(num_samples, midi_events, param_changes, note_expression, transport)
+        self.process(
+            num_samples,
+            midi_events,
+            param_changes,
+            note_expression,
+            transport,
+        )
     }
 
     fn set_parameter_rt(&self, param_id: u32, value: f32) -> bool {

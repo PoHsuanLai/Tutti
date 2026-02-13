@@ -381,39 +381,19 @@ pub struct AudioProcessedFullData {
 /// Bridge to host message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BridgeMessage {
-    PluginLoaded {
-        metadata: Box<PluginMetadata>,
-    },
+    PluginLoaded { metadata: Box<PluginMetadata> },
     PluginUnloaded,
-    AudioProcessed {
-        latency_us: u64,
-    },
+    AudioProcessed { latency_us: u64 },
     AudioProcessedMidi(Box<AudioProcessedMidiData>),
     AudioProcessedFull(Box<AudioProcessedFullData>),
-    ParameterValue {
-        value: Option<f32>,
-    },
-    ParameterList {
-        parameters: Vec<ParameterInfo>,
-    },
-    ParameterInfoResponse {
-        info: Option<ParameterInfo>,
-    },
-    StateData {
-        data: Vec<u8>,
-    },
-    EditorOpened {
-        width: u32,
-        height: u32,
-    },
+    ParameterValue { value: Option<f32> },
+    ParameterList { parameters: Vec<ParameterInfo> },
+    ParameterInfoResponse { info: Option<ParameterInfo> },
+    StateData { data: Vec<u8> },
+    EditorOpened { width: u32, height: u32 },
     EditorClosed,
-    ParameterChanged {
-        index: i32,
-        value: f32,
-    },
-    Error {
-        message: String,
-    },
+    ParameterChanged { index: i32, value: f32 },
+    Error { message: String },
     Ready,
     Shutdown,
 }

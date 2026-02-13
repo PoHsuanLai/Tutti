@@ -5,13 +5,13 @@
 
 #![allow(dead_code)] // Some functions used only by server module
 
-use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
+use crate::instance::{PluginInstance, ProcessContext, ProcessOutput};
+use std::path::Path;
 use tutti_plugin::protocol::{
     AudioBuffer, AudioBuffer64, NoteExpressionChanges, ParameterChanges, ParameterFlags,
     ParameterInfo,
 };
-use crate::instance::{PluginInstance, ProcessContext, ProcessOutput};
-use std::path::Path;
+use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
 
 #[cfg(feature = "clap")]
 use clap_host::ClapInstance as ClapHostInstance;
@@ -78,12 +78,10 @@ impl ClapInstance {
     /// by the first `process_f32()` call.
     #[cfg(feature = "clap")]
     pub fn activate(&mut self) -> Result<()> {
-        self.inner.activate().map_err(|e| {
-            BridgeError::LoadFailed {
-                path: std::path::PathBuf::new(),
-                stage: LoadStage::Activation,
-                reason: format!("activate failed: {e}"),
-            }
+        self.inner.activate().map_err(|e| BridgeError::LoadFailed {
+            path: std::path::PathBuf::new(),
+            stage: LoadStage::Activation,
+            reason: format!("activate failed: {e}"),
         })
     }
 }
@@ -109,7 +107,9 @@ impl PluginInstance for ClapInstance {
 
         let param_changes = ctx.param_changes.map(convert_param_changes);
         let note_expressions = ctx.note_expression.map(convert_note_expressions);
-        let transport = ctx.transport.map(|t| convert_transport(t, buffer.sample_rate));
+        let transport = ctx
+            .transport
+            .map(|t| convert_transport(t, buffer.sample_rate));
 
         let mut clap_buffer = clap_host::AudioBuffer32 {
             inputs: buffer.inputs,
@@ -148,7 +148,9 @@ impl PluginInstance for ClapInstance {
 
         let param_changes = ctx.param_changes.map(convert_param_changes);
         let note_expressions = ctx.note_expression.map(convert_note_expressions);
-        let transport = ctx.transport.map(|t| convert_transport(t, buffer.sample_rate));
+        let transport = ctx
+            .transport
+            .map(|t| convert_transport(t, buffer.sample_rate));
 
         let mut clap_buffer = clap_host::AudioBuffer64 {
             inputs: buffer.inputs,
@@ -286,9 +288,9 @@ fn convert_midi_event(event: &tutti_plugin::protocol::MidiEvent) -> clap_host::M
         ChannelVoiceMsg::ProgramChange { program } => {
             clap_host::MidiData::ProgramChange { program }
         }
-        ChannelVoiceMsg::ChannelPressure { pressure } => clap_host::MidiData::ChannelPressure {
-            pressure,
-        },
+        ChannelVoiceMsg::ChannelPressure { pressure } => {
+            clap_host::MidiData::ChannelPressure { pressure }
+        }
         ChannelVoiceMsg::PitchBend { bend } => clap_host::MidiData::PitchBend { value: bend },
         ChannelVoiceMsg::PolyPressure { note, pressure } => clap_host::MidiData::PolyPressure {
             key: note,
@@ -337,7 +339,9 @@ fn convert_note_expressions(
                 tutti_plugin::protocol::NoteExpressionType::Volume => {
                     clap_host::NoteExpressionType::Volume
                 }
-                tutti_plugin::protocol::NoteExpressionType::Pan => clap_host::NoteExpressionType::Pan,
+                tutti_plugin::protocol::NoteExpressionType::Pan => {
+                    clap_host::NoteExpressionType::Pan
+                }
                 tutti_plugin::protocol::NoteExpressionType::Tuning => {
                     clap_host::NoteExpressionType::Tuning
                 }
@@ -354,8 +358,15 @@ fn convert_note_expressions(
 }
 
 #[cfg(feature = "clap")]
-fn convert_transport(transport: &tutti_plugin::protocol::TransportInfo, sample_rate: f64) -> clap_host::TransportInfo {
-    let sr = if sample_rate > 0.0 { sample_rate } else { 44100.0 };
+fn convert_transport(
+    transport: &tutti_plugin::protocol::TransportInfo,
+    sample_rate: f64,
+) -> clap_host::TransportInfo {
+    let sr = if sample_rate > 0.0 {
+        sample_rate
+    } else {
+        44100.0
+    };
     clap_host::TransportInfo {
         playing: transport.playing,
         recording: transport.recording,
@@ -439,7 +450,9 @@ fn convert_process_output(output: clap_host::instance::ProcessOutput) -> Process
                 clap_host::NoteExpressionType::Volume => {
                     tutti_plugin::protocol::NoteExpressionType::Volume
                 }
-                clap_host::NoteExpressionType::Pan => tutti_plugin::protocol::NoteExpressionType::Pan,
+                clap_host::NoteExpressionType::Pan => {
+                    tutti_plugin::protocol::NoteExpressionType::Pan
+                }
                 clap_host::NoteExpressionType::Tuning => {
                     tutti_plugin::protocol::NoteExpressionType::Tuning
                 }
@@ -507,7 +520,11 @@ mod tests {
         let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
         let path = Path::new(CLAP_PLUGIN);
         let instance = ClapInstance::load(path, 44100.0, 512);
-        assert!(instance.is_ok(), "Failed to load CLAP plugin: {:?}", instance.err());
+        assert!(
+            instance.is_ok(),
+            "Failed to load CLAP plugin: {:?}",
+            instance.err()
+        );
 
         let instance = instance.unwrap();
         let meta = instance.metadata();
@@ -715,7 +732,11 @@ mod tests {
     fn test_surge_load() {
         let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
         let instance = ClapInstance::load(Path::new(SURGE_XT), 44100.0, 512);
-        assert!(instance.is_ok(), "Failed to load Surge XT: {:?}", instance.err());
+        assert!(
+            instance.is_ok(),
+            "Failed to load Surge XT: {:?}",
+            instance.err()
+        );
 
         let instance = instance.unwrap();
         let meta = instance.metadata();
@@ -831,7 +852,10 @@ mod tests {
         let instance =
             ClapInstance::load(Path::new(CLAP_PLUGIN), 44100.0, 512).expect("Failed to load");
         // load() inits but does NOT activate — activation is lazy
-        assert!(!instance.inner.is_active(), "Plugin should not be active right after load");
+        assert!(
+            !instance.inner.is_active(),
+            "Plugin should not be active right after load"
+        );
     }
 
     #[test]
@@ -841,14 +865,29 @@ mod tests {
             ClapInstance::load(Path::new(CLAP_PLUGIN), 44100.0, 512).expect("Failed to load");
 
         assert!(!instance.inner.is_active());
-        instance.inner.activate().expect("Activation should succeed");
-        assert!(instance.inner.is_active(), "Should be active after activate");
+        instance
+            .inner
+            .activate()
+            .expect("Activation should succeed");
+        assert!(
+            instance.inner.is_active(),
+            "Should be active after activate"
+        );
 
         instance.inner.deactivate();
-        assert!(!instance.inner.is_active(), "Should be inactive after deactivate");
+        assert!(
+            !instance.inner.is_active(),
+            "Should be inactive after deactivate"
+        );
 
-        instance.inner.activate().expect("Reactivation should succeed");
-        assert!(instance.inner.is_active(), "Should be active after reactivate");
+        instance
+            .inner
+            .activate()
+            .expect("Reactivation should succeed");
+        assert!(
+            instance.inner.is_active(),
+            "Should be active after reactivate"
+        );
     }
 
     #[test]
@@ -858,13 +897,28 @@ mod tests {
             ClapInstance::load(Path::new(CLAP_PLUGIN), 44100.0, 512).expect("Failed to load");
 
         // start_processing auto-activates if needed
-        instance.inner.start_processing().expect("start_processing should succeed");
-        assert!(instance.inner.is_active(), "Should be active (auto-activated)");
-        assert!(instance.inner.is_processing(), "Should be processing after start");
+        instance
+            .inner
+            .start_processing()
+            .expect("start_processing should succeed");
+        assert!(
+            instance.inner.is_active(),
+            "Should be active (auto-activated)"
+        );
+        assert!(
+            instance.inner.is_processing(),
+            "Should be processing after start"
+        );
 
         instance.inner.stop_processing();
-        assert!(!instance.inner.is_processing(), "Should not be processing after stop");
-        assert!(instance.inner.is_active(), "Should still be active after stop_processing");
+        assert!(
+            !instance.inner.is_processing(),
+            "Should not be processing after stop"
+        );
+        assert!(
+            instance.inner.is_active(),
+            "Should still be active after stop_processing"
+        );
     }
 
     #[test]
@@ -907,13 +961,28 @@ mod tests {
         state.restart_requested.store(true, Ordering::Release);
 
         // needs_restart() is non-clearing — should return true repeatedly
-        assert!(instance.inner.needs_restart(), "needs_restart should be true");
-        assert!(instance.inner.needs_restart(), "needs_restart should still be true (non-clearing)");
+        assert!(
+            instance.inner.needs_restart(),
+            "needs_restart should be true"
+        );
+        assert!(
+            instance.inner.needs_restart(),
+            "needs_restart should still be true (non-clearing)"
+        );
 
         // poll_restart_requested() clears the flag
-        assert!(instance.inner.poll_restart_requested(), "poll should return true");
-        assert!(!instance.inner.poll_restart_requested(), "poll should return false after clearing");
-        assert!(!instance.inner.needs_restart(), "needs_restart should be false after poll cleared it");
+        assert!(
+            instance.inner.poll_restart_requested(),
+            "poll should return true"
+        );
+        assert!(
+            !instance.inner.poll_restart_requested(),
+            "poll should return false after clearing"
+        );
+        assert!(
+            !instance.inner.needs_restart(),
+            "needs_restart should be false after poll cleared it"
+        );
     }
 
     #[test]
@@ -1049,10 +1118,15 @@ mod tests {
             ClapInstance::load(Path::new(CLAP_PLUGIN), 44100.0, 512).expect("Failed to load");
 
         let output_count = instance.inner.audio_port_count(false);
-        assert!(output_count > 0, "Synth should have at least one output port");
+        assert!(
+            output_count > 0,
+            "Synth should have at least one output port"
+        );
 
         for i in 0..output_count {
-            let info = instance.inner.audio_port_info(i, false)
+            let info = instance
+                .inner
+                .audio_port_info(i, false)
                 .expect("audio_port_info should return Some");
             assert!(info.channel_count > 0, "Port {} should have channels", i);
             assert!(!info.name.is_empty(), "Port {} should have a name", i);
@@ -1066,10 +1140,15 @@ mod tests {
             ClapInstance::load(Path::new(CLAP_PLUGIN), 44100.0, 512).expect("Failed to load");
 
         let input_count = instance.inner.note_port_count(true);
-        assert!(input_count > 0, "Synth should have at least one note input port");
+        assert!(
+            input_count > 0,
+            "Synth should have at least one note input port"
+        );
 
         for i in 0..input_count {
-            let info = instance.inner.note_port_info(i, true)
+            let info = instance
+                .inner
+                .note_port_info(i, true)
                 .expect("note_port_info should return Some");
             assert!(!info.name.is_empty(), "Note port {} should have a name", i);
         }
@@ -1236,9 +1315,15 @@ mod tests {
         let output_count = instance.inner.audio_port_count(false);
         assert!(output_count > 0, "Surge XT should have output ports");
 
-        let port = instance.inner.audio_port_info(0, false)
+        let port = instance
+            .inner
+            .audio_port_info(0, false)
             .expect("Should have at least one output port");
-        assert!(port.channel_count >= 2, "Expected stereo output, got {} channels", port.channel_count);
+        assert!(
+            port.channel_count >= 2,
+            "Expected stereo output, got {} channels",
+            port.channel_count
+        );
     }
 
     #[test]
@@ -1273,7 +1358,11 @@ mod tests {
         assert!(!parent.is_null(), "Failed to create NSView");
 
         let result = unsafe { instance.open_editor(parent) };
-        assert!(result.is_ok(), "open_editor should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "open_editor should succeed: {:?}",
+            result.err()
+        );
 
         let (w, h) = result.unwrap();
         assert!(w > 0 && h > 0, "GUI size should be non-zero: {}x{}", w, h);
@@ -1296,10 +1385,19 @@ mod tests {
         assert!(!parent.is_null());
 
         let result = unsafe { instance.open_editor(parent) };
-        assert!(result.is_ok(), "Surge XT open_editor should succeed: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Surge XT open_editor should succeed: {:?}",
+            result.err()
+        );
 
         let (w, h) = result.unwrap();
-        assert!(w > 0 && h > 0, "Surge XT GUI size should be non-zero: {}x{}", w, h);
+        assert!(
+            w > 0 && h > 0,
+            "Surge XT GUI size should be non-zero: {}x{}",
+            w,
+            h
+        );
 
         instance.close_editor();
         release_nsview(parent);
@@ -1354,7 +1452,10 @@ mod tests {
         // Surge XT likely supports voice info
         if let Some(info) = instance.inner.get_voice_info() {
             assert!(info.voice_count > 0, "Surge XT voice_count should be > 0");
-            assert!(info.voice_capacity > 0, "Surge XT voice_capacity should be > 0");
+            assert!(
+                info.voice_capacity > 0,
+                "Surge XT voice_capacity should be > 0"
+            );
         }
     }
 
@@ -1371,7 +1472,11 @@ mod tests {
         for i in 0..count {
             let name = instance.inner.get_note_name(i);
             assert!(name.is_some(), "note_name at index {} should exist", i);
-            assert!(!name.unwrap().name.is_empty(), "note_name {} should have a name", i);
+            assert!(
+                !name.unwrap().name.is_empty(),
+                "note_name {} should have a name",
+                i
+            );
         }
     }
 
@@ -1453,16 +1558,17 @@ mod tests {
             ClapInstance::load(Path::new(CLAP_PLUGIN), 44100.0, 512).expect("Failed to load");
 
         // Save with ForProject context (falls back to regular save if unsupported)
-        let saved = instance.inner.save_state_with_context(
-            clap_host::StateContext::ForProject,
-        ).expect("save_state_with_context should succeed");
+        let saved = instance
+            .inner
+            .save_state_with_context(clap_host::StateContext::ForProject)
+            .expect("save_state_with_context should succeed");
         assert!(!saved.is_empty());
 
         // Load it back
-        instance.inner.load_state_with_context(
-            &saved,
-            clap_host::StateContext::ForProject,
-        ).expect("load_state_with_context should succeed");
+        instance
+            .inner
+            .load_state_with_context(&saved, clap_host::StateContext::ForProject)
+            .expect("load_state_with_context should succeed");
     }
 
     #[test]
@@ -1472,15 +1578,16 @@ mod tests {
             ClapInstance::load(Path::new(CLAP_PLUGIN), 44100.0, 512).expect("Failed to load");
 
         // ForDuplicate context — used when duplicating a plugin instance
-        let saved = instance.inner.save_state_with_context(
-            clap_host::StateContext::ForDuplicate,
-        ).expect("save should succeed");
+        let saved = instance
+            .inner
+            .save_state_with_context(clap_host::StateContext::ForDuplicate)
+            .expect("save should succeed");
         assert!(!saved.is_empty());
 
-        instance.inner.load_state_with_context(
-            &saved,
-            clap_host::StateContext::ForDuplicate,
-        ).expect("load should succeed");
+        instance
+            .inner
+            .load_state_with_context(&saved, clap_host::StateContext::ForDuplicate)
+            .expect("load should succeed");
     }
 
     // Objective-C runtime FFI for NSView creation (macOS only).
@@ -1494,10 +1601,8 @@ mod tests {
     }
 
     #[cfg(target_os = "macos")]
-    type ObjcMsgSendFn = unsafe extern "C" fn(
-        *mut std::ffi::c_void,
-        *mut std::ffi::c_void,
-    ) -> *mut std::ffi::c_void;
+    type ObjcMsgSendFn =
+        unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> *mut std::ffi::c_void;
 
     #[cfg(target_os = "macos")]
     fn objc_send() -> ObjcMsgSendFn {
@@ -1509,13 +1614,11 @@ mod tests {
     fn ensure_nsapp() {
         use std::sync::Once;
         static INIT: Once = Once::new();
-        INIT.call_once(|| {
-            unsafe {
-                let send = objc_send();
-                let cls = objc_getClass(c"NSApplication".as_ptr());
-                let shared_sel = sel_registerName(c"sharedApplication".as_ptr());
-                send(cls, shared_sel);
-            }
+        INIT.call_once(|| unsafe {
+            let send = objc_send();
+            let cls = objc_getClass(c"NSApplication".as_ptr());
+            let shared_sel = sel_registerName(c"sharedApplication".as_ptr());
+            send(cls, shared_sel);
         });
     }
 

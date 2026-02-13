@@ -85,14 +85,13 @@ impl Vst2Instance {
                 Arc::clone(&time_info),
             )));
 
-            let mut loader =
-                PluginLoader::load(&resolved, Arc::clone(&host)).map_err(|e| {
-                    BridgeError::LoadFailed {
-                        path: path.to_path_buf(),
-                        stage: LoadStage::Opening,
-                        reason: format!("Failed to load VST: {:?}", e),
-                    }
-                })?;
+            let mut loader = PluginLoader::load(&resolved, Arc::clone(&host)).map_err(|e| {
+                BridgeError::LoadFailed {
+                    path: path.to_path_buf(),
+                    stage: LoadStage::Opening,
+                    reason: format!("Failed to load VST: {:?}", e),
+                }
+            })?;
 
             let mut instance = loader.instance().map_err(|e| BridgeError::LoadFailed {
                 path: path.to_path_buf(),
@@ -114,7 +113,7 @@ impl Vst2Instance {
             let metadata =
                 PluginMetadata::new(format!("vst2.{}", info.unique_id), info.name.clone())
                     .author(info.vendor.clone())
-                    .version(format!("{}", info.version))
+                    .version(info.version.to_string())
                     .audio_io(info.inputs as usize, info.outputs as usize)
                     .midi(info.midi_inputs > 0 || info.midi_outputs > 0)
                     .f64_support(info.f64_precision)
@@ -350,7 +349,7 @@ impl Vst2Instance {
         let alloc_size = needed.max(std::mem::size_of::<api::Events>());
 
         // Use a Vec<u64> for 8-byte alignment (api::Events requires isize alignment).
-        let u64_count = (alloc_size + 7) / 8;
+        let u64_count = alloc_size.div_ceil(8);
         let mut buf = vec![0u64; u64_count];
 
         unsafe {
@@ -395,7 +394,7 @@ impl Vst2Instance {
             ChannelVoiceMsg::ChannelPressure { pressure } => (0xD0 | channel_num, pressure, 0),
             ChannelVoiceMsg::PitchBend { bend } => {
                 // Clamp to valid 14-bit range (0..=16383)
-                let bend = (bend as u16).min(16383);
+                let bend = bend.min(16383);
                 let lsb = (bend & 0x7F) as u8;
                 let msb = ((bend >> 7) & 0x7F) as u8;
                 (0xE0 | channel_num, lsb, msb)
@@ -456,9 +455,7 @@ impl Vst2Instance {
 
     #[cfg(not(feature = "vst2"))]
     pub fn open_editor(&mut self, _parent: *mut std::ffi::c_void) -> Result<(u32, u32)> {
-        Err(BridgeError::EditorError(
-            "VST2 support not compiled".into(),
-        ))
+        Err(BridgeError::EditorError("VST2 support not compiled".into()))
     }
 
     #[cfg(feature = "vst2")]
@@ -569,7 +566,10 @@ impl Vst2Instance {
     }
 
     #[cfg(feature = "vst2")]
-    pub fn get_parameter_info(&mut self, param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
+    pub fn get_parameter_info(
+        &mut self,
+        param_id: u32,
+    ) -> Option<tutti_plugin::protocol::ParameterInfo> {
         let count = self.instance.get_info().parameters;
         let index = param_id as i32;
 
@@ -600,7 +600,10 @@ impl Vst2Instance {
     }
 
     #[cfg(not(feature = "vst2"))]
-    pub fn get_parameter_info(&mut self, _param_id: u32) -> Option<tutti_plugin::protocol::ParameterInfo> {
+    pub fn get_parameter_info(
+        &mut self,
+        _param_id: u32,
+    ) -> Option<tutti_plugin::protocol::ParameterInfo> {
         None
     }
 
@@ -659,9 +662,7 @@ impl Vst2Instance {
         if header == Self::STATE_HEADER_CHUNK {
             // Chunk-based restore
             if payload.is_empty() {
-                return Err(BridgeError::StateRestoreError(
-                    "Empty chunk data".into(),
-                ));
+                return Err(BridgeError::StateRestoreError("Empty chunk data".into()));
             }
             let params = &self.params;
             params.load_preset_data(payload);
@@ -676,9 +677,10 @@ impl Vst2Instance {
 
             let param_count = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
             if param_count < 0 {
-                return Err(BridgeError::StateRestoreError(
-                    format!("Invalid parameter count: {}", param_count),
-                ));
+                return Err(BridgeError::StateRestoreError(format!(
+                    "Invalid parameter count: {}",
+                    param_count
+                )));
             }
 
             let expected_payload = 4 + (param_count as usize) * 4;
@@ -1181,11 +1183,7 @@ mod tests {
         // Set to 0.0
         instance.set_parameter(0, 0.0);
         let value = instance.get_parameter(0);
-        assert!(
-            value.abs() < 0.01,
-            "Expected ~0.0 after set, got {}",
-            value
-        );
+        assert!(value.abs() < 0.01, "Expected ~0.0 after set, got {}", value);
 
         // Set to 1.0
         instance.set_parameter(0, 1.0);
@@ -1381,8 +1379,7 @@ mod tests {
             channel: Channel::Ch1,
             msg: ChannelVoiceMsg::ChannelPressure { pressure: 100 },
         };
-        let api =
-            Vst2Instance::midi_to_api_event(&event).expect("ChannelPressure should convert");
+        let api = Vst2Instance::midi_to_api_event(&event).expect("ChannelPressure should convert");
         assert_eq!(api.midi_data[0], 0xD0);
         assert_eq!(api.midi_data[1], 100);
         assert_eq!(api.midi_data[2], 0);
@@ -1553,8 +1550,7 @@ mod tests {
     fn test_vst2_has_editor() {
         let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
         let path = Path::new(VST2_PLUGIN);
-        let instance =
-            Vst2Instance::load(path, 44100.0, 512).expect("Failed to load VST2 plugin");
+        let instance = Vst2Instance::load(path, 44100.0, 512).expect("Failed to load VST2 plugin");
 
         // TAL-NoiseMaker has an editor
         assert!(
@@ -1618,22 +1614,21 @@ mod tests {
             Vst2Instance::load(path, 44100.0, 512).expect("Failed to load VST2 plugin");
 
         let name = instance.get_parameter_name(0);
-        assert!(
-            !name.is_empty(),
-            "Parameter 0 should have a non-empty name"
-        );
+        assert!(!name.is_empty(), "Parameter 0 should have a non-empty name");
 
         let text = instance.get_parameter_text(0);
         // Text may or may not be empty depending on plugin
-        assert!(text.len() < 256, "Parameter text should be reasonable length");
+        assert!(
+            text.len() < 256,
+            "Parameter text should be reasonable length"
+        );
     }
 
     #[test]
     fn test_vst2_trait_get_parameter() {
         let _lock = crate::test_utils::PLUGIN_LOAD_LOCK.lock().unwrap();
         let path = Path::new(VST2_PLUGIN);
-        let instance =
-            Vst2Instance::load(path, 44100.0, 512).expect("Failed to load VST2 plugin");
+        let instance = Vst2Instance::load(path, 44100.0, 512).expect("Failed to load VST2 plugin");
 
         // Test the PluginInstance trait's get_parameter (was returning 0.0 before fix)
         let value = PluginInstance::get_parameter(&instance, 0);

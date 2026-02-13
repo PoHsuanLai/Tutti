@@ -5,8 +5,8 @@
 
 #![allow(dead_code)] // Used by server module
 
-use tutti_plugin::Result;
 use tutti_plugin::protocol::{BridgeMessage, HostMessage};
+use tutti_plugin::Result;
 
 #[cfg(unix)]
 use tokio::{

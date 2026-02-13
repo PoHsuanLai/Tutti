@@ -86,7 +86,10 @@ mod tests {
         assert_eq!(LoadStage::Opening.to_string(), "opening library");
         assert_eq!(LoadStage::Factory.to_string(), "getting factory");
         assert_eq!(LoadStage::Instantiation.to_string(), "creating instance");
-        assert_eq!(LoadStage::Initialization.to_string(), "initializing processor");
+        assert_eq!(
+            LoadStage::Initialization.to_string(),
+            "initializing processor"
+        );
         assert_eq!(LoadStage::Setup.to_string(), "setting up audio");
         assert_eq!(LoadStage::Activation.to_string(), "activating");
     }
