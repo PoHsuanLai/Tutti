@@ -2,7 +2,7 @@
 
 use crate::butler::{
     BufferConfig, ButlerCommand, CacheStats, CaptureBuffer, CaptureBufferProducer, CaptureId,
-    FlushRequest, IOMetricsSnapshot, LruCache, PlayDirection, TransportBridge,
+    FlushRequest, IOMetricsSnapshot, LruCache, PlayDirection, TransportBridge, Varispeed,
 };
 use crate::error::Result;
 use crossbeam_channel::Sender;
@@ -223,6 +223,16 @@ impl SamplerSystem {
             channel_index,
             direction,
             speed: speed.abs(),
+        });
+        self
+    }
+
+    /// Set varispeed (direction + speed) for a stream.
+    pub fn set_varispeed(&self, channel_index: usize, varispeed: Varispeed) -> &Self {
+        let _ = self.butler_tx.send(ButlerCommand::SetVarispeed {
+            channel_index,
+            direction: varispeed.direction,
+            speed: varispeed.speed,
         });
         self
     }

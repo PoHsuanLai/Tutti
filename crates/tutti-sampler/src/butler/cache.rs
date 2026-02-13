@@ -83,16 +83,11 @@ impl LruCache {
     ///
     /// Returns true if an entry was evicted, false if cache is empty.
     fn evict_lru(&self) -> bool {
-        let mut oldest_path = None;
-        let mut oldest_time = u64::MAX;
-
-        for entry in self.cache.iter() {
-            let time = entry.value().last_access.load(Ordering::Relaxed);
-            if time < oldest_time {
-                oldest_time = time;
-                oldest_path = Some(entry.key().clone());
-            }
-        }
+        let oldest_path = self
+            .cache
+            .iter()
+            .min_by_key(|entry| entry.value().last_access.load(Ordering::Relaxed))
+            .map(|entry| entry.key().clone());
 
         if let Some(path) = oldest_path {
             if let Some((_, entry)) = self.cache.remove(&path) {

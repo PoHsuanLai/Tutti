@@ -372,7 +372,7 @@ pub(super) fn refill_forward(
         let start = start as usize;
         let end = end as usize;
         let len = end.saturating_sub(start);
-        if len > 0 { Some((start, end, len)) } else { None }
+        (len > 0).then_some((start, end, len))
     });
 
     let mut pos = file_position;
@@ -389,11 +389,7 @@ pub(super) fn refill_forward(
             (0.0, 0.0)
         } else {
             let left = wave.at(0, pos);
-            let right = if channels > 1 {
-                wave.at(1, pos)
-            } else {
-                left
-            };
+            let right = if channels > 1 { wave.at(1, pos) } else { left };
             (left, right)
         };
 
@@ -533,7 +529,10 @@ mod tests {
         let normal = calculate_varifill_chunk(0.5, base, 10_000_000.0, 1.0);
         let slow = calculate_varifill_chunk(0.5, base, 10_000_000.0, 0.5);
 
-        assert_eq!(slow, normal, "Slow speed should not decrease chunk below normal");
+        assert_eq!(
+            slow, normal,
+            "Slow speed should not decrease chunk below normal"
+        );
     }
 
     #[test]
@@ -544,7 +543,10 @@ mod tests {
         let fast_disk = calculate_varifill_chunk(0.5, base, 40_000_000.0, 1.0); // 4x bandwidth
 
         // bandwidth_factor = sqrt(4) = 2.0
-        assert!(fast_disk > normal, "Higher bandwidth should allow larger chunks");
+        assert!(
+            fast_disk > normal,
+            "Higher bandwidth should allow larger chunks"
+        );
     }
 
     #[test]
@@ -555,7 +557,10 @@ mod tests {
         let slow_disk = calculate_varifill_chunk(0.5, base, 2_500_000.0, 1.0); // 0.25x bandwidth
 
         // bandwidth_factor = sqrt(0.25) = 0.5
-        assert!(slow_disk < normal, "Lower bandwidth should use smaller chunks");
+        assert!(
+            slow_disk < normal,
+            "Lower bandwidth should use smaller chunks"
+        );
     }
 
     #[test]

@@ -16,13 +16,12 @@ mod thread;
 mod transport;
 mod varispeed;
 
-pub use cache::{CacheStats, LruCache};
-pub use config::BufferConfig;
-pub use metrics::{IOMetrics, IOMetricsSnapshot};
-pub use prefetch::{CaptureBufferProducer, RegionBufferConsumer};
-pub use request::CaptureId;
-pub use shared_state::SharedStreamState;
-pub use stream_state::ChannelStreamState;
+pub(crate) use cache::{CacheStats, LruCache};
+pub(crate) use config::BufferConfig;
+pub(crate) use metrics::IOMetricsSnapshot;
+pub(crate) use prefetch::{CaptureBufferProducer, RegionBufferConsumer};
+pub(crate) use request::CaptureId;
+pub(crate) use shared_state::SharedStreamState;
 pub use varispeed::{PlayDirection, Varispeed};
 
 pub(crate) use transport::TransportBridge;

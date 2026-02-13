@@ -107,6 +107,115 @@ impl SamplerHandle {
     }
 
     // =========================================================================
+    // Recording operations
+    // =========================================================================
+
+    /// Start recording on a channel.
+    ///
+    /// No-op (returns error) when sampler is disabled.
+    pub fn start_recording(
+        &self,
+        channel_index: usize,
+        source: crate::RecordingSource,
+        mode: crate::RecordingMode,
+        current_beat: f64,
+    ) -> crate::error::Result<()> {
+        let sampler = self.sampler.as_ref().ok_or_else(|| {
+            crate::error::Error::Recording("Sampler subsystem is disabled".to_string())
+        })?;
+        sampler
+            .recording()
+            .start_recording(channel_index, source, mode, current_beat)
+    }
+
+    /// Stop recording on a channel, returning the recorded data.
+    ///
+    /// Returns error when sampler is disabled.
+    pub fn stop_recording(
+        &self,
+        channel_index: usize,
+    ) -> crate::error::Result<crate::RecordedData> {
+        let sampler = self.sampler.as_ref().ok_or_else(|| {
+            crate::error::Error::Recording("Sampler subsystem is disabled".to_string())
+        })?;
+        sampler.recording().stop_recording(channel_index)
+    }
+
+    /// Check if a channel is actively recording.
+    ///
+    /// Returns false when sampler is disabled.
+    pub fn is_channel_recording(&self, channel_index: usize) -> bool {
+        self.sampler
+            .as_ref()
+            .map(|s| s.recording().is_recording(channel_index))
+            .unwrap_or(false)
+    }
+
+    /// Check if any channel has an active recording session.
+    ///
+    /// Returns false when sampler is disabled.
+    pub fn has_active_recording(&self) -> bool {
+        self.sampler
+            .as_ref()
+            .map(|s| s.recording().has_active_recording())
+            .unwrap_or(false)
+    }
+
+    // =========================================================================
+    // Audio input operations
+    // =========================================================================
+
+    /// List available audio input devices.
+    ///
+    /// Returns empty vec when sampler is disabled.
+    pub fn list_input_devices(&self) -> Vec<crate::audio_input::InputDeviceInfo> {
+        self.sampler
+            .as_ref()
+            .map(|s| s.audio_input().list_input_devices())
+            .unwrap_or_default()
+    }
+
+    /// Select an audio input device by index.
+    ///
+    /// Returns error when sampler is disabled.
+    pub fn select_input_device(&self, device_index: usize) -> crate::error::Result<()> {
+        let sampler = self.sampler.as_ref().ok_or_else(|| {
+            crate::error::Error::Recording("Sampler subsystem is disabled".to_string())
+        })?;
+        sampler.audio_input().select_device(device_index)
+    }
+
+    /// Set audio input gain (0.0 to 2.0).
+    ///
+    /// No-op when sampler is disabled.
+    pub fn set_input_gain(&self, gain: f32) -> &Self {
+        if let Some(ref sampler) = self.sampler {
+            sampler.audio_input().set_gain(gain);
+        }
+        self
+    }
+
+    /// Enable/disable input monitoring.
+    ///
+    /// No-op when sampler is disabled.
+    pub fn set_input_monitoring(&self, enabled: bool) -> &Self {
+        if let Some(ref sampler) = self.sampler {
+            sampler.audio_input().set_monitoring(enabled);
+        }
+        self
+    }
+
+    /// Get audio input peak level (for metering).
+    ///
+    /// Returns 0.0 when sampler is disabled.
+    pub fn input_peak_level(&self) -> f32 {
+        self.sampler
+            .as_ref()
+            .map(|s| s.audio_input().peak_level())
+            .unwrap_or(0.0)
+    }
+
+    // =========================================================================
     // Convenience methods (delegate to SamplerSystem)
     // =========================================================================
 

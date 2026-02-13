@@ -168,7 +168,7 @@ impl IOMetrics {
 }
 
 /// Snapshot of I/O metrics at a point in time.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct IOMetricsSnapshot {
     /// Bytes read from disk
     pub bytes_read: u64,
@@ -186,21 +186,6 @@ pub struct IOMetricsSnapshot {
     pub low_buffer_events: u64,
     /// Recent read throughput (bytes/second)
     pub read_rate: f64,
-}
-
-impl Default for IOMetricsSnapshot {
-    fn default() -> Self {
-        Self {
-            bytes_read: 0,
-            bytes_written: 0,
-            read_ops: 0,
-            write_ops: 0,
-            cache_hits: 0,
-            cache_misses: 0,
-            low_buffer_events: 0,
-            read_rate: 0.0,
-        }
-    }
 }
 
 impl IOMetricsSnapshot {

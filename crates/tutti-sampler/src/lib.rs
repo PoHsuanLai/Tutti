@@ -49,13 +49,19 @@ pub use time_stretch::{
     FftSize, GrainSize, TimeStretchAlgorithm, TimeStretchParams, TimeStretchUnit,
 };
 
-pub use butler::{
-    BufferConfig, CacheStats, CaptureBufferProducer, CaptureId, ChannelStreamState, IOMetrics,
-    IOMetricsSnapshot, LruCache, PlayDirection, RegionBufferConsumer, SharedStreamState, Varispeed,
+pub use import::{ImportHandle, ImportStatus};
+
+pub use butler::{PlayDirection, Varispeed};
+
+pub use recording::{
+    PunchEvent, QuantizeSettings, QuantizeSettingsBuilder, RecordedData, RecordingBuffer,
+    RecordingConfig, RecordingConfigBuilder, RecordingMode, RecordingSession, RecordingSource,
+    RecordingState, XRunEvent, XRunType,
 };
 
 mod audio_input;
 pub(crate) mod butler;
+pub mod import;
 pub(crate) mod recording;
 mod sampler;
 mod time_stretch;

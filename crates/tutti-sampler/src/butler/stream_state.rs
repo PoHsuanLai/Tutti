@@ -134,11 +134,6 @@ impl ChannelStreamState {
         self.loop_range
     }
 
-    /// Get cached read position for lock-free position queries.
-    pub fn cached_read_position(&self) -> Option<&Arc<AtomicU64>> {
-        self.cached_read_position.as_ref()
-    }
-
     /// Get configured crossfade length in samples.
     pub fn loop_crossfade_samples(&self) -> usize {
         self.loop_crossfade_samples
@@ -154,11 +149,6 @@ impl ChannelStreamState {
     /// Returns None if not prepared or loop not set.
     pub fn preloop_buffer(&self) -> Option<&[(f32, f32)]> {
         self.preloop_buffer.as_deref()
-    }
-
-    /// Check if pre-loop buffer is ready for crossfade.
-    pub fn has_preloop_buffer(&self) -> bool {
-        self.preloop_buffer.is_some()
     }
 
     /// Lock-free: check loop status based on read position.
@@ -288,27 +278,27 @@ mod tests {
     fn test_preloop_buffer() {
         let mut state = ChannelStreamState::default();
 
-        assert!(!state.has_preloop_buffer());
+        assert!(!state.preloop_buffer().is_some());
         assert!(state.preloop_buffer().is_none());
 
         let samples = vec![(0.5, 0.5), (0.6, 0.6), (0.7, 0.7)];
         state.set_preloop_buffer(samples.clone());
 
-        assert!(state.has_preloop_buffer());
+        assert!(state.preloop_buffer().is_some());
         assert_eq!(state.preloop_buffer(), Some(samples.as_slice()));
 
         state.set_loop_range(100, 500, 64);
         state.clear_loop_range();
-        assert!(!state.has_preloop_buffer());
+        assert!(!state.preloop_buffer().is_some());
     }
 
     #[test]
     fn test_preloop_buffer_reset_on_stop() {
         let mut state = ChannelStreamState::default();
         state.set_preloop_buffer(vec![(0.5, 0.5)]);
-        assert!(state.has_preloop_buffer());
+        assert!(state.preloop_buffer().is_some());
 
         state.stop_streaming();
-        assert!(!state.has_preloop_buffer());
+        assert!(!state.preloop_buffer().is_some());
     }
 }

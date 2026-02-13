@@ -70,23 +70,23 @@ pub(super) fn check_and_handle_loops(
                         // Get samples from loop start to pre-fill the buffer
                         // This prevents underruns while the butler refills asynchronously
                         let file_path = producers[idx].file_path();
-                        let prefill_samples =
-                            if let Some(wave) = get_wave_from_cache(sample_cache, metrics, file_path)
-                            {
-                                // Capture the ENTIRE loop region to prevent underruns
-                                // This ensures the audio thread always has valid content
-                                let loop_end = stream_state
-                                    .loop_range()
-                                    .map(|(_, end)| end as usize)
-                                    .unwrap_or(wave.len());
-                                let loop_len = loop_end - loop_start as usize;
-                                // Fill buffer with at least one full loop iteration
-                                // Limited by ring buffer capacity
-                                let prefill_len = loop_len.min(producers[idx].write_space());
-                                capture_samples(&wave, loop_start as usize, prefill_len)
-                            } else {
-                                Vec::new()
-                            };
+                        let prefill_samples = if let Some(wave) =
+                            get_wave_from_cache(sample_cache, metrics, file_path)
+                        {
+                            // Capture the ENTIRE loop region to prevent underruns
+                            // This ensures the audio thread always has valid content
+                            let loop_end = stream_state
+                                .loop_range()
+                                .map(|(_, end)| end as usize)
+                                .unwrap_or(wave.len());
+                            let loop_len = loop_end - loop_start as usize;
+                            // Fill buffer with at least one full loop iteration
+                            // Limited by ring buffer capacity
+                            let prefill_len = loop_len.min(producers[idx].write_space());
+                            capture_samples(&wave, loop_start as usize, prefill_len)
+                        } else {
+                            Vec::new()
+                        };
 
                         // Flush old content and seek to loop start
                         stream_state.flush_buffer();
@@ -96,8 +96,7 @@ pub(super) fn check_and_handle_loops(
                         if !prefill_samples.is_empty() {
                             let written = producers[idx].write(&prefill_samples);
                             // Advance file position to account for pre-filled samples
-                            producers[idx]
-                                .set_file_position(loop_start + written as u64);
+                            producers[idx].set_file_position(loop_start + written as u64);
                         }
                     }
                 }

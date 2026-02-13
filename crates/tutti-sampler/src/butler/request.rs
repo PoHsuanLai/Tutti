@@ -298,7 +298,10 @@ mod tests {
     fn test_butler_command_debug_simple_variants() {
         assert_eq!(format!("{:?}", ButlerCommand::Run), "Run");
         assert_eq!(format!("{:?}", ButlerCommand::Pause), "Pause");
-        assert_eq!(format!("{:?}", ButlerCommand::WaitForCompletion), "WaitForCompletion");
+        assert_eq!(
+            format!("{:?}", ButlerCommand::WaitForCompletion),
+            "WaitForCompletion"
+        );
         assert_eq!(format!("{:?}", ButlerCommand::FlushAll), "FlushAll");
         assert_eq!(format!("{:?}", ButlerCommand::Shutdown), "Shutdown");
     }

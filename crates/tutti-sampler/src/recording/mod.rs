@@ -12,9 +12,14 @@ mod automation_lane;
 pub(crate) mod automation_manager;
 mod automation_target;
 
-pub(crate) use config::{RecordingConfig, RecordingMode, RecordingSource};
-pub(crate) use events::RecordingBuffer;
-pub(crate) use session::{PunchEvent, RecordedData, RecordingSession, RecordingState, XRunEvent};
+pub use config::{
+    QuantizeSettings, QuantizeSettingsBuilder, RecordingConfig, RecordingConfigBuilder,
+    RecordingMode, RecordingSource,
+};
+pub use events::RecordingBuffer;
+pub use session::{
+    PunchEvent, RecordedData, RecordingSession, RecordingState, XRunEvent, XRunType,
+};
 
 pub(crate) use automation_lane::{AutomationLane, AutomationRecordingConfig};
 pub(crate) use automation_target::AutomationTarget;

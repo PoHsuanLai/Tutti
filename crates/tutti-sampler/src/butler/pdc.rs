@@ -41,7 +41,7 @@ pub(super) fn check_pdc_updates(
 
         let current_preroll = stream_state.pdc_preroll();
         let new_preroll = snapshot
-            .channel_compensations
+            .channel_compensations()
             .get(channel_index)
             .copied()
             .unwrap_or(0) as u64;

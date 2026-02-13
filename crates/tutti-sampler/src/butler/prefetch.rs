@@ -353,7 +353,9 @@ mod tests {
             RegionBuffer::with_capacity(region_id, PathBuf::from("test.wav"), capacity);
 
         // Fill buffer with "section A" data (values 0.0 - 0.99)
-        let section_a: Vec<_> = (0..50).map(|i| (i as f32 / 100.0, i as f32 / 100.0)).collect();
+        let section_a: Vec<_> = (0..50)
+            .map(|i| (i as f32 / 100.0, i as f32 / 100.0))
+            .collect();
         let written = prod.write(&section_a);
         assert_eq!(written, 50);
 
@@ -373,7 +375,9 @@ mod tests {
         );
 
         // Write "section B" data (values 1.0 - 1.49)
-        let section_b: Vec<_> = (0..50).map(|i| (1.0 + i as f32 / 100.0, 1.0 + i as f32 / 100.0)).collect();
+        let section_b: Vec<_> = (0..50)
+            .map(|i| (1.0 + i as f32 / 100.0, 1.0 + i as f32 / 100.0))
+            .collect();
         let written_b = prod.write(&section_b);
         assert!(written_b > 0, "Should be able to write after clear");
 
@@ -396,10 +400,12 @@ mod tests {
             RegionBuffer::with_capacity(region_id, PathBuf::from("test.wav"), capacity);
 
         // Fill buffer completely with "220Hz-like" data (low values)
-        let low_freq: Vec<_> = (0..4096).map(|i| {
-            let phase = (i as f32 * 0.03).sin(); // ~220Hz pattern
-            (phase, phase)
-        }).collect();
+        let low_freq: Vec<_> = (0..4096)
+            .map(|i| {
+                let phase = (i as f32 * 0.03).sin(); // ~220Hz pattern
+                (phase, phase)
+            })
+            .collect();
         let written_low = prod.write(&low_freq);
         eprintln!("Wrote {} low-freq samples", written_low);
 
@@ -426,10 +432,12 @@ mod tests {
         );
 
         // Refill with "880Hz-like" data (high values)
-        let high_freq: Vec<_> = (0..write_space_after).map(|i| {
-            let phase = (i as f32 * 0.125).sin(); // ~880Hz pattern
-            (phase, phase)
-        }).collect();
+        let high_freq: Vec<_> = (0..write_space_after)
+            .map(|i| {
+                let phase = (i as f32 * 0.125).sin(); // ~880Hz pattern
+                (phase, phase)
+            })
+            .collect();
         let written_high = prod.write(&high_freq);
         eprintln!("Wrote {} high-freq samples after clear", written_high);
 

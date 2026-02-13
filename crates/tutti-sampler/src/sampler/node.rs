@@ -5,7 +5,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, Wave};
+use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame, TransportReader, Wave};
 
 use crate::butler::LoopCrossfade;
 
@@ -37,6 +37,17 @@ pub struct SamplerUnit {
 
     /// Crossfade for smooth loop transitions.
     crossfade: Option<LoopCrossfade>,
+
+    /// Optional transport for beat-synced playback.
+    /// When set, sampler only plays when transport is rolling
+    /// and uses beat position to compute sample offset.
+    transport: Option<Arc<dyn TransportReader>>,
+
+    /// Start position in beats on the timeline.
+    start_beat: f64,
+
+    /// Duration in beats (0.0 = play entire sample).
+    duration_beats: f64,
 }
 
 impl Clone for SamplerUnit {
@@ -52,6 +63,9 @@ impl Clone for SamplerUnit {
             src_ratio: self.src_ratio,
             loop_range: self.loop_range,
             crossfade: self.crossfade.clone(),
+            transport: self.transport.clone(),
+            start_beat: self.start_beat,
+            duration_beats: self.duration_beats,
         }
     }
 }
@@ -63,7 +77,7 @@ impl SamplerUnit {
         Self {
             wave,
             position: AtomicU64::new(0),
-            playing: AtomicBool::new(true), // Auto-play by default
+            playing: AtomicBool::new(true),
             looping: AtomicBool::new(false),
             gain: 1.0,
             speed: 1.0,
@@ -71,6 +85,9 @@ impl SamplerUnit {
             src_ratio: 1.0,
             loop_range: None,
             crossfade: None,
+            transport: None,
+            start_beat: 0.0,
+            duration_beats: 0.0,
         }
     }
 
@@ -80,7 +97,7 @@ impl SamplerUnit {
         Self {
             wave,
             position: AtomicU64::new(0),
-            playing: AtomicBool::new(true), // Auto-play by default
+            playing: AtomicBool::new(true),
             looping: AtomicBool::new(looping),
             gain,
             speed,
@@ -88,7 +105,58 @@ impl SamplerUnit {
             src_ratio: 1.0,
             loop_range: None,
             crossfade: None,
+            transport: None,
+            start_beat: 0.0,
+            duration_beats: 0.0,
         }
+    }
+
+    /// Create a transport-aware sampler.
+    pub fn with_transport(
+        wave: Arc<Wave>,
+        transport: Arc<dyn TransportReader>,
+        start_beat: f64,
+        duration_beats: f64,
+    ) -> Self {
+        let sample_rate = wave.sample_rate() as f32;
+        Self {
+            wave,
+            position: AtomicU64::new(0),
+            playing: AtomicBool::new(true),
+            looping: AtomicBool::new(false),
+            gain: 1.0,
+            speed: 1.0,
+            sample_rate,
+            src_ratio: 1.0,
+            loop_range: None,
+            crossfade: None,
+            transport: Some(transport),
+            start_beat,
+            duration_beats,
+        }
+    }
+
+    /// Set transport for beat-synced playback.
+    pub fn set_transport(
+        &mut self,
+        transport: Arc<dyn TransportReader>,
+        start_beat: f64,
+        duration_beats: f64,
+    ) {
+        self.transport = Some(transport);
+        self.start_beat = start_beat;
+        self.duration_beats = duration_beats;
+    }
+
+    /// Replace transport (used by export to swap live transport for export timeline).
+    /// Replace the transport reader (used by export to inject export timeline).
+    pub fn replace_transport(&mut self, transport: Arc<dyn TransportReader>) {
+        self.transport = Some(transport);
+    }
+
+    /// Check if this sampler has a transport (i.e., is timeline-aware).
+    pub fn has_transport(&self) -> bool {
+        self.transport.is_some()
     }
 
     /// Trigger playback from start.
@@ -128,6 +196,16 @@ impl SamplerUnit {
         self.position.load(Ordering::Relaxed)
     }
 
+    /// Get the timeline start position in beats.
+    pub fn start_beat(&self) -> f64 {
+        self.start_beat
+    }
+
+    /// Get the clip duration in beats (0.0 means play entire sample).
+    pub fn duration_beats(&self) -> f64 {
+        self.duration_beats
+    }
+
     /// Get duration in samples.
     pub fn duration_samples(&self) -> usize {
         self.wave.len()
@@ -138,8 +216,17 @@ impl SamplerUnit {
         self.wave.duration()
     }
 
+    /// Set gain.
+    pub fn set_gain(&mut self, gain: f32) {
+        self.gain = gain;
+    }
+
+    /// Get current gain.
+    pub fn gain(&self) -> f32 {
+        self.gain
+    }
+
     /// Set session sample rate for automatic SRC.
-    /// Calculates src_ratio from the wave's sample rate vs session rate.
     pub fn set_session_sample_rate(&mut self, session_rate: f64) {
         let file_rate = self.wave.sample_rate();
         self.src_ratio = if (file_rate - session_rate).abs() < 0.01 {
@@ -150,9 +237,6 @@ impl SamplerUnit {
     }
 
     /// Set loop range in samples with optional crossfade.
-    ///
-    /// When crossfade_samples > 0, samples from loop_start are captured
-    /// and blended with samples at loop_end for smooth transitions.
     pub fn set_loop_range(&mut self, loop_start: u64, loop_end: u64, crossfade_samples: usize) {
         self.loop_range = Some((loop_start, loop_end));
         self.looping.store(true, Ordering::Relaxed);
@@ -160,12 +244,9 @@ impl SamplerUnit {
         if crossfade_samples > 0 {
             let mut xfade = LoopCrossfade::new(crossfade_samples);
 
-            // Capture samples from loop start for crossfading
-            let mut preloop_samples = Vec::with_capacity(crossfade_samples);
-            for i in 0..crossfade_samples {
-                let pos = loop_start as f64 + i as f64;
-                preloop_samples.push(self.get_sample_raw(pos));
-            }
+            let preloop_samples: Vec<_> = (0..crossfade_samples)
+                .map(|i| self.get_sample_raw(loop_start as f64 + i as f64))
+                .collect();
             xfade.fill_preloop(&preloop_samples);
 
             self.crossfade = Some(xfade);
@@ -185,7 +266,6 @@ impl SamplerUnit {
         self.loop_range
     }
 
-    /// Get sample without gain applied (for crossfade buffer capture).
     #[inline]
     fn get_sample_raw(&self, position: f64) -> (f32, f32) {
         let len = self.wave.len() as f64;
@@ -219,33 +299,30 @@ impl SamplerUnit {
 
     #[inline]
     fn get_sample(&self, position: f64) -> (f32, f32) {
-        let len = self.wave.len() as f64;
-        if position >= len {
-            return (0.0, 0.0);
+        let (l, r) = self.get_sample_raw(position);
+        (l * self.gain, r * self.gain)
+    }
+
+    #[inline]
+    fn transport_sample_position(&self) -> Option<f64> {
+        let transport = self.transport.as_ref()?;
+        if !transport.is_playing() {
+            return None;
         }
-
-        let idx = position.floor() as usize;
-        let frac = position.fract() as f32;
-
-        let (l0, r0) = if self.wave.channels() >= 2 {
-            (self.wave.at(0, idx), self.wave.at(1, idx))
-        } else {
-            let mono = self.wave.at(0, idx);
-            (mono, mono)
-        };
-
-        let next_idx = (idx + 1).min(self.wave.len().saturating_sub(1));
-        let (l1, r1) = if self.wave.channels() >= 2 {
-            (self.wave.at(0, next_idx), self.wave.at(1, next_idx))
-        } else {
-            let mono = self.wave.at(0, next_idx);
-            (mono, mono)
-        };
-
-        let left = l0 + (l1 - l0) * frac;
-        let right = r0 + (r1 - r0) * frac;
-
-        (left * self.gain, right * self.gain)
+        let current_beat = transport.current_beat();
+        let beat_offset = current_beat - self.start_beat;
+        if beat_offset < 0.0 {
+            return None;
+        }
+        if self.duration_beats > 0.0 && beat_offset >= self.duration_beats {
+            return None;
+        }
+        let tempo = transport.tempo() as f64;
+        if tempo <= 0.0 {
+            return None;
+        }
+        let seconds_offset = beat_offset * 60.0 / tempo;
+        Some(seconds_offset * self.wave.sample_rate())
     }
 }
 
@@ -265,9 +342,29 @@ impl AudioUnit for SamplerUnit {
 
     fn set_sample_rate(&mut self, sample_rate: f64) {
         self.sample_rate = sample_rate as f32;
+        self.set_session_sample_rate(sample_rate);
     }
 
     fn tick(&mut self, _input: &[f32], output: &mut [f32]) {
+        // Transport-aware path: position derived from beat
+        if self.transport.is_some() {
+            if output.len() >= 2 {
+                match self.transport_sample_position() {
+                    None => {
+                        output[0] = 0.0;
+                        output[1] = 0.0;
+                    }
+                    Some(pos) => {
+                        let (left, right) = self.get_sample(pos);
+                        output[0] = left;
+                        output[1] = right;
+                    }
+                }
+            }
+            return;
+        }
+
+        // Self-advancing path (no transport)
         if !self.playing.load(Ordering::Relaxed) {
             if output.len() >= 2 {
                 output[0] = 0.0;
@@ -324,6 +421,29 @@ impl AudioUnit for SamplerUnit {
     }
 
     fn process(&mut self, size: usize, _input: &BufferRef, output: &mut BufferMut) {
+        // Transport-aware path: compute position at block start, advance per-sample
+        if self.transport.is_some() {
+            match self.transport_sample_position() {
+                None => {
+                    for i in 0..size {
+                        output.set_f32(0, i, 0.0);
+                        output.set_f32(1, i, 0.0);
+                    }
+                }
+                Some(start_pos) => {
+                    let advance = (self.speed * self.src_ratio) as f64;
+                    for i in 0..size {
+                        let pos = start_pos + i as f64 * advance;
+                        let (left, right) = self.get_sample(pos);
+                        output.set_f32(0, i, left);
+                        output.set_f32(1, i, right);
+                    }
+                }
+            }
+            return;
+        }
+
+        // Self-advancing path (no transport)
         if !self.playing.load(Ordering::Relaxed) {
             for i in 0..size {
                 output.set_f32(0, i, 0.0);

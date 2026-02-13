@@ -39,11 +39,6 @@ impl Default for Varispeed {
 }
 
 impl Varispeed {
-    /// Create forward playback at normal speed.
-    pub fn forward() -> Self {
-        Self::default()
-    }
-
     /// Create reverse playback at normal speed.
     pub fn reverse() -> Self {
         Self {
@@ -52,34 +47,17 @@ impl Varispeed {
         }
     }
 
-    /// Create with custom speed (positive = forward, negative = reverse).
-    pub fn with_speed(speed: f32) -> Self {
-        if speed < 0.0 {
-            Self {
-                direction: PlayDirection::Reverse,
-                speed: speed.abs(),
-            }
-        } else {
-            Self {
-                direction: PlayDirection::Forward,
-                speed,
-            }
-        }
-    }
-
-    /// Check if playing forward.
     pub fn is_forward(&self) -> bool {
         self.direction.is_forward()
     }
 
-    /// Check if playing in reverse.
     pub fn is_reverse(&self) -> bool {
         self.direction.is_reverse()
     }
 
     /// Get effective speed (always positive).
     pub fn effective_speed(&self) -> f32 {
-        self.speed.abs().max(0.01) // minimum speed to prevent division by zero
+        self.speed.abs().max(0.01)
     }
 
     /// Get signed speed (negative for reverse).
@@ -113,23 +91,11 @@ mod tests {
     }
 
     #[test]
-    fn test_with_speed_positive() {
-        let v = Varispeed::with_speed(2.0);
-        assert!(v.is_forward());
-        assert_eq!(v.speed, 2.0);
-    }
-
-    #[test]
-    fn test_with_speed_negative() {
-        let v = Varispeed::with_speed(-1.5);
-        assert!(v.is_reverse());
-        assert_eq!(v.speed, 1.5);
-        assert_eq!(v.signed_speed(), -1.5);
-    }
-
-    #[test]
     fn test_effective_speed_minimum() {
-        let v = Varispeed::with_speed(0.0);
+        let v = Varispeed {
+            speed: 0.0,
+            ..Default::default()
+        };
         assert!(v.effective_speed() >= 0.01);
     }
 }

@@ -349,7 +349,15 @@ mod tests {
         bridge.stop();
 
         // Should have sent SeekStream for channel 0
-        let has_seek = cmds.iter().any(|c| matches!(c, ButlerCommand::SeekStream { channel_index: 0, .. }));
+        let has_seek = cmds.iter().any(|c| {
+            matches!(
+                c,
+                ButlerCommand::SeekStream {
+                    channel_index: 0,
+                    ..
+                }
+            )
+        });
         assert!(has_seek, "Expected SeekStream command, got: {:?}", cmds);
     }
 
@@ -374,7 +382,15 @@ mod tests {
         bridge.stop();
 
         // Should have sent SetLoopRange for channel 0
-        let has_loop = cmds.iter().any(|c| matches!(c, ButlerCommand::SetLoopRange { channel_index: 0, .. }));
+        let has_loop = cmds.iter().any(|c| {
+            matches!(
+                c,
+                ButlerCommand::SetLoopRange {
+                    channel_index: 0,
+                    ..
+                }
+            )
+        });
         assert!(has_loop, "Expected SetLoopRange command, got: {:?}", cmds);
     }
 
@@ -400,8 +416,14 @@ mod tests {
         bridge.stop();
 
         // Should have sent ClearLoopRange for channel 0
-        let has_clear = cmds.iter().any(|c| matches!(c, ButlerCommand::ClearLoopRange { channel_index: 0 }));
-        assert!(has_clear, "Expected ClearLoopRange command, got: {:?}", cmds);
+        let has_clear = cmds
+            .iter()
+            .any(|c| matches!(c, ButlerCommand::ClearLoopRange { channel_index: 0 }));
+        assert!(
+            has_clear,
+            "Expected ClearLoopRange command, got: {:?}",
+            cmds
+        );
     }
 
     #[test]
@@ -462,8 +484,14 @@ mod tests {
         bridge.stop();
 
         // Should have multiple Run and Pause commands
-        let run_count = cmds.iter().filter(|c| matches!(c, ButlerCommand::Run)).count();
-        let pause_count = cmds.iter().filter(|c| matches!(c, ButlerCommand::Pause)).count();
+        let run_count = cmds
+            .iter()
+            .filter(|c| matches!(c, ButlerCommand::Run))
+            .count();
+        let pause_count = cmds
+            .iter()
+            .filter(|c| matches!(c, ButlerCommand::Pause))
+            .count();
 
         // Should have captured at least some of the state changes
         assert!(run_count > 0, "Should have some Run commands");
