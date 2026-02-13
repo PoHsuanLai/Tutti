@@ -11,7 +11,7 @@
 //!     .unison(3, 15.0)
 //!     .build()?;
 //!
-//! let synth_id = engine.graph(|net| net.add(synth).master());
+//! let synth_id = engine.graph_mut(|net| net.add(synth).master());
 //! engine.note_on(synth_id, Note::C4, 100);
 //! ```
 
@@ -24,9 +24,9 @@ pub(crate) use voice::{
 };
 
 mod unison;
-pub(crate) use unison::{UnisonConfig, UnisonVoiceParams};
 #[cfg(feature = "midi")]
 pub(crate) use unison::UnisonEngine;
+pub(crate) use unison::{UnisonConfig, UnisonVoiceParams};
 
 mod portamento;
 pub(crate) use portamento::{Portamento, PortamentoConfig, PortamentoCurve, PortamentoMode};
@@ -37,7 +37,9 @@ pub(crate) use tuning::Tuning;
 #[cfg(feature = "soundfont")]
 mod soundfont;
 #[cfg(feature = "soundfont")]
-pub use soundfont::{SoundFontHandle, SoundFontSystem, SoundFontUnit};
+pub use soundfont::{
+    SoundFont, SoundFontHandle, SoundFontSystem, SoundFontUnit, SynthesizerSettings,
+};
 
 mod builder;
 #[cfg(feature = "midi")]

@@ -31,7 +31,7 @@ pub(crate) enum VoiceState {
     Stolen,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct VoiceSlot {
     pub voice_id: VoiceId,
     pub note: u8,
@@ -43,23 +43,6 @@ pub(crate) struct VoiceSlot {
     pub key_held: bool,
     pub sustained: bool,
     pub sostenuto_held: bool,
-}
-
-impl Default for VoiceSlot {
-    fn default() -> Self {
-        Self {
-            voice_id: 0,
-            note: 0,
-            channel: 0,
-            velocity: 0.0,
-            envelope_level: 0.0,
-            start_time: 0,
-            state: VoiceState::Idle,
-            key_held: false,
-            sustained: false,
-            sostenuto_held: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -211,10 +194,7 @@ impl VoiceAllocator {
             for slot in &mut self.slots {
                 if slot.channel == channel && slot.sustained {
                     slot.sustained = false;
-                    if slot.state == VoiceState::Active
-                        && !slot.sostenuto_held
-                        && !slot.key_held
-                    {
+                    if slot.state == VoiceState::Active && !slot.sostenuto_held && !slot.key_held {
                         slot.state = VoiceState::Releasing;
                         self.note_to_slot[slot.note as usize] = None;
                     }
@@ -481,10 +461,7 @@ mod tests {
 
         // Third note should steal the oldest (note 60)
         let result = alloc.allocate(67, 0, 0.9);
-        assert!(matches!(
-            result,
-            AllocationResult::Stolen { slot_index: 0 }
-        ));
+        assert!(matches!(result, AllocationResult::Stolen { slot_index: 0 }));
     }
 
     #[test]
@@ -716,9 +693,16 @@ mod tests {
 
         // New note played AFTER sostenuto down should NOT be held
         alloc.allocate(64, 0, 0.7);
-        assert!(!alloc.slots[1].sostenuto_held, "New notes should not be sostenuto-held");
+        assert!(
+            !alloc.slots[1].sostenuto_held,
+            "New notes should not be sostenuto-held"
+        );
         alloc.release(64, 0);
-        assert_eq!(alloc.slots[1].state, VoiceState::Releasing, "New note should release normally");
+        assert_eq!(
+            alloc.slots[1].state,
+            VoiceState::Releasing,
+            "New note should release normally"
+        );
 
         // Original note still held
         assert_eq!(alloc.slots[0].state, VoiceState::Active);

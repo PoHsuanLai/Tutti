@@ -7,6 +7,28 @@ use crate::{
 use tutti_core::midi::MidiRegistry;
 use tutti_core::AudioUnit; // For get_id()
 
+/// Generate fluent setter methods that delegate to `self.builder`.
+///
+/// Each arm takes the form:
+///   `[doc_string] method_name(params) => builder_method(args);`
+///
+/// The macro generates `pub fn method_name(mut self, params) -> Self`
+/// which calls `self.builder = self.builder.builder_method(args)`.
+macro_rules! synth_setter {
+    ($(
+        $(#[doc = $doc:expr])*
+        $method:ident( $($param:ident : $ty:ty),* ) => $builder_method:ident( $($arg:tt)* );
+    )*) => {
+        $(
+            $(#[doc = $doc])*
+            pub fn $method(mut self, $($param: $ty),*) -> Self {
+                self.builder = self.builder.$builder_method($($arg)*);
+                self
+            }
+        )*
+    };
+}
+
 /// Fluent builder for creating MIDI-responsive polyphonic synthesizers.
 ///
 /// Wraps `SynthBuilder` and automatically wires up the `MidiRegistry`
@@ -24,178 +46,99 @@ impl SynthHandle {
         }
     }
 
-    pub fn sine(mut self) -> Self {
-        self.builder = self.builder.oscillator(OscillatorType::Sine);
-        self
+    // =========================================================================
+    // Oscillators
+    // =========================================================================
+
+    synth_setter! {
+        sine() => oscillator(OscillatorType::Sine);
+        saw() => oscillator(OscillatorType::Saw);
+        /// Pulse width ranges from 0.0 to 1.0.
+        square(pulse_width: f32) => oscillator(OscillatorType::Square { pulse_width });
+        triangle() => oscillator(OscillatorType::Triangle);
+        noise() => oscillator(OscillatorType::Noise);
     }
 
-    pub fn saw(mut self) -> Self {
-        self.builder = self.builder.oscillator(OscillatorType::Saw);
-        self
+    // =========================================================================
+    // Polyphony
+    // =========================================================================
+
+    synth_setter! {
+        poly(voices: usize) => poly(voices);
+        /// Single voice, retriggers on each note.
+        mono() => mono();
+        /// Single voice, glides between overlapping notes.
+        legato() => legato();
     }
 
-    /// Pulse width ranges from 0.0 to 1.0.
-    pub fn square(mut self, pulse_width: f32) -> Self {
-        self.builder = self
-            .builder
-            .oscillator(OscillatorType::Square { pulse_width });
-        self
+    // =========================================================================
+    // Filters
+    // =========================================================================
+
+    synth_setter! {
+        /// Cutoff in Hz, resonance 0.0-1.0.
+        filter_moog(cutoff: f32, resonance: f32) =>
+            filter(FilterType::Moog { cutoff, resonance });
+        filter_lowpass(cutoff: f32, q: f32) =>
+            filter(FilterType::Svf { cutoff, q, mode: SvfMode::Lowpass });
+        filter_highpass(cutoff: f32, q: f32) =>
+            filter(FilterType::Svf { cutoff, q, mode: SvfMode::Highpass });
+        filter_bandpass(cutoff: f32, q: f32) =>
+            filter(FilterType::Svf { cutoff, q, mode: SvfMode::Bandpass });
+        filter_notch(cutoff: f32, q: f32) =>
+            filter(FilterType::Svf { cutoff, q, mode: SvfMode::Notch });
+        no_filter() => filter(FilterType::None);
     }
 
-    pub fn triangle(mut self) -> Self {
-        self.builder = self.builder.oscillator(OscillatorType::Triangle);
-        self
+    // =========================================================================
+    // Envelopes
+    // =========================================================================
+
+    synth_setter! {
+        /// All times in seconds, sustain is a level (0.0-1.0).
+        adsr(attack: f32, decay: f32, sustain: f32, release: f32) =>
+            envelope(attack, decay, sustain, release);
+        envelope_organ() => envelope_config(EnvelopeConfig::organ());
+        envelope_pluck() => envelope_config(EnvelopeConfig::pluck());
+        envelope_pad() => envelope_config(EnvelopeConfig::pad());
     }
 
-    pub fn noise(mut self) -> Self {
-        self.builder = self.builder.oscillator(OscillatorType::Noise);
-        self
+    // =========================================================================
+    // Voice stealing
+    // =========================================================================
+
+    synth_setter! {
+        /// When all voices are in use, steal the voice that started earliest (default).
+        voice_steal_oldest() => voice_stealing(AllocationStrategy::Oldest);
+        /// When all voices are in use, steal the voice with the lowest envelope level.
+        voice_steal_quietest() => voice_stealing(AllocationStrategy::Quietest);
+        /// Steal the highest pitched voice. Good for bass-heavy sounds.
+        voice_steal_highest() => voice_stealing(AllocationStrategy::HighestNote);
+        /// Steal the lowest pitched voice. Good for lead sounds.
+        voice_steal_lowest() => voice_stealing(AllocationStrategy::LowestNote);
+        /// Steal the most recently triggered voice.
+        voice_steal_newest() => voice_stealing(AllocationStrategy::Newest);
+        /// When all voices are in use, new notes are ignored.
+        no_voice_steal() => voice_stealing(AllocationStrategy::NoSteal);
     }
 
-    pub fn poly(mut self, voices: usize) -> Self {
-        self.builder = self.builder.poly(voices);
-        self
+    // =========================================================================
+    // Tuning
+    // =========================================================================
+
+    synth_setter! {
+        tuning_equal() => tuning(Tuning::equal_temperament());
+        /// Pure intervals based on simple frequency ratios.
+        /// Sounds more "in tune" for single keys but doesn't transpose well.
+        tuning_just() => tuning(Tuning::just_intonation());
+        /// Based on pure perfect fifths. Common in medieval music.
+        tuning_pythagorean() => tuning(Tuning::pythagorean());
+        /// Compromise tuning common in Renaissance/Baroque music.
+        tuning_meantone() => tuning(Tuning::meantone());
     }
 
-    /// Single voice, retriggers on each note.
-    pub fn mono(mut self) -> Self {
-        self.builder = self.builder.mono();
-        self
-    }
-
-    /// Single voice, glides between overlapping notes.
-    pub fn legato(mut self) -> Self {
-        self.builder = self.builder.legato();
-        self
-    }
-
-    /// Cutoff in Hz, resonance 0.0-1.0.
-    pub fn filter_moog(mut self, cutoff: f32, resonance: f32) -> Self {
-        self.builder = self.builder.filter(FilterType::Moog { cutoff, resonance });
-        self
-    }
-
-    pub fn filter_lowpass(mut self, cutoff: f32, q: f32) -> Self {
-        self.builder = self.builder.filter(FilterType::Svf {
-            cutoff,
-            q,
-            mode: SvfMode::Lowpass,
-        });
-        self
-    }
-
-    pub fn filter_highpass(mut self, cutoff: f32, q: f32) -> Self {
-        self.builder = self.builder.filter(FilterType::Svf {
-            cutoff,
-            q,
-            mode: SvfMode::Highpass,
-        });
-        self
-    }
-
-    pub fn filter_bandpass(mut self, cutoff: f32, q: f32) -> Self {
-        self.builder = self.builder.filter(FilterType::Svf {
-            cutoff,
-            q,
-            mode: SvfMode::Bandpass,
-        });
-        self
-    }
-
-    pub fn filter_notch(mut self, cutoff: f32, q: f32) -> Self {
-        self.builder = self.builder.filter(FilterType::Svf {
-            cutoff,
-            q,
-            mode: SvfMode::Notch,
-        });
-        self
-    }
-
-    pub fn no_filter(mut self) -> Self {
-        self.builder = self.builder.filter(FilterType::None);
-        self
-    }
-
-    /// All times in seconds, sustain is a level (0.0-1.0).
-    pub fn adsr(mut self, attack: f32, decay: f32, sustain: f32, release: f32) -> Self {
-        self.builder = self.builder.envelope(attack, decay, sustain, release);
-        self
-    }
-
-    pub fn envelope_organ(mut self) -> Self {
-        self.builder = self.builder.envelope_config(EnvelopeConfig::organ());
-        self
-    }
-
-    pub fn envelope_pluck(mut self) -> Self {
-        self.builder = self.builder.envelope_config(EnvelopeConfig::pluck());
-        self
-    }
-
-    pub fn envelope_pad(mut self) -> Self {
-        self.builder = self.builder.envelope_config(EnvelopeConfig::pad());
-        self
-    }
-
-    /// When all voices are in use, steal the voice that started earliest (default).
-    pub fn voice_steal_oldest(mut self) -> Self {
-        self.builder = self.builder.voice_stealing(AllocationStrategy::Oldest);
-        self
-    }
-
-    /// When all voices are in use, steal the voice with the lowest envelope level.
-    pub fn voice_steal_quietest(mut self) -> Self {
-        self.builder = self.builder.voice_stealing(AllocationStrategy::Quietest);
-        self
-    }
-
-    /// Steal the highest pitched voice. Good for bass-heavy sounds.
-    pub fn voice_steal_highest(mut self) -> Self {
-        self.builder = self.builder.voice_stealing(AllocationStrategy::HighestNote);
-        self
-    }
-
-    /// Steal the lowest pitched voice. Good for lead sounds.
-    pub fn voice_steal_lowest(mut self) -> Self {
-        self.builder = self.builder.voice_stealing(AllocationStrategy::LowestNote);
-        self
-    }
-
-    /// Steal the most recently triggered voice.
-    pub fn voice_steal_newest(mut self) -> Self {
-        self.builder = self.builder.voice_stealing(AllocationStrategy::Newest);
-        self
-    }
-
-    /// When all voices are in use, new notes are ignored.
-    pub fn no_voice_steal(mut self) -> Self {
-        self.builder = self.builder.voice_stealing(AllocationStrategy::NoSteal);
-        self
-    }
-
-    pub fn tuning_equal(mut self) -> Self {
-        self.builder = self.builder.tuning(Tuning::equal_temperament());
-        self
-    }
-
-    /// Pure intervals based on simple frequency ratios.
-    /// Sounds more "in tune" for single keys but doesn't transpose well.
-    pub fn tuning_just(mut self) -> Self {
-        self.builder = self.builder.tuning(Tuning::just_intonation());
-        self
-    }
-
-    /// Based on pure perfect fifths. Common in medieval music.
-    pub fn tuning_pythagorean(mut self) -> Self {
-        self.builder = self.builder.tuning(Tuning::pythagorean());
-        self
-    }
-
-    /// Compromise tuning common in Renaissance/Baroque music.
-    pub fn tuning_meantone(mut self) -> Self {
-        self.builder = self.builder.tuning(Tuning::meantone());
-        self
-    }
+    // These take references, so they can't use the simple macro pattern
+    // (the macro captures $param: $ty but &[f32] doesn't fit `ident: ty` cleanly)
 
     /// The scale repeats every octave (1200 cents).
     pub fn tuning_from_cents(mut self, cents: &[f32]) -> Self {
@@ -209,29 +152,24 @@ impl SynthHandle {
         self
     }
 
-    /// Default: 2 semitones.
-    pub fn pitch_bend_range(mut self, semitones: f32) -> Self {
-        self.builder = self.builder.pitch_bend_range(semitones);
-        self
+    // =========================================================================
+    // Modulation
+    // =========================================================================
+
+    synth_setter! {
+        /// Default: 2 semitones.
+        pitch_bend_range(semitones: f32) => pitch_bend_range(semitones);
+        /// At depth 1.0, mod wheel fully up doubles the cutoff frequency.
+        mod_wheel_to_filter(depth: f32) => mod_wheel_to_filter(depth);
+        /// At depth 1.0, velocity 0 halves cutoff and velocity 127 leaves it unchanged.
+        velocity_to_filter(depth: f32) => velocity_to_filter(depth);
+        /// Rate in Hz, depth 0.0-1.0 (at 1.0 sweeps cutoff +/-50%).
+        lfo_to_filter(rate: f32, depth: f32) => lfo_to_filter(rate, depth);
     }
 
-    /// At depth 1.0, mod wheel fully up doubles the cutoff frequency.
-    pub fn mod_wheel_to_filter(mut self, depth: f32) -> Self {
-        self.builder = self.builder.mod_wheel_to_filter(depth);
-        self
-    }
-
-    /// At depth 1.0, velocity 0 halves cutoff and velocity 127 leaves it unchanged.
-    pub fn velocity_to_filter(mut self, depth: f32) -> Self {
-        self.builder = self.builder.velocity_to_filter(depth);
-        self
-    }
-
-    /// Rate in Hz, depth 0.0-1.0 (at 1.0 sweeps cutoff +/-50%).
-    pub fn lfo_to_filter(mut self, rate: f32, depth: f32) -> Self {
-        self.builder = self.builder.lfo_to_filter(rate, depth);
-        self
-    }
+    // =========================================================================
+    // Unison
+    // =========================================================================
 
     /// Voices 1-16, detune_cents is total spread (e.g., 15.0 for +/-7.5 cents).
     pub fn unison(mut self, voices: u8, detune_cents: f32) -> Self {
@@ -254,6 +192,10 @@ impl SynthHandle {
         });
         self
     }
+
+    // =========================================================================
+    // Portamento
+    // =========================================================================
 
     /// Glide time in seconds, applies to all notes.
     pub fn portamento(mut self, time: f32) -> Self {
@@ -298,6 +240,10 @@ impl SynthHandle {
         });
         self
     }
+
+    // =========================================================================
+    // Build
+    // =========================================================================
 
     /// Registers the synth's ID with the MidiRegistry automatically.
     pub fn build(self) -> crate::Result<PolySynth> {
@@ -482,10 +428,7 @@ mod tests {
         let samples_unison = render_samples(&mut synth_unison, 500);
 
         // Calculate L/R difference (stereo width indicator)
-        let diff_mono: f32 = samples_mono
-            .iter()
-            .map(|(l, r)| (l - r).abs())
-            .sum::<f32>()
+        let diff_mono: f32 = samples_mono.iter().map(|(l, r)| (l - r).abs()).sum::<f32>()
             / samples_mono.len() as f32;
         let diff_unison: f32 = samples_unison
             .iter()
@@ -689,12 +632,14 @@ mod tests {
         assert!(
             freq_bent > freq_base * 1.08,
             "Bent frequency ({:.1} Hz) should be >8% higher than base ({:.1} Hz)",
-            freq_bent, freq_base
+            freq_bent,
+            freq_base
         );
         assert!(
             (freq_bent - expected_bent).abs() < expected_bent * 0.10,
             "Bent frequency ({:.1} Hz) should be within 10% of expected ({:.1} Hz)",
-            freq_bent, expected_bent
+            freq_bent,
+            expected_bent
         );
     }
 
@@ -739,7 +684,8 @@ mod tests {
         assert!(
             freq_12st > freq_2st * 1.5,
             "12-semitone range ({:.1} Hz) should be >1.5x higher than 2-semitone range ({:.1} Hz)",
-            freq_12st, freq_2st
+            freq_12st,
+            freq_2st
         );
     }
 
@@ -772,7 +718,8 @@ mod tests {
         assert!(
             (freq - expected).abs() < expected * 0.10,
             "Bent-down frequency ({:.1} Hz) should be within 10% of expected ({:.1} Hz)",
-            freq, expected
+            freq,
+            expected
         );
     }
 
@@ -850,12 +797,16 @@ mod tests {
         let rms_closed = rms_stereo(&samples_closed);
         let rms_open = rms_stereo(&samples_open);
 
-        assert!(rms_closed > 0.001, "Should produce audio with filter closed");
+        assert!(
+            rms_closed > 0.001,
+            "Should produce audio with filter closed"
+        );
         assert!(rms_open > 0.001, "Should produce audio with filter open");
         assert!(
             rms_open > rms_closed * 1.05,
             "Opening filter should increase RMS: open={:.4}, closed={:.4}",
-            rms_open, rms_closed
+            rms_open,
+            rms_closed
         );
     }
 
@@ -902,10 +853,22 @@ mod tests {
             .unwrap();
 
         // Play soft (vel=30) and loud (vel=127) on both configs
-        registry.queue(synth_no_mod_soft.get_id(), &[MidiEvent::note_on_builder(60, 30).build()]);
-        registry.queue(synth_no_mod_loud.get_id(), &[MidiEvent::note_on_builder(60, 127).build()]);
-        registry.queue(synth_mod_soft.get_id(), &[MidiEvent::note_on_builder(60, 30).build()]);
-        registry.queue(synth_mod_loud.get_id(), &[MidiEvent::note_on_builder(60, 127).build()]);
+        registry.queue(
+            synth_no_mod_soft.get_id(),
+            &[MidiEvent::note_on_builder(60, 30).build()],
+        );
+        registry.queue(
+            synth_no_mod_loud.get_id(),
+            &[MidiEvent::note_on_builder(60, 127).build()],
+        );
+        registry.queue(
+            synth_mod_soft.get_id(),
+            &[MidiEvent::note_on_builder(60, 30).build()],
+        );
+        registry.queue(
+            synth_mod_loud.get_id(),
+            &[MidiEvent::note_on_builder(60, 127).build()],
+        );
 
         // Skip attack transient
         render_samples(&mut synth_no_mod_soft, 200);
@@ -957,8 +920,8 @@ mod tests {
             block_rms.push(rms_stereo(&samples));
         }
 
-        let max_rms = block_rms.iter().cloned().fold(0.0f32, f32::max);
-        let min_rms = block_rms.iter().cloned().fold(f32::MAX, f32::min);
+        let max_rms = block_rms.iter().copied().fold(0.0f32, f32::max);
+        let min_rms = block_rms.iter().copied().fold(f32::MAX, f32::min);
 
         assert!(
             min_rms > 0.001,
@@ -968,7 +931,9 @@ mod tests {
         assert!(
             max_rms / min_rms > 1.03,
             "LFO should cause RMS variation: max={:.4}, min={:.4}, ratio={:.2}",
-            max_rms, min_rms, max_rms / min_rms
+            max_rms,
+            min_rms,
+            max_rms / min_rms
         );
     }
 
@@ -1001,7 +966,9 @@ mod tests {
         assert!(
             diff_pct < 0.10,
             "Without mod depth, CC1 should not change RMS: before={:.4}, after={:.4}, diff={:.1}%",
-            rms_before, rms_after, diff_pct * 100.0
+            rms_before,
+            rms_after,
+            diff_pct * 100.0
         );
     }
 
@@ -1054,10 +1021,7 @@ mod tests {
         let note_on = MidiEvent::note_on_builder(60, 100).build();
         registry.queue(synth.get_id(), &[note_on]);
         let samples = render_samples(&mut synth, 1000);
-        assert!(
-            rms_stereo(&samples) > 0.01,
-            "Triangle should produce audio"
-        );
+        assert!(rms_stereo(&samples) > 0.01, "Triangle should produce audio");
     }
 
     #[test]
@@ -1169,7 +1133,8 @@ mod tests {
         assert!(
             rms_filtered < rms_no_filter * 0.8,
             "Moog filter should reduce RMS: filtered={:.4}, unfiltered={:.4}",
-            rms_filtered, rms_no_filter
+            rms_filtered,
+            rms_no_filter
         );
     }
 
@@ -1292,7 +1257,8 @@ mod tests {
         assert!(
             rms_lowpass < rms_unfiltered * 0.95,
             "SVF lowpass should reduce RMS: lowpass={:.4}, unfiltered={:.4}",
-            rms_lowpass, rms_unfiltered
+            rms_lowpass,
+            rms_unfiltered
         );
     }
 
@@ -1408,7 +1374,10 @@ mod tests {
         let note = MidiEvent::note_on_builder(60, 100).build();
         registry.queue(synth.get_id(), &[note]);
         let samples = render_samples(&mut synth, 1000);
-        assert!(rms_stereo(&samples) > 0.01, "Mono synth should produce audio");
+        assert!(
+            rms_stereo(&samples) > 0.01,
+            "Mono synth should produce audio"
+        );
         assert_eq!(synth.active_voice_count(), 1);
     }
 

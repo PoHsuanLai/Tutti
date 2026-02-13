@@ -4,7 +4,7 @@ const A4_FREQ: f32 = 440.0;
 const A4_NOTE: u8 = 69;
 
 #[derive(Debug, Clone, Copy)]
-pub struct ScaleDegree {
+pub(crate) struct ScaleDegree {
     /// 0 = unison, 1200 = octave
     pub cents: f32,
 }
@@ -111,7 +111,6 @@ impl Tuning {
 
     /// Quarter-comma meantone temperament.
     pub fn meantone() -> Self {
-        let fifth = 5.0_f32.powf(0.25); // Tempered fifth
         let mut cents = Vec::with_capacity(12);
 
         for i in 0..12 {
@@ -139,7 +138,6 @@ impl Tuning {
             reference_freq: A4_FREQ,
             reference_note: A4_NOTE,
         };
-        let _ = fifth; // Silence unused warning
         tuning.recompute_table();
         tuning
     }

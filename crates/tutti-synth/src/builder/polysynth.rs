@@ -2,12 +2,10 @@
 
 use super::voice::SynthVoice;
 use super::SynthConfig;
-use crate::{
-    AllocationResult, Portamento, UnisonEngine, VoiceAllocator, VoiceAllocatorConfig,
-};
+use crate::{AllocationResult, Portamento, UnisonEngine, VoiceAllocator, VoiceAllocatorConfig};
 use smallvec::SmallVec;
-use tutti_core::midi::{ChannelVoiceMsg, MidiEvent, MidiRegistry, MidiSnapshot};
-use tutti_core::{Arc, AudioUnit, BufferMut, BufferRef, ExportTimeline, Shared, SignalFrame};
+use tutti_core::midi::{ChannelVoiceMsg, MidiEvent, MidiRegistry, MidiSource};
+use tutti_core::{AudioUnit, BufferMut, BufferRef, Shared, SignalFrame};
 
 extern crate alloc;
 use alloc::vec::Vec;
@@ -17,8 +15,11 @@ const FINISHED_NOTES_CAPACITY: usize = 16;
 /// Polyphonic synthesizer combining tutti-synth building blocks with FunDSP.
 ///
 /// Created via [`SynthBuilder`](super::SynthBuilder). MIDI events are received
-/// via pull-based polling from [`MidiRegistry`] during `tick()`/`process()`.
-#[derive(Clone)]
+/// via pull-based polling from a [`MidiSource`] during `tick()`/`process()`.
+///
+/// The synth works with any MIDI source:
+/// - **Live**: `MidiRegistry` for real-time MIDI routing
+/// - **Export**: `MidiSnapshotReader` for offline rendering
 pub struct PolySynth {
     config: SynthConfig,
     allocator: VoiceAllocator,
@@ -28,11 +29,8 @@ pub struct PolySynth {
     pitch_bend: f32,
     master_volume: Shared,
     id: u64,
-    midi_registry: Option<MidiRegistry>,
+    midi_source: Option<Box<dyn MidiSource>>,
     midi_buffer: Vec<MidiEvent>,
-    midi_snapshot: Option<MidiSnapshot>,
-    export_timeline: Option<Arc<ExportTimeline>>,
-    last_poll_beat: f64,
     mix_buffer: [f32; 2],
     finished_indices: SmallVec<[usize; FINISHED_NOTES_CAPACITY]>,
 }
@@ -86,56 +84,30 @@ impl PolySynth {
             pitch_bend: 0.0,
             master_volume,
             id,
-            midi_registry: None,
+            midi_source: None,
             midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
-            midi_snapshot: None,
-            export_timeline: None,
-            last_poll_beat: 0.0,
             mix_buffer: [0.0; 2],
             finished_indices: SmallVec::new(),
         })
     }
 
+    /// Convenience: set a live `MidiRegistry` as the MIDI source.
     pub fn with_midi_registry(mut self, registry: MidiRegistry) -> Self {
-        self.midi_registry = Some(registry);
+        self.midi_source = Some(Box::new(registry));
         self
     }
 
-    /// Switches to export mode: MIDI events come from the snapshot (non-destructive,
-    /// beat-position-based) instead of the live registry.
-    pub fn configure_for_export(&mut self, snapshot: MidiSnapshot, timeline: Arc<ExportTimeline>) {
-        self.midi_snapshot = Some(snapshot);
-        self.export_timeline = Some(timeline);
-        self.midi_registry = None;
-        self.last_poll_beat = 0.0;
-    }
-
-    pub fn is_export_mode(&self) -> bool {
-        self.export_timeline.is_some()
+    /// Set the MIDI source (live registry or export snapshot reader).
+    pub fn set_midi_source(&mut self, source: Box<dyn MidiSource>) {
+        self.midi_source = Some(source);
     }
 
     fn poll_midi_events(&mut self) {
-        if let Some(timeline) = &self.export_timeline {
-            let current_beat = timeline.current_beat();
-            let beat_increment = timeline.beats_per_sample();
-
-            if let Some(ref mut snapshot) = self.midi_snapshot {
-                let events = snapshot.poll_range(self.id, self.last_poll_beat, current_beat + beat_increment);
-                for event in events {
-                    self.process_midi_event(&event);
-                }
-            }
-
-            self.last_poll_beat = current_beat;
-            return;
-        }
-
-        let registry = match &self.midi_registry {
-            Some(r) => r.clone(),
+        let source = match &self.midi_source {
+            Some(s) => s,
             None => return,
         };
-
-        let count = registry.poll_into(self.id, &mut self.midi_buffer);
+        let count = source.poll_into(self.id, &mut self.midi_buffer);
         for i in 0..count {
             let event = self.midi_buffer[i];
             self.process_midi_event(&event);
@@ -272,17 +244,16 @@ impl PolySynth {
 
         // If the slot is still Active, the note is being held by sustain/sostenuto pedal.
         let slot_still_active = self.allocator.slots().iter().any(|s| {
-            s.note == note
-                && s.channel == channel
-                && s.state == crate::voice::VoiceState::Active
+            s.note == note && s.channel == channel && s.state == crate::voice::VoiceState::Active
         });
 
         if !slot_still_active {
-            for voice in &mut self.voices {
-                if voice.active && voice.note == note && voice.channel == channel {
-                    voice.note_off();
-                    break;
-                }
+            if let Some(voice) = self
+                .voices
+                .iter_mut()
+                .find(|v| v.active && v.note == note && v.channel == channel)
+            {
+                voice.note_off();
             }
         }
     }
@@ -294,9 +265,17 @@ impl PolySynth {
             match cc {
                 1 => {
                     let norm = value as f32 / 127.0;
-                    for voice in &mut self.voices {
-                        voice.set_mod_wheel(norm);
-                    }
+                    self.voices.iter_mut().for_each(|v| v.set_mod_wheel(norm));
+                }
+                71 => {
+                    let norm = value as f32 / 127.0;
+                    self.voices
+                        .iter_mut()
+                        .for_each(|v| v.set_filter_resonance(norm));
+                }
+                74 => {
+                    let norm = value as f32 / 127.0;
+                    self.voices.iter_mut().for_each(|v| v.set_cc_cutoff(norm));
                 }
                 64 => {
                     self.allocator.sustain_pedal(channel, value >= 64);
@@ -311,19 +290,17 @@ impl PolySynth {
                     }
                 }
                 120 => {
-                    for voice in &mut self.voices {
-                        if voice.channel == channel {
-                            voice.reset();
-                        }
-                    }
+                    self.voices
+                        .iter_mut()
+                        .filter(|v| v.channel == channel)
+                        .for_each(|v| v.reset());
                     self.allocator.all_sound_off(channel);
                 }
                 123 => {
-                    for voice in &mut self.voices {
-                        if voice.active && voice.channel == channel {
-                            voice.note_off();
-                        }
-                    }
+                    self.voices
+                        .iter_mut()
+                        .filter(|v| v.active && v.channel == channel)
+                        .for_each(|v| v.note_off());
                     self.allocator.all_notes_off(channel);
                 }
                 _ => {}
@@ -340,15 +317,15 @@ impl PolySynth {
         }
 
         let bend_semitones = self.pitch_bend * self.config.pitch_bend_range;
-        for voice in &mut self.voices {
-            if voice.active {
-                let bent_freq = self
-                    .config
-                    .tuning
-                    .fractional_note_to_freq(voice.note as f32 + bend_semitones);
-                voice.set_pitch(bent_freq, self.unison.as_ref());
-            }
-        }
+        let tuning = &self.config.tuning;
+        let unison = self.unison.as_ref();
+        self.voices
+            .iter_mut()
+            .filter(|v| v.active)
+            .for_each(|voice| {
+                let bent_freq = tuning.fractional_note_to_freq(voice.note as f32 + bend_semitones);
+                voice.set_pitch(bent_freq, unison);
+            });
     }
 
     /// Close the gate on any voice whose allocator slot is Releasing but
@@ -356,8 +333,10 @@ impl PolySynth {
     fn sync_voice_gates(&mut self) {
         let slots = self.allocator.slots();
         for (i, voice) in self.voices.iter_mut().enumerate() {
-            if voice.active && voice.gate.value() > 0.0
-                && i < slots.len() && slots[i].state == crate::voice::VoiceState::Releasing
+            if voice.active
+                && voice.gate.value() > 0.0
+                && i < slots.len()
+                && slots[i].state == crate::voice::VoiceState::Releasing
             {
                 voice.note_off();
             }
@@ -492,6 +471,26 @@ impl AudioUnit for PolySynth {
     fn allocate(&mut self) {
         for voice in &mut self.voices {
             voice.allocate();
+        }
+    }
+}
+
+impl Clone for PolySynth {
+    fn clone(&self) -> Self {
+        Self {
+            config: self.config.clone(),
+            allocator: self.allocator.clone(),
+            voices: self.voices.clone(),
+            portamento: self.portamento.clone(),
+            unison: self.unison.clone(),
+            pitch_bend: self.pitch_bend,
+            master_volume: self.master_volume.clone(),
+            id: self.id,
+            // Cloned synths need explicit MIDI source setup
+            midi_source: None,
+            midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
+            mix_buffer: [0.0; 2],
+            finished_indices: SmallVec::new(),
         }
     }
 }
@@ -990,7 +989,10 @@ mod tests {
 
         // Channel 1 voice should still have gate open
         let ch1_voice = synth.voices.iter().find(|v| v.active && v.channel == 1);
-        assert!(ch1_voice.is_some(), "Channel 1 voice should still be active");
+        assert!(
+            ch1_voice.is_some(),
+            "Channel 1 voice should still be active"
+        );
         assert!(
             ch1_voice.unwrap().gate.value() > 0.0,
             "Channel 1 voice gate should still be open"
@@ -1089,7 +1091,11 @@ mod tests {
         queue_midi_via_registry(&mut synth, &registry, &[note2]);
         synth.tick(&[], &mut output);
 
-        assert_eq!(synth.active_voice_count(), 1, "Legato should use same voice");
+        assert_eq!(
+            synth.active_voice_count(),
+            1,
+            "Legato should use same voice"
+        );
         assert_eq!(synth.voices[0].note, 64, "Voice should have new note");
         assert!(
             synth.voices[0].gate.value() > 0.0,

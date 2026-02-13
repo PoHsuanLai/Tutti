@@ -2,7 +2,7 @@
 
 use rustysynth::{SoundFont, Synthesizer, SynthesizerSettings};
 use smallvec::SmallVec;
-use tutti_core::midi::{MidiEvent, MidiRegistry};
+use tutti_core::midi::{MidiEvent, MidiRegistry, MidiSource};
 use tutti_core::Arc;
 use tutti_core::{AudioUnit, BufferMut, BufferRef, Setting, SignalFrame};
 
@@ -16,7 +16,7 @@ pub struct SoundFontUnit {
     right_buffer: Vec<f32>,
     buffer_pos: usize,
     pending_midi: SmallVec<[MidiEvent; 128]>,
-    midi_registry: Option<MidiRegistry>,
+    midi_source: Option<Box<dyn MidiSource>>,
     midi_buffer: Vec<MidiEvent>,
 }
 
@@ -35,7 +35,7 @@ impl SoundFontUnit {
             right_buffer: vec![0.0; buffer_size],
             buffer_pos: buffer_size,
             pending_midi: SmallVec::new(),
-            midi_registry: None,
+            midi_source: None,
             midi_buffer: vec![MidiEvent::note_on_builder(0, 0).build(); 256],
         }
     }
@@ -46,8 +46,13 @@ impl SoundFontUnit {
         midi_registry: MidiRegistry,
     ) -> Self {
         let mut unit = Self::new(soundfont, settings);
-        unit.midi_registry = Some(midi_registry);
+        unit.midi_source = Some(Box::new(midi_registry));
         unit
+    }
+
+    /// Set the MIDI source (live registry or export snapshot reader).
+    pub fn set_midi_source(&mut self, source: Box<dyn MidiSource>) {
+        self.midi_source = Some(source);
     }
 
     pub fn sample_rate(&self) -> u32 {
@@ -78,9 +83,9 @@ impl SoundFontUnit {
     fn poll_midi_events(&mut self) {
         use tutti_core::midi::ChannelVoiceMsg;
 
-        if let Some(ref registry) = self.midi_registry {
+        if let Some(ref source) = self.midi_source {
             let unit_id = self.get_id();
-            let count = registry.poll_into(unit_id, &mut self.midi_buffer);
+            let count = source.poll_into(unit_id, &mut self.midi_buffer);
             for i in 0..count {
                 self.pending_midi.push(self.midi_buffer[i]);
             }
@@ -103,6 +108,20 @@ impl SoundFontUnit {
                 ChannelVoiceMsg::ProgramChange { program } => {
                     self.synthesizer
                         .process_midi_message(channel, 0xC0, program as i32, 0);
+                }
+                ChannelVoiceMsg::PitchBend { bend } => {
+                    let lsb = (bend & 0x7F) as i32;
+                    let msb = ((bend >> 7) & 0x7F) as i32;
+                    self.synthesizer
+                        .process_midi_message(channel, 0xE0, lsb, msb);
+                }
+                ChannelVoiceMsg::ControlChange { control: tutti_core::midi::ControlChange::CC { control: cc, value } } => {
+                    self.synthesizer.process_midi_message(
+                        channel,
+                        0xB0,
+                        cc as i32,
+                        value as i32,
+                    );
                 }
                 _ => {}
             }
@@ -194,8 +213,9 @@ impl Clone for SoundFontUnit {
             left_buffer: self.left_buffer.clone(),
             right_buffer: self.right_buffer.clone(),
             buffer_pos: self.buffer_pos,
-            pending_midi: SmallVec::new(), // Fresh empty buffer for clone
-            midi_registry: self.midi_registry.clone(),
+            pending_midi: SmallVec::new(),
+            // Cloned units need explicit MIDI source setup
+            midi_source: None,
             midi_buffer: vec![MidiEvent::note_on_builder(0, 0).build(); 256],
         }
     }

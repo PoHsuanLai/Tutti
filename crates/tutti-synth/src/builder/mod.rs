@@ -15,7 +15,9 @@ pub enum OscillatorType {
     Sine,
     #[default]
     Saw,
-    Square { pulse_width: f32 },
+    Square {
+        pulse_width: f32,
+    },
     Triangle,
     Noise,
 }
@@ -31,8 +33,15 @@ pub enum SvfMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum FilterType {
-    Moog { cutoff: f32, resonance: f32 },
-    Svf { cutoff: f32, q: f32, mode: SvfMode },
+    Moog {
+        cutoff: f32,
+        resonance: f32,
+    },
+    Svf {
+        cutoff: f32,
+        q: f32,
+        mode: SvfMode,
+    },
     #[default]
     None,
 }
@@ -83,7 +92,7 @@ impl EnvelopeConfig {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct FilterModConfig {
     /// Mod wheel (CC1) to filter cutoff depth (0.0-1.0, default: 0.0)
     /// At 1.0, mod wheel fully open doubles the cutoff frequency.
@@ -96,17 +105,6 @@ pub struct FilterModConfig {
     /// LFO to filter cutoff depth (0.0-1.0, default: 0.0)
     /// At 1.0, LFO sweeps cutoff by ±50%.
     pub lfo_depth: f32,
-}
-
-impl Default for FilterModConfig {
-    fn default() -> Self {
-        Self {
-            mod_wheel_depth: 0.0,
-            velocity_depth: 0.0,
-            lfo_rate: 0.0,
-            lfo_depth: 0.0,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
