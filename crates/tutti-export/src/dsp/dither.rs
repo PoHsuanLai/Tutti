@@ -2,7 +2,7 @@
 
 use crate::options::DitherType;
 
-pub struct DitherState {
+pub(crate) struct DitherState {
     random_state: u32,
     error_l: f32,
     error_r: f32,
@@ -42,7 +42,7 @@ impl DitherState {
     }
 }
 
-pub fn apply_dither(
+pub(crate) fn apply_dither(
     left: &mut [f32],
     right: &mut [f32],
     target_bits: u16,

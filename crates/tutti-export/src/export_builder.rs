@@ -1,3 +1,4 @@
+use crate::handle::ExportHandle;
 use crate::{AudioFormat, ExportOptions, NormalizationMode, Result};
 use std::path::Path;
 use tutti_core::{AudioUnit, ExportContext};
@@ -38,11 +39,15 @@ pub struct ExportBuilder {
 
 impl ExportBuilder {
     pub fn new(net: tutti_core::dsp::Net, sample_rate: f64) -> Self {
+        let options = ExportOptions {
+            source_sample_rate: sample_rate.round() as u32,
+            ..Default::default()
+        };
         Self {
             net,
             sample_rate,
             duration_seconds: None,
-            options: ExportOptions::default(),
+            options,
             compensate_latency: false,
             context: None,
         }
@@ -90,16 +95,7 @@ impl ExportBuilder {
     }
 
     pub fn to_file(self, path: impl AsRef<Path>) -> Result<()> {
-        let options = self.options.clone();
-        let (left, right) = self.render_internal()?;
-        let path = path.as_ref();
-        crate::export_to_file(
-            path.to_str()
-                .ok_or_else(|| crate::ExportError::InvalidOptions("Invalid path".into()))?,
-            &left,
-            &right,
-            &options,
-        )
+        self.to_file_with_progress(path, |_| {})
     }
 
     pub fn to_file_with_progress(
@@ -108,7 +104,7 @@ impl ExportBuilder {
         on_progress: impl Fn(ExportProgress),
     ) -> Result<()> {
         let options = self.options.clone();
-        let (left, right) = self.render_internal_with_progress(&on_progress)?;
+        let (left, right) = self.render_impl(&on_progress)?;
 
         let path = path.as_ref();
         crate::export_to_file_with_progress(
@@ -121,9 +117,45 @@ impl ExportBuilder {
         )
     }
 
+    /// Start a non-blocking background export, returning a handle to poll progress.
+    ///
+    /// The export runs on a dedicated thread. Poll [`ExportHandle::progress()`]
+    /// each frame to get status updates, or call [`ExportHandle::wait()`] to block.
+    ///
+    /// ```ignore
+    /// let mut handle = engine.export()
+    ///     .duration_seconds(60.0)
+    ///     .format(AudioFormat::Wav)
+    ///     .start("output.wav");
+    ///
+    /// loop {
+    ///     match handle.progress() {
+    ///         ExportStatus::Running(p) => println!("{:.0}%", p.progress * 100.0),
+    ///         ExportStatus::Complete => break,
+    ///         ExportStatus::Failed(e) => { eprintln!("{}", e); break; }
+    ///         ExportStatus::Pending => {}
+    ///     }
+    /// }
+    /// ```
+    pub fn start(self, path: impl AsRef<Path>) -> ExportHandle {
+        let path = path.as_ref().to_path_buf();
+        let (tx, rx) = crossbeam_channel::bounded(64);
+
+        let thread = std::thread::Builder::new()
+            .name("tutti-export".into())
+            .spawn(move || {
+                self.to_file_with_progress(&path, |p| {
+                    let _ = tx.try_send(p); // drop if full — UI will catch up
+                })
+            })
+            .expect("failed to spawn export thread");
+
+        ExportHandle::new(rx, thread)
+    }
+
     pub fn render(self) -> Result<(Vec<f32>, Vec<f32>, f64)> {
         let sample_rate = self.sample_rate;
-        let (left, right) = self.render_internal()?;
+        let (left, right) = self.render_impl(&|_| {})?;
         Ok((left, right, sample_rate))
     }
 
@@ -132,121 +164,89 @@ impl ExportBuilder {
         on_progress: impl Fn(ExportProgress),
     ) -> Result<(Vec<f32>, Vec<f32>, f64)> {
         let sample_rate = self.sample_rate;
-        let (left, right) = self.render_internal_with_progress(&on_progress)?;
+        let (left, right) = self.render_impl(&on_progress)?;
         Ok((left, right, sample_rate))
     }
 
-    fn render_internal(self) -> Result<(Vec<f32>, Vec<f32>)> {
-        self.render_internal_with_progress(&|_| {})
-    }
+    /// Block-based offline render. Processes audio in blocks of up to 64 samples
+    /// (MAX_BUFFER_SIZE) for efficient SIMD processing. If an ExportContext is
+    /// present, advances its timeline so transport-aware nodes (samplers, MIDI
+    /// synths) produce correct output.
+    fn render_impl(self, on_progress: &impl Fn(ExportProgress)) -> Result<(Vec<f32>, Vec<f32>)> {
+        use tutti_core::{BufferRef, BufferVec, MAX_BUFFER_SIZE};
 
-    fn render_internal_with_progress(
-        self,
-        on_progress: &impl Fn(ExportProgress),
-    ) -> Result<(Vec<f32>, Vec<f32>)> {
         let duration = self.duration_seconds.ok_or_else(|| {
             crate::ExportError::InvalidOptions(
                 "Duration not set. Use .duration_seconds() or .duration_beats()".into(),
             )
         })?;
 
-        let mut render_net = self.net;
-        render_net.set_sample_rate(self.sample_rate);
+        let mut net = self.net;
+        net.set_sample_rate(self.sample_rate);
 
         let latency_samples = if self.compensate_latency {
-            render_net.latency().unwrap_or(0.0).floor() as usize
+            net.latency().unwrap_or(0.0).floor() as usize
         } else {
             0
         };
         let extra_duration = latency_samples as f64 / self.sample_rate;
 
-        // If we have export context, use custom render loop that advances timeline
-        if let Some(context) = self.context {
-            return Self::render_with_context_impl(
-                render_net,
-                self.sample_rate,
-                duration,
-                extra_duration,
-                latency_samples,
-                context,
-                on_progress,
-            );
-        }
-
-        // Fallback: use Wave::render for simple cases (no MIDI/automation)
-        let wave = tutti_core::dsp::Wave::render_with_progress(
-            self.sample_rate,
-            duration + extra_duration,
-            &mut render_net,
-            |p| {
-                on_progress(ExportProgress {
-                    phase: ExportPhase::Rendering,
-                    progress: p,
-                });
-            },
-        );
-
+        let total_samples = ((duration + extra_duration) * self.sample_rate).round() as usize;
         let output_length = (duration * self.sample_rate).round() as usize;
+
         let mut left = Vec::with_capacity(output_length);
         let mut right = Vec::with_capacity(output_length);
 
-        for i in 0..output_length {
-            left.push(wave.at(0, i + latency_samples));
-            right.push(wave.at(1, i + latency_samples));
+        let mut buffer = BufferVec::new(net.outputs().max(2));
+        let progress_interval = (self.sample_rate * 0.5) as usize;
+        let mut next_progress = progress_interval;
+        let empty_input = BufferRef::new(&[]);
+
+        on_progress(ExportProgress {
+            phase: ExportPhase::Rendering,
+            progress: 0.0,
+        });
+
+        // If context exists, advance by 1 sample so the first processed sample
+        // sees beat position "1 sample in" (matches advance-then-tick semantics).
+        if let Some(ref context) = self.context {
+            context.timeline.advance(1);
         }
 
-        Ok((left, right))
-    }
+        let mut i = 0;
+        while i < total_samples {
+            let block_size = (total_samples - i).min(MAX_BUFFER_SIZE);
 
-    /// Render with export context, advancing timeline per sample.
-    ///
-    /// This allows MIDI synths and automation lanes to read from the
-    /// export timeline instead of the live transport.
-    fn render_with_context_impl(
-        mut net: tutti_core::dsp::Net,
-        sample_rate: f64,
-        duration: f64,
-        extra_duration: f64,
-        latency_samples: usize,
-        context: ExportContext,
-        on_progress: &impl Fn(ExportProgress),
-    ) -> Result<(Vec<f32>, Vec<f32>)> {
-        let total_samples = ((duration + extra_duration) * sample_rate).round() as usize;
-        let output_length = (duration * sample_rate).round() as usize;
+            let mut buffer_mut = buffer.buffer_mut();
+            net.process(block_size, &empty_input, &mut buffer_mut);
 
-        let mut left = Vec::with_capacity(output_length);
-        let mut right = Vec::with_capacity(output_length);
-
-        let mut output = [0.0f32; 2];
-        let progress_interval = total_samples / 100;
-
-        for i in 0..total_samples {
-            // Advance the export timeline by 1 sample
-            context.timeline.advance(1);
-
-            // Process one sample
-            net.tick(&[], &mut output);
-
-            // Skip latency compensation samples
-            if i >= latency_samples && left.len() < output_length {
-                left.push(output[0]);
-                right.push(output[1]);
+            // Advance timeline after processing (for next block's position)
+            if let Some(ref context) = self.context {
+                context.timeline.advance(block_size);
             }
 
-            // Progress callback
-            if progress_interval > 0 && i % progress_interval == 0 {
+            for j in 0..block_size {
+                let sample_idx = i + j;
+                if sample_idx >= latency_samples && left.len() < output_length {
+                    left.push(buffer_mut.at_f32(0, j));
+                    right.push(if net.outputs() >= 2 {
+                        buffer_mut.at_f32(1, j)
+                    } else {
+                        buffer_mut.at_f32(0, j)
+                    });
+                }
+            }
+
+            i += block_size;
+
+            if i >= next_progress || i >= total_samples {
                 on_progress(ExportProgress {
                     phase: ExportPhase::Rendering,
                     progress: i as f32 / total_samples as f32,
                 });
+                next_progress += progress_interval;
             }
         }
-
-        // Final progress
-        on_progress(ExportProgress {
-            phase: ExportPhase::Rendering,
-            progress: 1.0,
-        });
 
         Ok((left, right))
     }

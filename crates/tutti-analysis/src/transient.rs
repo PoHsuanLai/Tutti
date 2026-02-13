@@ -285,15 +285,18 @@ impl TransientDetector {
 
         let mut peaks = Vec::new();
 
-        // Calculate adaptive threshold
-        let values: Vec<f32> = detection_fn.iter().map(|(_, v)| *v).collect();
-        let mean: f32 = values.iter().sum::<f32>() / values.len() as f32;
-        let variance: f32 =
-            values.iter().map(|v| (v - mean).powi(2)).sum::<f32>() / values.len() as f32;
+        // Calculate adaptive threshold (single-pass: sum, sum_sq, max)
+        let len = detection_fn.len() as f32;
+        let (sum, sum_sq, max_val) = detection_fn
+            .iter()
+            .fold((0.0f32, 0.0f32, 0.0f32), |(s, sq, mx), &(_, v)| {
+                (s + v, sq + v * v, mx.max(v))
+            });
+        let mean = sum / len;
+        let variance = sum_sq / len - mean * mean;
         let std_dev = variance.sqrt();
 
         let adaptive_threshold = mean + std_dev * self.threshold * 3.0;
-        let max_val = values.iter().cloned().fold(0.0f32, f32::max);
 
         // Find local maxima above threshold
         for i in 1..detection_fn.len() - 1 {
@@ -335,104 +338,6 @@ impl TransientDetector {
             }
         }
     }
-}
-
-/// Estimate tempo from transient positions
-///
-/// # Arguments
-/// * `transients` - Detected transients
-/// * `min_bpm` - Minimum expected tempo
-/// * `max_bpm` - Maximum expected tempo
-///
-/// # Returns
-/// Estimated tempo in BPM, or None if not enough data
-pub fn estimate_tempo(transients: &[Transient], min_bpm: f64, max_bpm: f64) -> Option<f64> {
-    if transients.len() < 3 {
-        return None;
-    }
-
-    // Calculate inter-onset intervals
-    let mut intervals: Vec<f64> = Vec::new();
-    for i in 1..transients.len() {
-        let interval = transients[i].time - transients[i - 1].time;
-        let bpm = 60.0 / interval;
-        if bpm >= min_bpm && bpm <= max_bpm {
-            intervals.push(interval);
-        }
-    }
-
-    if intervals.is_empty() {
-        return None;
-    }
-
-    // Find most common interval using clustering
-    intervals.sort_by(|a, b| a.partial_cmp(b).unwrap());
-
-    let tolerance = 0.02; // 20ms tolerance
-    let mut clusters: Vec<(f64, usize)> = Vec::new();
-
-    for interval in &intervals {
-        let mut found = false;
-        for (center, count) in &mut clusters {
-            if (*interval - *center).abs() < tolerance {
-                *center = (*center * *count as f64 + *interval) / (*count + 1) as f64;
-                *count += 1;
-                found = true;
-                break;
-            }
-        }
-        if !found {
-            clusters.push((*interval, 1));
-        }
-    }
-
-    // Find cluster with most members
-    let best_interval = clusters
-        .into_iter()
-        .max_by_key(|(_, count)| *count)
-        .map(|(interval, _)| interval)?;
-
-    Some(60.0 / best_interval)
-}
-
-/// Slice audio at transient points
-///
-/// # Arguments
-/// * `samples` - Audio samples to slice
-/// * `transients` - Transient positions
-/// * `include_tail` - Whether to include samples after the last transient
-///
-/// # Returns
-/// Vector of sample slices
-pub fn slice_at_transients<'a>(
-    samples: &'a [f32],
-    transients: &[Transient],
-    include_tail: bool,
-) -> Vec<&'a [f32]> {
-    if transients.is_empty() {
-        return if include_tail && !samples.is_empty() {
-            vec![samples]
-        } else {
-            Vec::new()
-        };
-    }
-
-    let mut slices = Vec::new();
-    let mut prev_pos = 0;
-
-    for transient in transients {
-        let pos = transient.sample_position;
-        if pos > prev_pos && pos < samples.len() {
-            slices.push(&samples[prev_pos..pos]);
-            prev_pos = pos;
-        }
-    }
-
-    if include_tail && prev_pos < samples.len() {
-        slices.push(&samples[prev_pos..]);
-    }
-
-    slices
 }
 
 #[cfg(test)]
@@ -500,72 +405,5 @@ mod tests {
 
             let _detected = detector.detect(&samples);
         }
-    }
-
-    #[test]
-    fn test_estimate_tempo() {
-        let transients = vec![
-            Transient {
-                sample_position: 0,
-                time: 0.0,
-                strength: 1.0,
-            },
-            Transient {
-                sample_position: 22050,
-                time: 0.5,
-                strength: 1.0,
-            },
-            Transient {
-                sample_position: 44100,
-                time: 1.0,
-                strength: 1.0,
-            },
-            Transient {
-                sample_position: 66150,
-                time: 1.5,
-                strength: 1.0,
-            },
-            Transient {
-                sample_position: 88200,
-                time: 2.0,
-                strength: 1.0,
-            },
-        ];
-
-        let tempo = estimate_tempo(&transients, 60.0, 200.0);
-
-        assert!(tempo.is_some());
-        let bpm = tempo.unwrap();
-        assert!((bpm - 120.0).abs() < 5.0, "Expected ~120 BPM, got {}", bpm);
-    }
-
-    #[test]
-    fn test_slice_at_transients() {
-        let samples: Vec<f32> = (0..1000).map(|i| i as f32).collect();
-        let transients = vec![
-            Transient {
-                sample_position: 200,
-                time: 0.0,
-                strength: 1.0,
-            },
-            Transient {
-                sample_position: 500,
-                time: 0.0,
-                strength: 1.0,
-            },
-            Transient {
-                sample_position: 800,
-                time: 0.0,
-                strength: 1.0,
-            },
-        ];
-
-        let slices = slice_at_transients(&samples, &transients, true);
-
-        assert_eq!(slices.len(), 4);
-        assert_eq!(slices[0].len(), 200);
-        assert_eq!(slices[1].len(), 300);
-        assert_eq!(slices[2].len(), 300);
-        assert_eq!(slices[3].len(), 200);
     }
 }

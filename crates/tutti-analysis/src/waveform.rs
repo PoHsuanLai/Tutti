@@ -157,22 +157,16 @@ fn compute_block(samples: &[f32]) -> WaveformBlock {
         return WaveformBlock::default();
     }
 
-    let mut min = f32::MAX;
-    let mut max = f32::MIN;
-    let mut sum_sq = 0.0f32;
-
-    for &sample in samples {
-        min = min.min(sample);
-        max = max.max(sample);
-        sum_sq += sample * sample;
-    }
-
-    let rms = (sum_sq / samples.len() as f32).sqrt();
+    let (min, max, sum_sq) = samples
+        .iter()
+        .fold((f32::MAX, f32::MIN, 0.0f32), |(min, max, sum), &s| {
+            (min.min(s), max.max(s), sum + s * s)
+        });
 
     WaveformBlock {
         min: if min == f32::MAX { 0.0 } else { min },
         max: if max == f32::MIN { 0.0 } else { max },
-        rms,
+        rms: (sum_sq / samples.len() as f32).sqrt(),
     }
 }
 
@@ -199,35 +193,27 @@ pub fn compute_summary(
     let mut summary = WaveformSummary::with_capacity(samples_per_block, num_blocks);
     summary.total_samples = channel_samples;
 
-    for block_idx in 0..num_blocks {
+    summary.blocks.extend((0..num_blocks).map(|block_idx| {
         let start = block_idx * samples_per_block;
         let end = (start + samples_per_block).min(channel_samples);
+        let count = end - start;
 
-        let mut min = f32::MAX;
-        let mut max = f32::MIN;
-        let mut sum_sq = 0.0f32;
-        let mut count = 0;
+        let (min, max, sum_sq) = (start..end)
+            .map(|i| samples[i * channels])
+            .fold((f32::MAX, f32::MIN, 0.0f32), |(min, max, sum), s| {
+                (min.min(s), max.max(s), sum + s * s)
+            });
 
-        for i in start..end {
-            let sample = samples[i * channels]; // First channel
-            min = min.min(sample);
-            max = max.max(sample);
-            sum_sq += sample * sample;
-            count += 1;
-        }
-
-        let rms = if count > 0 {
-            (sum_sq / count as f32).sqrt()
-        } else {
-            0.0
-        };
-
-        summary.blocks.push(WaveformBlock {
+        WaveformBlock {
             min: if min == f32::MAX { 0.0 } else { min },
             max: if max == f32::MIN { 0.0 } else { max },
-            rms,
-        });
-    }
+            rms: if count > 0 {
+                (sum_sq / count as f32).sqrt()
+            } else {
+                0.0
+            },
+        }
+    }));
 
     summary
 }
@@ -240,7 +226,10 @@ pub fn compute_summary(
 ///
 /// # Returns
 /// Stereo waveform summary with separate left and right channels
-pub fn compute_stereo_summary(samples: &[f32], samples_per_block: usize) -> StereoWaveformSummary {
+pub(crate) fn compute_stereo_summary(
+    samples: &[f32],
+    samples_per_block: usize,
+) -> StereoWaveformSummary {
     if samples.is_empty() || samples_per_block == 0 {
         return StereoWaveformSummary::new(samples_per_block);
     }
@@ -256,54 +245,36 @@ pub fn compute_stereo_summary(samples: &[f32], samples_per_block: usize) -> Ster
     for block_idx in 0..num_blocks {
         let start = block_idx * samples_per_block;
         let end = (start + samples_per_block).min(channel_samples);
+        let count = end - start;
 
-        let mut l_min = f32::MAX;
-        let mut l_max = f32::MIN;
-        let mut l_sum_sq = 0.0f32;
+        let (l_min, l_max, l_sum_sq, r_min, r_max, r_sum_sq) = (start..end).fold(
+            (f32::MAX, f32::MIN, 0.0f32, f32::MAX, f32::MIN, 0.0f32),
+            |(l_mn, l_mx, l_sq, r_mn, r_mx, r_sq), i| {
+                let l = samples[i * 2];
+                let r = samples[i * 2 + 1];
+                (
+                    l_mn.min(l),
+                    l_mx.max(l),
+                    l_sq + l * l,
+                    r_mn.min(r),
+                    r_mx.max(r),
+                    r_sq + r * r,
+                )
+            },
+        );
 
-        let mut r_min = f32::MAX;
-        let mut r_max = f32::MIN;
-        let mut r_sum_sq = 0.0f32;
-
-        let mut count = 0;
-
-        for i in start..end {
-            let l = samples[i * 2];
-            let r = samples[i * 2 + 1];
-
-            l_min = l_min.min(l);
-            l_max = l_max.max(l);
-            l_sum_sq += l * l;
-
-            r_min = r_min.min(r);
-            r_max = r_max.max(r);
-            r_sum_sq += r * r;
-
-            count += 1;
-        }
-
-        let l_rms = if count > 0 {
-            (l_sum_sq / count as f32).sqrt()
-        } else {
-            0.0
-        };
-        let r_rms = if count > 0 {
-            (r_sum_sq / count as f32).sqrt()
-        } else {
-            0.0
+        let make_block = |min: f32, max: f32, sum_sq: f32| WaveformBlock {
+            min: if min == f32::MAX { 0.0 } else { min },
+            max: if max == f32::MIN { 0.0 } else { max },
+            rms: if count > 0 {
+                (sum_sq / count as f32).sqrt()
+            } else {
+                0.0
+            },
         };
 
-        left.blocks.push(WaveformBlock {
-            min: if l_min == f32::MAX { 0.0 } else { l_min },
-            max: if l_max == f32::MIN { 0.0 } else { l_max },
-            rms: l_rms,
-        });
-
-        right.blocks.push(WaveformBlock {
-            min: if r_min == f32::MAX { 0.0 } else { r_min },
-            max: if r_max == f32::MIN { 0.0 } else { r_max },
-            rms: r_rms,
-        });
+        left.blocks.push(make_block(l_min, l_max, l_sum_sq));
+        right.blocks.push(make_block(r_min, r_max, r_sum_sq));
     }
 
     StereoWaveformSummary { left, right }
@@ -396,23 +367,14 @@ fn downsample_summary(summary: &WaveformSummary) -> WaveformSummary {
     let mut result = WaveformSummary::with_capacity(new_samples_per_block, num_blocks);
     result.total_samples = summary.total_samples;
 
-    for i in (0..summary.blocks.len()).step_by(2) {
-        let a = &summary.blocks[i];
-        let b = summary.blocks.get(i + 1);
-
-        let block = if let Some(b) = b {
-            WaveformBlock {
-                min: a.min.min(b.min),
-                max: a.max.max(b.max),
-                // Approximate combined RMS (power average)
-                rms: ((a.rms * a.rms + b.rms * b.rms) / 2.0).sqrt(),
-            }
-        } else {
-            *a
-        };
-
-        result.blocks.push(block);
-    }
+    result.blocks.extend(summary.blocks.chunks(2).map(|pair| {
+        let a = &pair[0];
+        pair.get(1).map_or(*a, |b| WaveformBlock {
+            min: a.min.min(b.min),
+            max: a.max.max(b.max),
+            rms: ((a.rms * a.rms + b.rms * b.rms) / 2.0).sqrt(),
+        })
+    }));
 
     result
 }

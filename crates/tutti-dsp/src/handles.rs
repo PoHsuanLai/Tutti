@@ -17,11 +17,12 @@
 //! dsp.spatial().vbap("panner", ChannelLayout::stereo());
 //! ```
 
-use crate::{AudioUnit, LfoNode, LfoShape};
 #[cfg(feature = "spatial")]
 use crate::{BinauralPannerNode, ChannelLayout, SpatialPannerNode};
+use crate::{LfoNode, LfoShape};
 #[cfg(feature = "dynamics")]
 use crate::{SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate};
+use tutti_core::AudioUnit;
 use tutti_core::NodeRegistry;
 
 /// Main DSP handle for registering DSP nodes

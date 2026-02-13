@@ -257,24 +257,6 @@ pub fn analyze_stereo(left: &[f32], right: &[f32]) -> StereoAnalysis {
     }
 }
 
-/// Analyze stereo from interleaved samples
-pub fn analyze_stereo_interleaved(samples: &[f32]) -> StereoAnalysis {
-    if samples.len() < 2 {
-        return StereoAnalysis::default();
-    }
-
-    let len = samples.len() / 2;
-    let mut left = Vec::with_capacity(len);
-    let mut right = Vec::with_capacity(len);
-
-    for i in 0..len {
-        left.push(samples[i * 2]);
-        right.push(samples[i * 2 + 1]);
-    }
-
-    analyze_stereo(&left, &right)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -409,24 +391,5 @@ mod tests {
             analysis.ms_ratio_db() < -40.0,
             "Out of phase should have low M/S ratio"
         );
-    }
-
-    #[test]
-    fn test_interleaved() {
-        let left: Vec<f32> = (0..100).map(|i| (i as f32 / 10.0).sin()).collect();
-        let right: Vec<f32> = (0..100).map(|i| (i as f32 / 10.0).cos()).collect();
-
-        // Create interleaved
-        let mut interleaved = Vec::with_capacity(200);
-        for i in 0..100 {
-            interleaved.push(left[i]);
-            interleaved.push(right[i]);
-        }
-
-        let analysis1 = analyze_stereo(&left, &right);
-        let analysis2 = analyze_stereo_interleaved(&interleaved);
-
-        assert!((analysis1.correlation - analysis2.correlation).abs() < 0.001);
-        assert!((analysis1.left_level - analysis2.left_level).abs() < 0.001);
     }
 }

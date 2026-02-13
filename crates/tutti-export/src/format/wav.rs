@@ -30,7 +30,11 @@ pub(crate) fn export_wav(
     let (left_proc, right_proc) = process_audio(left, right, options, config.sample_rate)?;
 
     if options.mono {
-        encode_wav_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
+        encode_wav_mono_file(
+            &stereo_to_mono(&left_proc, &right_proc),
+            Path::new(path),
+            &config,
+        )
     } else {
         encode_wav_file(&left_proc, &right_proc, Path::new(path), &config)
     }
@@ -67,7 +71,11 @@ pub(crate) fn export_wav_with_progress(
     });
 
     let result = if options.mono {
-        encode_wav_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
+        encode_wav_mono_file(
+            &stereo_to_mono(&left_proc, &right_proc),
+            Path::new(path),
+            &config,
+        )
     } else {
         encode_wav_file(&left_proc, &right_proc, Path::new(path), &config)
     };

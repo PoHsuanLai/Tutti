@@ -26,6 +26,7 @@ pub struct AutomationLane<T, R: TransportReader = TransportHandle> {
     envelope: AutomationEnvelope<T>,
     transport: R,
     last_value: f32,
+    sample_rate: f64,
 }
 
 /// Type alias for automation lane with live transport.
@@ -38,6 +39,7 @@ impl<T, R: TransportReader> AutomationLane<T, R> {
             envelope,
             transport,
             last_value: 0.0,
+            sample_rate: 44100.0,
         }
     }
 
@@ -94,15 +96,11 @@ impl<T, R: TransportReader> AutomationLane<T, R> {
     pub fn update(&mut self) -> f32 {
         let beat = self.transport.current_beat();
 
-        self.last_value = if self.transport.is_loop_enabled() {
-            if let Some((loop_start, loop_end)) = self.transport.get_loop_range() {
-                self.get_value_looped(beat, loop_start, loop_end)
-            } else {
-                self.envelope.get_value_at(beat).unwrap_or(0.0)
-            }
-        } else {
-            self.envelope.get_value_at(beat).unwrap_or(0.0)
-        };
+        self.last_value = self
+            .transport
+            .get_loop_range()
+            .map(|(ls, le)| self.get_value_looped(beat, ls, le))
+            .unwrap_or_else(|| self.envelope.get_value_at(beat).unwrap_or(0.0));
 
         self.last_value
     }
@@ -124,10 +122,21 @@ impl<T: Clone + Send + Sync + 'static, R: TransportReader + Clone + 'static> Aud
     }
 
     fn process(&mut self, size: usize, _input: &BufferRef, output: &mut BufferMut) {
-        let value = self.update();
+        let beat = self.transport.current_beat();
+        let tempo = self.transport.tempo() as f64;
+        let beats_per_sample = (tempo / 60.0) / self.sample_rate;
+        let loop_range = self.transport.get_loop_range();
 
         for i in 0..size {
+            let sample_beat = beat + i as f64 * beats_per_sample;
+            let value = loop_range
+                .map(|(ls, le)| self.get_value_looped(sample_beat, ls, le))
+                .unwrap_or_else(|| self.envelope.get_value_at(sample_beat).unwrap_or(0.0));
             output.set_f32(0, i, value);
+        }
+
+        if size > 0 {
+            self.last_value = output.at_f32(0, size - 1);
         }
     }
 
@@ -135,7 +144,9 @@ impl<T: Clone + Send + Sync + 'static, R: TransportReader + Clone + 'static> Aud
         self.last_value = 0.0;
     }
 
-    fn set_sample_rate(&mut self, _sample_rate: f64) {}
+    fn set_sample_rate(&mut self, sample_rate: f64) {
+        self.sample_rate = sample_rate;
+    }
 
     fn route(&mut self, _input: &SignalFrame, _frequency: f64) -> SignalFrame {
         SignalFrame::new(1)
@@ -164,6 +175,7 @@ impl<T: Clone, R: TransportReader + Clone> Clone for AutomationLane<T, R> {
             envelope: self.envelope.clone(),
             transport: self.transport.clone(),
             last_value: self.last_value,
+            sample_rate: self.sample_rate,
         }
     }
 }
@@ -222,6 +234,9 @@ mod tests {
         }
         fn is_in_preroll(&self) -> bool {
             false
+        }
+        fn tempo(&self) -> f32 {
+            120.0
         }
     }
 
@@ -391,7 +406,48 @@ mod tests {
 
         lane.process(64, &input_ref, &mut output_buf);
 
-        assert!((lane.last_value() - 0.5).abs() < 0.01, "Expected ~0.5, got {}", lane.last_value());
+        assert!(
+            (lane.last_value() - 0.5).abs() < 0.01,
+            "Expected ~0.5, got {}",
+            lane.last_value()
+        );
+    }
+
+    #[test]
+    fn test_process_per_sample_varies() {
+        use tutti_core::dsp::F32x;
+
+        // Ramp from 0.0 at beat 0 to 1.0 at beat 4. At beat 0, each sample
+        // should produce a slightly different value as the beat advances.
+        let transport = MockTransport::new(0.0);
+        let mut lane = AutomationLane::new(ramp_envelope(), transport);
+        lane.sample_rate = 44100.0;
+
+        let mut output_simd = vec![F32x::ZERO; 8];
+        let input_ref = BufferRef::empty();
+        let mut output_buf = BufferMut::new(&mut output_simd);
+
+        lane.process(32, &input_ref, &mut output_buf);
+
+        // First sample at beat 0 should be 0.0
+        assert!((output_buf.at_f32(0, 0) - 0.0).abs() < 0.001);
+
+        // Last sample should be slightly > 0.0 (per-sample beat advance)
+        // beats_per_sample = (120/60) / 44100 ≈ 0.0000453515
+        // beat at sample 31 = 31 * 0.0000453515 ≈ 0.001406
+        // value = 0.001406 / 4.0 ≈ 0.000351 (ramp 0→1 over 4 beats)
+        let last = output_buf.at_f32(0, 31);
+        assert!(last > 0.0, "Expected > 0.0, got {last}");
+        assert!(last < 0.01, "Expected small value, got {last}");
+
+        // Values should be monotonically increasing (ramp up)
+        for i in 1..32 {
+            assert!(
+                output_buf.at_f32(0, i) >= output_buf.at_f32(0, i - 1),
+                "Sample {i} should be >= sample {}",
+                i - 1
+            );
+        }
     }
 
     #[test]

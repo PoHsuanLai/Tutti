@@ -4,7 +4,7 @@ use crate::engine::{submit_request, ResponseChannel, TensorRequest};
 use crate::gpu::{ControlParams, MidiState, NeuralModelId, MIDI_FEATURE_COUNT};
 use crossbeam_channel::{Receiver, Sender};
 use std::sync::Arc;
-use tutti_core::midi::{MidiEvent, MidiRegistry};
+use tutti_core::midi::{MidiEvent, MidiRegistry, MidiSource};
 use tutti_core::{AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 const SYNTH_POOL_SIZE: usize = 4;
@@ -61,7 +61,7 @@ pub struct NeuralSynthNode {
     phase: f32,
     midi_state: MidiState,
     request_tx: Sender<TensorRequest>,
-    midi_registry: Option<MidiRegistry>,
+    midi_source: Option<Box<dyn MidiSource>>,
     midi_buffer: Vec<MidiEvent>,
     buffer_pool: SynthBufferPool,
 }
@@ -88,25 +88,31 @@ impl NeuralSynthNode {
             phase: 0.0,
             midi_state: MidiState::default(),
             request_tx,
-            midi_registry: None,
+            midi_source: None,
             midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
             buffer_pool: SynthBufferPool::new(),
         }
     }
 
+    /// Convenience: set a live `MidiRegistry` as the MIDI source.
     pub fn with_midi_registry(mut self, registry: MidiRegistry) -> Self {
-        self.midi_registry = Some(registry);
+        self.midi_source = Some(Box::new(registry));
         self
     }
 
+    /// Set the MIDI source (live registry or export snapshot reader).
+    pub fn set_midi_source(&mut self, source: Box<dyn MidiSource>) {
+        self.midi_source = Some(source);
+    }
+
     fn poll_midi_events(&mut self) {
-        let registry = match &self.midi_registry {
-            Some(r) => r,
+        let source = match &self.midi_source {
+            Some(s) => s,
             None => return,
         };
 
         let unit_id = self.model_id.as_u64();
-        let count = registry.poll_into(unit_id, &mut self.midi_buffer);
+        let count = source.poll_into(unit_id, &mut self.midi_buffer);
 
         for i in 0..count {
             let event = &self.midi_buffer[i];
@@ -255,7 +261,8 @@ impl Clone for NeuralSynthNode {
             phase: self.phase,
             midi_state: self.midi_state.clone(),
             request_tx: self.request_tx.clone(),
-            midi_registry: self.midi_registry.clone(),
+            // Cloned nodes need explicit MIDI source setup
+            midi_source: None,
             midi_buffer: vec![MidiEvent::note_on(0, 0, 0, 0); 256],
             buffer_pool: SynthBufferPool::new(),
         }

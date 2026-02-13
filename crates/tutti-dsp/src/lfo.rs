@@ -4,7 +4,7 @@ use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use tutti_core::{
     dsp::{Signal, DEFAULT_SR},
-    AudioUnit, BufferMut, BufferRef, SignalFrame,
+    AudioUnit, BufferMut, BufferRef, SignalFrame, TransportHandle, TransportReader,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -78,7 +78,7 @@ pub enum LfoMode {
     BeatSynced,
 }
 
-pub struct LfoNode {
+pub struct LfoNode<R: TransportReader = TransportHandle> {
     shape: LfoShape,
     mode: LfoMode,
     frequency: Arc<AtomicFloat>,
@@ -87,6 +87,7 @@ pub struct LfoNode {
     phase: f32,
     sample_rate: f64,
     random_state: RandomState,
+    transport: Option<R>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +145,7 @@ impl LfoNode {
             phase: 0.0,
             sample_rate: DEFAULT_SR,
             random_state: RandomState::default(),
+            transport: None,
         }
     }
 
@@ -157,6 +159,27 @@ impl LfoNode {
             phase: 0.0,
             sample_rate: DEFAULT_SR,
             random_state: RandomState::default(),
+            transport: None,
+        }
+    }
+}
+
+impl<R: TransportReader> LfoNode<R> {
+    /// Create a beat-synced LFO that reads beat position from a transport.
+    ///
+    /// Unlike `new_beat_synced`, this variant has 0 inputs — it reads the
+    /// current beat directly from the transport reader.
+    pub fn with_transport(shape: LfoShape, beats_per_cycle: f32, transport: R) -> Self {
+        Self {
+            shape,
+            mode: LfoMode::BeatSynced,
+            frequency: Arc::new(AtomicFloat::new(beats_per_cycle)),
+            depth: Arc::new(AtomicFloat::new(1.0)),
+            phase_offset: Arc::new(AtomicFloat::new(0.0)),
+            phase: 0.0,
+            sample_rate: DEFAULT_SR,
+            random_state: RandomState::default(),
+            transport: Some(transport),
         }
     }
 
@@ -202,11 +225,11 @@ impl LfoNode {
     }
 }
 
-impl AudioUnit for LfoNode {
+impl<R: TransportReader + Clone + 'static> AudioUnit for LfoNode<R> {
     fn inputs(&self) -> usize {
         match self.mode {
             LfoMode::FreeRunning => 0,
-            LfoMode::BeatSynced => 1,
+            LfoMode::BeatSynced => usize::from(self.transport.is_none()),
         }
     }
 
@@ -237,7 +260,11 @@ impl AudioUnit for LfoNode {
                 (self.phase + phase_offset) % 1.0
             }
             LfoMode::BeatSynced => {
-                let beat = input[0];
+                let beat = if let Some(ref transport) = self.transport {
+                    transport.current_beat() as f32
+                } else {
+                    input[0]
+                };
                 let beats_per_cycle = self.frequency.get();
                 if beats_per_cycle > 0.0 {
                     ((beat / beats_per_cycle) + phase_offset) % 1.0
@@ -271,14 +298,29 @@ impl AudioUnit for LfoNode {
             LfoMode::BeatSynced => {
                 let beats_per_cycle = self.frequency.get();
 
-                for i in 0..size {
-                    let beat = input.at_f32(0, i);
+                if let Some(ref transport) = self.transport {
+                    // Transport-aware: read beat from transport (single value per block)
+                    let beat = transport.current_beat() as f32;
                     let phase = if beats_per_cycle > 0.0 {
                         ((beat / beats_per_cycle) + phase_offset) % 1.0
                     } else {
                         phase_offset
                     };
-                    output.set_f32(0, i, self.evaluate(phase));
+                    let value = self.evaluate(phase);
+                    for i in 0..size {
+                        output.set_f32(0, i, value);
+                    }
+                } else {
+                    // Input-driven: read beat from input[0] per-sample
+                    for i in 0..size {
+                        let beat = input.at_f32(0, i);
+                        let phase = if beats_per_cycle > 0.0 {
+                            ((beat / beats_per_cycle) + phase_offset) % 1.0
+                        } else {
+                            phase_offset
+                        };
+                        output.set_f32(0, i, self.evaluate(phase));
+                    }
                 }
             }
         }
@@ -325,7 +367,7 @@ impl AudioUnit for LfoNode {
     }
 }
 
-impl Clone for LfoNode {
+impl<R: TransportReader + Clone> Clone for LfoNode<R> {
     fn clone(&self) -> Self {
         Self {
             shape: self.shape,
@@ -336,6 +378,7 @@ impl Clone for LfoNode {
             phase: self.phase,
             sample_rate: self.sample_rate,
             random_state: self.random_state.clone(),
+            transport: self.transport.clone(),
         }
     }
 }

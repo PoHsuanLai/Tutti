@@ -138,13 +138,6 @@ impl NeuralSystem {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct GpuInfo {
-    pub name: String,
-    pub backend: String,
-    pub max_memory_mb: Option<u64>,
-}
-
 fn stem_or(path: &str, fallback: &str) -> String {
     std::path::Path::new(path)
         .file_stem()

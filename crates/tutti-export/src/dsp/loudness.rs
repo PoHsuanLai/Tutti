@@ -3,7 +3,7 @@
 use tutti_core::analyze_true_peak;
 
 /// Apply loudness normalization (EBU R128).
-pub fn normalize_loudness(
+pub(crate) fn normalize_loudness(
     left: &mut [f32],
     right: &mut [f32],
     current_lufs: f64,
@@ -21,24 +21,22 @@ pub fn normalize_loudness(
         gain *= 10.0_f32.powf(-reduction_db as f32 / 20.0);
     }
 
-    for i in 0..left.len() {
-        left[i] *= gain;
-        right[i] *= gain;
-    }
+    left.iter_mut().zip(right.iter_mut()).for_each(|(l, r)| {
+        *l *= gain;
+        *r *= gain;
+    });
 }
 
 /// Normalize audio to target peak level.
-pub fn normalize_peak(left: &mut [f32], right: &mut [f32], target_db: f64) {
+pub(crate) fn normalize_peak(left: &mut [f32], right: &mut [f32], target_db: f64) {
     let current_peak = analyze_true_peak(left, right);
     let gain_db = target_db - current_peak;
     let gain = 10.0_f64.powf(gain_db / 20.0) as f32;
 
-    for sample in left.iter_mut() {
-        *sample *= gain;
-    }
-    for sample in right.iter_mut() {
-        *sample *= gain;
-    }
+    left.iter_mut().zip(right.iter_mut()).for_each(|(l, r)| {
+        *l *= gain;
+        *r *= gain;
+    });
 }
 
 #[cfg(test)]

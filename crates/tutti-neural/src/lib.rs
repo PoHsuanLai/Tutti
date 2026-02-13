@@ -16,7 +16,7 @@ mod error;
 pub use error::{Error, Result};
 
 mod system;
-pub use system::{GpuInfo, NeuralSystem, NeuralSystemBuilder};
+pub use system::{NeuralSystem, NeuralSystemBuilder};
 
 pub use tutti_core::InferenceConfig;
 

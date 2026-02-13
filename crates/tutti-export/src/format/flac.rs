@@ -49,7 +49,11 @@ pub(crate) fn export_flac(
     let (left_proc, right_proc) = process_audio(left, right, options, config.sample_rate)?;
 
     if options.mono {
-        encode_flac_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
+        encode_flac_mono_file(
+            &stereo_to_mono(&left_proc, &right_proc),
+            Path::new(path),
+            &config,
+        )
     } else {
         encode_flac_file(&left_proc, &right_proc, Path::new(path), &config)
     }
@@ -87,7 +91,11 @@ pub(crate) fn export_flac_with_progress(
     });
 
     let result = if options.mono {
-        encode_flac_mono_file(&stereo_to_mono(&left_proc, &right_proc), Path::new(path), &config)
+        encode_flac_mono_file(
+            &stereo_to_mono(&left_proc, &right_proc),
+            Path::new(path),
+            &config,
+        )
     } else {
         encode_flac_file(&left_proc, &right_proc, Path::new(path), &config)
     };

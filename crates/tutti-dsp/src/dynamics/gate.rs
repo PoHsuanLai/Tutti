@@ -368,7 +368,11 @@ mod tests {
         }
 
         assert!(!gate.is_open());
-        assert!(output[0] > 0.05, "With -12dB range, signal should be attenuated not muted: {}", output[0]);
+        assert!(
+            output[0] > 0.05,
+            "With -12dB range, signal should be attenuated not muted: {}",
+            output[0]
+        );
         assert!(output[0] < 0.5);
     }
 

@@ -55,7 +55,8 @@ impl NeuralEngine {
         let thread = std::thread::Builder::new()
             .name("neural-engine".into())
             .spawn(move || {
-                if let Err(e) = inference_loop(config, backend_factory, cmd_rx, request_rx, &running)
+                if let Err(e) =
+                    inference_loop(config, backend_factory, cmd_rx, request_rx, &running)
                 {
                     tracing::error!("Neural engine thread failed: {}", e);
                 }

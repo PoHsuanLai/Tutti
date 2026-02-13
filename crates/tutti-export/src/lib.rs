@@ -46,6 +46,9 @@
 mod error;
 pub use error::{ExportError, Result};
 
+mod handle;
+pub use handle::{ExportHandle, ExportStatus};
+
 mod export_builder;
 pub use export_builder::{ExportBuilder, ExportPhase, ExportProgress};
 

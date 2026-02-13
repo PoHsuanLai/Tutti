@@ -62,8 +62,6 @@
 //!     .build();
 //! ```
 
-pub use tutti_core::AudioUnit;
-
 mod error;
 pub use error::{Error, Result};
 

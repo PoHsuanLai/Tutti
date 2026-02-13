@@ -43,7 +43,7 @@ impl ResampleQuality {
 }
 
 #[cfg(any(feature = "wav", feature = "flac"))]
-pub fn resample_stereo(
+pub(crate) fn resample_stereo(
     left: &[f32],
     right: &[f32],
     source_rate: u32,

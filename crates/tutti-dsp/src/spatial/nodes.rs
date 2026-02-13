@@ -24,8 +24,10 @@
 //! binaural.set_position(90.0, 0.0); // Hard left
 //! ```
 
-use crate::{AudioUnit, Result};
+use crate::Result;
 use core::sync::atomic::{AtomicU32, Ordering};
+use tutti_core::Arc;
+use tutti_core::AudioUnit;
 use tutti_core::{BufferMut, BufferRef, SignalFrame};
 
 use super::binaural_panner::BinauralPanner;
@@ -60,16 +62,18 @@ use super::vbap_panner::SpatialPanner;
 pub struct SpatialPannerNode {
     panner: SpatialPanner,
     num_outputs: usize,
-    azimuth_atomic: AtomicU32,
-    elevation_atomic: AtomicU32,
-    spread_atomic: AtomicU32,
-    width_atomic: AtomicU32,
+    azimuth_atomic: Arc<AtomicU32>,
+    elevation_atomic: Arc<AtomicU32>,
+    spread_atomic: Arc<AtomicU32>,
+    width_atomic: Arc<AtomicU32>,
     sample_rate: f32,
     scratch_output: Vec<f32>,
 }
 
 impl Clone for SpatialPannerNode {
     fn clone(&self) -> Self {
+        // Re-create the panner with current position so the backend
+        // starts from the correct state.
         let mut new_panner = match self.num_outputs {
             2 => SpatialPanner::stereo().expect("stereo preset"),
             4 => SpatialPanner::quad().expect("quad preset"),
@@ -88,10 +92,11 @@ impl Clone for SpatialPannerNode {
         Self {
             panner: new_panner,
             num_outputs: self.num_outputs,
-            azimuth_atomic: AtomicU32::new(self.azimuth_atomic.load(Ordering::Relaxed)),
-            elevation_atomic: AtomicU32::new(self.elevation_atomic.load(Ordering::Relaxed)),
-            spread_atomic: AtomicU32::new(self.spread_atomic.load(Ordering::Relaxed)),
-            width_atomic: AtomicU32::new(self.width_atomic.load(Ordering::Relaxed)),
+            // Share the same Arc so frontend and backend see the same atomics
+            azimuth_atomic: Arc::clone(&self.azimuth_atomic),
+            elevation_atomic: Arc::clone(&self.elevation_atomic),
+            spread_atomic: Arc::clone(&self.spread_atomic),
+            width_atomic: Arc::clone(&self.width_atomic),
             sample_rate: self.sample_rate,
             scratch_output: vec![0.0; self.num_outputs],
         }
@@ -134,10 +139,10 @@ impl SpatialPannerNode {
         Self {
             panner,
             num_outputs,
-            azimuth_atomic: AtomicU32::new(0.0_f32.to_bits()),
-            elevation_atomic: AtomicU32::new(0.0_f32.to_bits()),
-            spread_atomic: AtomicU32::new(0.0_f32.to_bits()),
-            width_atomic: AtomicU32::new(1.0_f32.to_bits()),
+            azimuth_atomic: Arc::new(AtomicU32::new(0.0_f32.to_bits())),
+            elevation_atomic: Arc::new(AtomicU32::new(0.0_f32.to_bits())),
+            spread_atomic: Arc::new(AtomicU32::new(0.0_f32.to_bits())),
+            width_atomic: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             sample_rate: 48000.0,
             scratch_output: vec![0.0; num_outputs],
         }
@@ -316,9 +321,9 @@ impl AudioUnit for SpatialPannerNode {
 /// ```
 pub struct BinauralPannerNode {
     panner: BinauralPanner,
-    azimuth_atomic: AtomicU32,
-    elevation_atomic: AtomicU32,
-    width_atomic: AtomicU32,
+    azimuth_atomic: Arc<AtomicU32>,
+    elevation_atomic: Arc<AtomicU32>,
+    width_atomic: Arc<AtomicU32>,
     sample_rate: f32,
 }
 
@@ -331,9 +336,9 @@ impl Clone for BinauralPannerNode {
 
         Self {
             panner: new_panner,
-            azimuth_atomic: AtomicU32::new(self.azimuth_atomic.load(Ordering::Relaxed)),
-            elevation_atomic: AtomicU32::new(self.elevation_atomic.load(Ordering::Relaxed)),
-            width_atomic: AtomicU32::new(self.width_atomic.load(Ordering::Relaxed)),
+            azimuth_atomic: Arc::clone(&self.azimuth_atomic),
+            elevation_atomic: Arc::clone(&self.elevation_atomic),
+            width_atomic: Arc::clone(&self.width_atomic),
             sample_rate: self.sample_rate,
         }
     }
@@ -344,9 +349,9 @@ impl BinauralPannerNode {
     pub fn new(sample_rate: f32) -> Self {
         Self {
             panner: BinauralPanner::new(sample_rate),
-            azimuth_atomic: AtomicU32::new(0.0_f32.to_bits()),
-            elevation_atomic: AtomicU32::new(0.0_f32.to_bits()),
-            width_atomic: AtomicU32::new(1.0_f32.to_bits()),
+            azimuth_atomic: Arc::new(AtomicU32::new(0.0_f32.to_bits())),
+            elevation_atomic: Arc::new(AtomicU32::new(0.0_f32.to_bits())),
+            width_atomic: Arc::new(AtomicU32::new(1.0_f32.to_bits())),
             sample_rate,
         }
     }
@@ -536,5 +541,35 @@ mod tests {
         assert!((cloned.azimuth() - panner.azimuth()).abs() < 0.001);
         assert!((cloned.elevation() - panner.elevation()).abs() < 0.001);
         assert!((cloned.width() - panner.width()).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_spatial_clone_shares_atomics() {
+        let panner = SpatialPannerNode::stereo().unwrap();
+        let cloned = panner.clone();
+
+        // Setting position on original should be visible from clone
+        panner.set_position(90.0, 45.0);
+        assert!((cloned.azimuth() - 90.0).abs() < 0.001);
+        assert!((cloned.elevation() - 45.0).abs() < 0.001);
+
+        // And vice versa
+        cloned.set_position(-60.0, 10.0);
+        assert!((panner.azimuth() - (-60.0)).abs() < 0.001);
+        assert!((panner.elevation() - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_binaural_clone_shares_atomics() {
+        let panner = BinauralPannerNode::new(48000.0);
+        let cloned = panner.clone();
+
+        panner.set_position(90.0, 45.0);
+        assert!((cloned.azimuth() - 90.0).abs() < 0.001);
+        assert!((cloned.elevation() - 45.0).abs() < 0.001);
+
+        cloned.set_position(-60.0, 10.0);
+        assert!((panner.azimuth() - (-60.0)).abs() < 0.001);
+        assert!((panner.elevation() - 10.0).abs() < 0.001);
     }
 }

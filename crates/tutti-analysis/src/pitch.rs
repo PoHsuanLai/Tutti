@@ -395,7 +395,7 @@ pub fn median_filter(pitches: &[PitchResult], window_size: usize) -> Vec<PitchRe
         if freqs.is_empty() {
             result.push(PitchResult::default());
         } else {
-            freqs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            freqs.sort_by(|a, b| a.total_cmp(b));
             let median_freq = freqs[freqs.len() / 2];
             let (midi_note, cents_offset) = freq_to_midi(median_freq);
 

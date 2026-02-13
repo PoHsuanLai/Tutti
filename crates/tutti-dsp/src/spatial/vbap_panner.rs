@@ -126,7 +126,13 @@ impl SpatialPanner {
     }
 
     /// Process stereo into multichannel with width preservation
-    pub(crate) fn process_stereo_into(&mut self, left: f32, right: f32, width: f32, output: &mut [f32]) {
+    pub(crate) fn process_stereo_into(
+        &mut self,
+        left: f32,
+        right: f32,
+        width: f32,
+        output: &mut [f32],
+    ) {
         let width = width.max(0.0);
 
         if width < 0.001 {
