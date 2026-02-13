@@ -115,13 +115,11 @@ impl SoundFontUnit {
                     self.synthesizer
                         .process_midi_message(channel, 0xE0, lsb, msb);
                 }
-                ChannelVoiceMsg::ControlChange { control: tutti_core::midi::ControlChange::CC { control: cc, value } } => {
-                    self.synthesizer.process_midi_message(
-                        channel,
-                        0xB0,
-                        cc as i32,
-                        value as i32,
-                    );
+                ChannelVoiceMsg::ControlChange {
+                    control: tutti_core::midi::ControlChange::CC { control: cc, value },
+                } => {
+                    self.synthesizer
+                        .process_midi_message(channel, 0xB0, cc as i32, value as i32);
                 }
                 _ => {}
             }

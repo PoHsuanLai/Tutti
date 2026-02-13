@@ -6,7 +6,6 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-/// Automation point recording configuration.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct AutomationRecordingConfig {
     pub min_point_interval: f64,
@@ -26,7 +25,6 @@ impl Default for AutomationRecordingConfig {
     }
 }
 
-/// Recording session state (internal).
 #[derive(Debug, Clone)]
 struct RecordingSession {
     last_recorded_beat: f64,
@@ -34,7 +32,6 @@ struct RecordingSession {
     is_touching: bool,
 }
 
-/// Automation lane for one parameter.
 #[derive(Debug)]
 pub struct AutomationLane {
     envelope: Arc<RwLock<AutomationEnvelope<AutomationTarget>>>,
@@ -45,7 +42,6 @@ pub struct AutomationLane {
 }
 
 impl AutomationLane {
-    /// Create a new automation lane for the given target
     pub fn new(target: AutomationTarget) -> Self {
         let (min, max, default) = target.default_range();
         let envelope = AutomationEnvelope::new(target).with_range(min, max);
@@ -59,7 +55,6 @@ impl AutomationLane {
         }
     }
 
-    /// Create a new automation lane with an existing envelope
     pub fn with_envelope(envelope: AutomationEnvelope<AutomationTarget>) -> Self {
         let manual_value = envelope.get_value_at(0.0).unwrap_or(0.5);
         Self {
@@ -71,12 +66,10 @@ impl AutomationLane {
         }
     }
 
-    /// Get a shared reference to the envelope (for read-only access)
     pub fn envelope(&self) -> Arc<RwLock<AutomationEnvelope<AutomationTarget>>> {
         Arc::clone(&self.envelope)
     }
 
-    /// Get the current automation state
     pub fn state(&self) -> AutomationState {
         self.state
     }
@@ -96,27 +89,22 @@ impl AutomationLane {
         }
     }
 
-    /// Get the current recording configuration
     pub fn config(&self) -> &AutomationRecordingConfig {
         &self.config
     }
 
-    /// Get mutable access to the recording configuration
     pub fn config_mut(&mut self) -> &mut AutomationRecordingConfig {
         &mut self.config
     }
 
-    /// Set the recording configuration
     pub fn set_config(&mut self, config: AutomationRecordingConfig) {
         self.config = config;
     }
 
-    /// Get the manual value (used when state is Off)
     pub fn manual_value(&self) -> f32 {
         self.manual_value
     }
 
-    /// Set the manual value
     pub fn set_manual_value(&mut self, value: f32) {
         self.manual_value = value;
     }
@@ -264,42 +252,34 @@ impl AutomationLane {
         ));
     }
 
-    /// Add a point to the envelope manually
     pub fn add_point(&self, point: AutomationPoint) {
         self.envelope.write().add_point(point);
     }
 
-    /// Remove a point at the given beat position
     pub fn remove_point_at(&self, beat: f64) -> Option<AutomationPoint> {
         self.envelope.write().remove_point_at(beat)
     }
 
-    /// Clear all points from the envelope
     pub fn clear(&self) {
         self.envelope.write().clear();
     }
 
-    /// Get the number of points in the envelope
     pub fn len(&self) -> usize {
         self.envelope.read().len()
     }
 
-    /// Check if the envelope is empty
     pub fn is_empty(&self) -> bool {
         self.envelope.read().is_empty()
     }
 
-    /// Simplify the envelope by removing redundant points
     pub fn simplify(&self, tolerance: f32) {
         self.envelope.write().simplify(tolerance);
     }
 
-    /// Enable/disable the envelope
     pub fn set_enabled(&self, enabled: bool) {
         self.envelope.write().enabled = enabled;
     }
 
-    /// Check if the envelope is enabled
     pub fn is_enabled(&self) -> bool {
         self.envelope.read().enabled
     }

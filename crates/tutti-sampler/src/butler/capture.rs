@@ -8,14 +8,12 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
 
-/// State for a capture consumer.
 pub struct CaptureConsumerState {
     pub consumer: CaptureBufferConsumer,
     pub writer: Option<WavWriter<BufWriter<File>>>,
     pub channels: usize,
 }
 
-/// Create a WAV writer for capture
 pub(super) fn create_wav_writer(
     file_path: &PathBuf,
     sample_rate: f64,
@@ -37,7 +35,6 @@ pub(super) fn create_wav_writer(
     }
 }
 
-/// Flush a single capture buffer to disk
 pub(super) fn flush_capture(
     state: &mut CaptureConsumerState,
     metrics: &IOMetrics,
@@ -72,7 +69,6 @@ pub(super) fn flush_capture(
     state.consumer.add_frames_written(read as u64);
 }
 
-/// Flush all capture buffers
 pub(super) fn flush_all_captures(
     capture_consumers: &mut std::collections::HashMap<CaptureId, CaptureConsumerState>,
     metrics: &IOMetrics,

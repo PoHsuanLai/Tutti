@@ -35,13 +35,6 @@ pub struct SmoothedValue {
 }
 
 impl SmoothedValue {
-    /// Create a new smoothed value.
-    ///
-    /// # Arguments
-    ///
-    /// * `initial` - Initial value
-    /// * `smooth_time_secs` - Smoothing time in seconds (e.g., 0.010 for 10ms)
-    /// * `sample_rate` - Sample rate in Hz
     pub fn new(initial: f32, smooth_time_secs: f32, sample_rate: f32) -> Self {
         let smooth_samples = (smooth_time_secs * sample_rate).max(1.0) as u32;
 
@@ -54,7 +47,6 @@ impl SmoothedValue {
         }
     }
 
-    /// Create with smoothing disabled (immediate value changes).
     pub fn immediate(initial: f32) -> Self {
         Self {
             current: initial,
@@ -65,9 +57,6 @@ impl SmoothedValue {
         }
     }
 
-    /// Set new target value with smoothing.
-    ///
-    /// The value will gradually transition to the target over the smoothing period.
     #[inline]
     pub fn set_target(&mut self, target: f32) {
         if (target - self.target).abs() < f32::EPSILON {
@@ -82,9 +71,6 @@ impl SmoothedValue {
         }
     }
 
-    /// Set value immediately (no smoothing).
-    ///
-    /// Use this for initialization or when smoothing isn't desired.
     #[inline]
     pub fn set_immediate(&mut self, value: f32) {
         self.current = value;
@@ -93,9 +79,7 @@ impl SmoothedValue {
         self.samples_remaining = 0;
     }
 
-    /// Get the next smoothed sample value.
-    ///
-    /// Call this once per sample in the audio callback.
+    /// Call once per sample in the audio callback.
     #[inline]
     pub fn next_sample(&mut self) -> f32 {
         if self.samples_remaining > 0 {
@@ -111,38 +95,31 @@ impl SmoothedValue {
         self.current
     }
 
-    /// Get current value without advancing.
     #[inline]
     pub fn current(&self) -> f32 {
         self.current
     }
 
-    /// Get target value.
     #[inline]
     pub fn target(&self) -> f32 {
         self.target
     }
 
-    /// Check if still smoothing (hasn't reached target yet).
     #[inline]
     pub fn is_smoothing(&self) -> bool {
         self.samples_remaining > 0
     }
 
-    /// Get remaining samples until target is reached.
     #[inline]
     pub fn samples_remaining(&self) -> u32 {
         self.samples_remaining
     }
 
-    /// Update the smoothing time.
-    ///
     /// Takes effect on the next `set_target()` call.
     pub fn set_smooth_time(&mut self, smooth_time_secs: f32, sample_rate: f32) {
         self.smooth_samples = (smooth_time_secs * sample_rate).max(1.0) as u32;
     }
 
-    /// Skip smoothing and jump to target immediately.
     #[inline]
     pub fn skip_to_target(&mut self) {
         self.current = self.target;
@@ -150,9 +127,6 @@ impl SmoothedValue {
         self.samples_remaining = 0;
     }
 
-    /// Process a block of samples, filling buffer with smoothed values.
-    ///
-    /// More efficient than calling `next_sample()` in a loop when you need a buffer of values.
     #[inline]
     pub fn process_block(&mut self, buffer: &mut [f32]) {
         for sample in buffer.iter_mut() {
@@ -160,9 +134,6 @@ impl SmoothedValue {
         }
     }
 
-    /// Process a block, multiplying buffer samples by smoothed gain.
-    ///
-    /// Useful for volume/gain automation.
     #[inline]
     pub fn apply_gain(&mut self, buffer: &mut [f32]) {
         for sample in buffer.iter_mut() {
@@ -187,7 +158,6 @@ pub struct SmoothedStereo {
 }
 
 impl SmoothedStereo {
-    /// Create a new stereo smoothed value pair.
     pub fn new(
         initial_left: f32,
         initial_right: f32,
@@ -200,35 +170,29 @@ impl SmoothedStereo {
         }
     }
 
-    /// Create with same value for both channels.
     pub fn mono(initial: f32, smooth_time_secs: f32, sample_rate: f32) -> Self {
         Self::new(initial, initial, smooth_time_secs, sample_rate)
     }
 
-    /// Set targets for both channels.
     pub fn set_targets(&mut self, left: f32, right: f32) {
         self.left.set_target(left);
         self.right.set_target(right);
     }
 
-    /// Set same target for both channels.
     pub fn set_target_mono(&mut self, value: f32) {
         self.left.set_target(value);
         self.right.set_target(value);
     }
 
-    /// Get next values for both channels.
     #[inline]
     pub fn next_sample(&mut self) -> (f32, f32) {
         (self.left.next_sample(), self.right.next_sample())
     }
 
-    /// Check if either channel is still smoothing.
     pub fn is_smoothing(&self) -> bool {
         self.left.is_smoothing() || self.right.is_smoothing()
     }
 
-    /// Apply gain to stereo buffers.
     pub fn apply_gain_stereo(&mut self, left_buf: &mut [f32], right_buf: &mut [f32]) {
         let len = left_buf.len().min(right_buf.len());
         for i in 0..len {

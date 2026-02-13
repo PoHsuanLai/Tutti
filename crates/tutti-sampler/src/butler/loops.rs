@@ -198,7 +198,6 @@ pub(super) fn capture_fadein_samples(
     samples
 }
 
-/// Calculate optimal buffer size based on file size.
 pub(super) fn calculate_buffer_size(file_length_samples: u64, sample_rate: f64) -> usize {
     let file_size_bytes = file_length_samples * 2 * 4;
     let file_size_mb = file_size_bytes as f64 / (1024.0 * 1024.0);
@@ -220,10 +219,6 @@ pub(super) fn calculate_buffer_size(file_length_samples: u64, sample_rate: f64) 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // capture_samples tests
-    // =========================================================================
 
     fn make_test_wave(samples: &[(f32, f32)]) -> Wave {
         let mut wave = Wave::new(2, 48000.0);
@@ -298,10 +293,6 @@ mod tests {
         assert_eq!(captured[2], (3.0, 3.0));
     }
 
-    // =========================================================================
-    // calculate_buffer_size tests
-    // =========================================================================
-
     #[test]
     fn test_buffer_size_small_file() {
         // Small file: 1 second at 48kHz = 48000 samples
@@ -366,10 +357,6 @@ mod tests {
         assert_eq!(size, expected);
     }
 
-    // =========================================================================
-    // capture_fadeout_samples tests (needs mock stream state)
-    // =========================================================================
-
     #[test]
     fn test_capture_fadeout_zero_count() {
         use crate::butler::stream_state::ChannelStreamState;
@@ -390,10 +377,6 @@ mod tests {
 
         assert!(samples.is_empty());
     }
-
-    // =========================================================================
-    // capture_fadein_samples tests
-    // =========================================================================
 
     #[test]
     fn test_capture_fadein_zero_count() {
@@ -417,10 +400,6 @@ mod tests {
         // File not in cache and doesn't exist, so returns empty
         assert!(samples.is_empty());
     }
-
-    // =========================================================================
-    // Edge case / potential bug tests
-    // =========================================================================
 
     #[test]
     fn test_capture_samples_empty_wave() {

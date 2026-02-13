@@ -2,21 +2,7 @@
 
 use crate::system::MidiSystem;
 
-/// Fluent builder for sending MIDI messages.
-///
-/// Created via `MidiSystem::send()`.
-///
-/// # Example
-/// ```ignore
-/// // Chain multiple messages
-/// midi.send()
-///     .note_on(0, 60, 100)
-///     .cc(0, 74, 64)
-///     .pitch_bend(0, 0);
-///
-/// // Or single message
-/// midi.send().note_on(0, 60, 100);
-/// ```
+/// Fluent builder for sending MIDI messages. Created via `MidiSystem::send()`.
 pub struct MidiBuilder<'a> {
     #[cfg(feature = "midi-io")]
     midi: Option<&'a MidiSystem>,

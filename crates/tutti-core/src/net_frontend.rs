@@ -12,7 +12,6 @@ use crate::neural::{
     BatchingStrategy, GraphAnalyzer, NeuralModelId, NeuralNodeManager, SharedNeuralNodeManager,
 };
 
-/// Metadata about a node in the graph
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
     pub(crate) id: NodeId,
@@ -57,9 +56,6 @@ pub struct NodeHandle<'a> {
 }
 
 impl<'a> NodeHandle<'a> {
-    /// Chain another audio unit after this node.
-    ///
-    /// Creates a new node and pipes this node's output to its input.
     pub fn connect<U: AudioUnit + 'static>(self, unit: U) -> NodeHandle<'a> {
         let next_id = self.net.net.push(Box::new(unit));
         self.net.net.connect(self.id, 0, next_id, 0);
@@ -69,17 +65,11 @@ impl<'a> NodeHandle<'a> {
         }
     }
 
-    /// Connect this node to the graph output.
-    ///
-    /// Returns the final node's ID.
     pub fn master(self) -> NodeId {
         self.net.net.pipe_output(self.id);
         self.id
     }
 
-    /// Get the node ID without connecting to output.
-    ///
-    /// Use when you need to manually wire connections.
     pub fn id(self) -> NodeId {
         self.id
     }
@@ -128,8 +118,6 @@ impl TuttiNet {
         }
     }
 
-    /// Extract the real-time backend for the audio callback.
-    ///
     /// Can only be called once (panics on second call).
     pub(crate) fn backend(&mut self) -> NetBackend {
         self.net.backend()
@@ -157,10 +145,6 @@ impl TuttiNet {
         NodeHandle { net: self, id }
     }
 
-    /// Add a pre-boxed node to the graph.
-    ///
-    /// Use this when you have a `Box<dyn AudioUnit>` from external sources.
-    /// For most cases, prefer [`add`](Self::add) which auto-boxes.
     pub fn add_boxed(&mut self, unit: Box<dyn AudioUnit>) -> NodeHandle<'_> {
         let id = self.net.push(unit);
         NodeHandle { net: self, id }
@@ -190,9 +174,6 @@ impl TuttiNet {
         NodeHandle { net: self, id }
     }
 
-    /// Add a pre-boxed neural AudioUnit and register it with the NeuralNodeManager.
-    ///
-    /// Use this when you already have a `Box<dyn AudioUnit>` (e.g., from a node registry).
     #[cfg(feature = "neural")]
     pub fn add_neural_boxed(
         &mut self,
@@ -204,7 +185,6 @@ impl TuttiNet {
         NodeHandle { net: self, id }
     }
 
-    /// Add a node with fade-in for click-free insertion during playback.
     pub fn add_with_fade<U: AudioUnit + 'static>(
         &mut self,
         fade: fundsp::sequencer::Fade,
@@ -215,37 +195,31 @@ impl TuttiNet {
         NodeHandle { net: self, id }
     }
 
-    /// Add a mono-to-stereo splitter node (1 input → 2 identical outputs).
     pub fn add_split(&mut self) -> NodeId {
         use fundsp::prelude::*;
         self.net.push(Box::new(split::<U1>()))
     }
 
-    /// Add a stereo-to-mono joiner node (2 inputs → 1 mixed output).
     pub fn add_join(&mut self) -> NodeId {
         use fundsp::prelude::*;
         self.net.push(Box::new(join::<U2>()))
     }
 
-    /// Remove a node from the graph, returning the removed unit.
     #[cfg(not(feature = "neural"))]
     pub fn remove(&mut self, node: NodeId) -> Box<dyn AudioUnit> {
         self.net.remove(node)
     }
 
-    /// Remove a node from the graph, returning the removed unit.
     #[cfg(feature = "neural")]
     pub fn remove(&mut self, node: NodeId) -> Box<dyn AudioUnit> {
         self.neural_manager.unregister(&node);
         self.net.remove(node)
     }
 
-    /// Replace a node with a new unit, returning the old unit.
     pub fn replace<U: AudioUnit + 'static>(&mut self, node: NodeId, unit: U) -> Box<dyn AudioUnit> {
         self.net.replace(node, Box::new(unit))
     }
 
-    /// Replace a node with crossfade for click-free hot-swapping.
     pub fn crossfade<U: AudioUnit + 'static>(
         &mut self,
         node: NodeId,
@@ -256,25 +230,34 @@ impl TuttiNet {
         self.net.crossfade(node, fade, fade_time, Box::new(unit));
     }
 
-    /// Connect first output of source to first input of target.
-    ///
-    /// For connecting specific ports, use [`connect_ports`](Self::connect_ports).
-    /// For connecting all outputs to all inputs, use [`pipe_all`](Self::pipe_all).
+    /// Crossfade a node's DSP unit using an already-boxed unit (avoids double-boxing).
+    pub fn crossfade_boxed(
+        &mut self,
+        node: NodeId,
+        fade: fundsp::sequencer::Fade,
+        fade_time: f32,
+        unit: Box<dyn AudioUnit>,
+    ) {
+        self.net.crossfade(node, fade, fade_time, unit);
+    }
+
+    /// Number of nodes currently in the graph.
+    pub fn node_count(&self) -> usize {
+        self.net.size()
+    }
+
     pub fn pipe(&mut self, source: NodeId, target: NodeId) {
         self.net.connect(source, 0, target, 0);
     }
 
-    /// Connect specific ports between two nodes.
     pub fn connect_ports(&mut self, from: NodeId, from_port: usize, to: NodeId, to_port: usize) {
         self.net.connect(from, from_port, to, to_port);
     }
 
-    /// Connect all outputs of source to all inputs of target.
     pub fn pipe_all(&mut self, source: NodeId, target: NodeId) {
         self.net.pipe_all(source, target);
     }
 
-    /// Connect a node's output to the graph output.
     pub fn pipe_output(&mut self, source: NodeId) {
         self.net.pipe_output(source);
     }
@@ -334,44 +317,36 @@ impl TuttiNet {
         }
     }
 
-    /// Connect the graph input to a node's input.
     pub fn pipe_input(&mut self, target: NodeId) {
         self.net.pipe_input(target);
     }
 
-    /// Set a specific source for a node's input channel.
     pub fn set_source(&mut self, node: NodeId, channel: usize, source: Source) {
         self.net.set_source(node, channel, source);
     }
 
-    /// Disconnect a node's input port.
     pub fn disconnect(&mut self, node: NodeId, port: usize) {
         self.net.disconnect(node, port);
     }
 
-    /// Get immutable reference to a node's AudioUnit.
     pub fn node(&self, node: NodeId) -> &dyn AudioUnit {
         self.net.node(node)
     }
 
-    /// Get mutable reference to a node's AudioUnit.
     pub fn node_mut(&mut self, node: NodeId) -> &mut dyn AudioUnit {
         self.net.node_mut(node)
     }
 
-    /// Get mutable reference to a node with automatic downcasting.
     pub fn node_mut_typed<T: AudioUnit + 'static>(&mut self, id: NodeId) -> Option<&mut T> {
         let unit = self.node_mut(id);
         <dyn AudioUnit>::as_any_mut(unit).downcast_mut::<T>()
     }
 
-    /// Get immutable reference to a node with automatic downcasting.
     pub fn node_ref_typed<T: AudioUnit + 'static>(&self, id: NodeId) -> Option<&T> {
         let unit = self.node(id);
         <dyn AudioUnit>::as_any(unit).downcast_ref::<T>()
     }
 
-    /// Try to mutate a node, calling closure if downcasting succeeds.
     pub fn with_node_mut<T, F, R>(&mut self, id: NodeId, f: F) -> Option<R>
     where
         T: AudioUnit + 'static,
@@ -380,7 +355,6 @@ impl TuttiNet {
         self.node_mut_typed::<T>(id).map(f)
     }
 
-    /// Get metadata for a specific node.
     pub fn node_info(&self, id: NodeId) -> Option<NodeInfo> {
         if !self.contains(id) {
             return None;
@@ -441,15 +415,12 @@ impl TuttiNet {
             if !self.neural_manager.is_empty() {
                 let analyzer = GraphAnalyzer::new(&self.net, &self.neural_manager);
                 self.batching_strategy = Some(analyzer.analyze());
-
-                // Batching strategy available via batching_strategy()
             } else {
                 self.batching_strategy = None;
             }
         }
     }
 
-    /// Insert a PDC delay node on a specific input port of a node.
     fn insert_pdc_delay(&mut self, target: NodeId, input_port: usize, delay_samples: usize) {
         let source = self.net.source(target, input_port);
         if let Source::Local(src_id, src_port) = source {
@@ -475,7 +446,6 @@ impl TuttiNet {
         }
     }
 
-    /// Insert a PDC delay node on a graph output channel.
     fn insert_output_pdc_delay(&mut self, output_channel: usize, delay_samples: usize) {
         let source = self.net.output_source(output_channel);
         if let Source::Local(src_id, src_port) = source {
@@ -493,71 +463,58 @@ impl TuttiNet {
         }
     }
 
-    /// Check if the graph has a backend attached.
     pub fn has_backend(&self) -> bool {
         self.net.has_backend()
     }
 
-    /// Number of graph inputs.
     pub fn inputs(&self) -> usize {
         self.net.inputs()
     }
 
-    /// Number of graph outputs.
     pub fn outputs(&self) -> usize {
         self.net.outputs()
     }
 
-    /// Number of nodes in the graph.
     pub fn size(&self) -> usize {
         self.net.size()
     }
 
-    /// Check if a node exists in the graph.
     pub fn contains(&self, node: NodeId) -> bool {
         self.net.contains(node)
     }
 
-    /// Set the sample rate for all nodes.
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
         self.net.set_sample_rate(sample_rate);
     }
 
-    /// Reset all nodes to their initial state.
     pub fn reset(&mut self) {
         self.net.reset();
     }
 
-    /// Get the last error from graph validation.
     pub fn error(&mut self) -> &Option<fundsp::net::NetError> {
         self.net.error()
     }
 
-    /// Validate the graph structure (panics on invalid graph).
     pub fn check(&self) {
         self.net.check();
     }
 
-    /// Render the graph offline to a Wave.
     pub fn render_offline(&self, sample_rate: f64, duration: f64) -> fundsp::wave::Wave {
         let mut render_net = self.net.clone();
         render_net.set_sample_rate(sample_rate);
         fundsp::wave::Wave::render(sample_rate, duration, &mut render_net)
     }
 
-    /// Render the graph offline with latency compensation.
     pub fn render_offline_latency(&self, sample_rate: f64, duration: f64) -> fundsp::wave::Wave {
         let mut render_net = self.net.clone();
         render_net.set_sample_rate(sample_rate);
         fundsp::wave::Wave::render_latency(sample_rate, duration, &mut render_net)
     }
 
-    /// Clone the underlying Net for offline export.
     pub fn clone_net(&self) -> Net {
         self.net.clone()
     }
 
-    /// Queue MIDI events to be sent to a node.
     #[cfg(feature = "midi")]
     pub fn queue_midi(&mut self, node: NodeId, events: &[crate::midi::MidiEvent]) {
         let unit_id = self.net.node(node).get_id();
@@ -565,31 +522,26 @@ impl TuttiNet {
         self.midi_registry.queue(unit_id, events);
     }
 
-    /// Get a reference to the MIDI registry.
     #[cfg(feature = "midi")]
     pub fn midi_registry(&self) -> &crate::midi::MidiRegistry {
         &self.midi_registry
     }
 
-    /// Get the neural node manager.
     #[cfg(feature = "neural")]
     pub fn neural_manager(&self) -> &SharedNeuralNodeManager {
         &self.neural_manager
     }
 
-    /// Get the current batching strategy for neural nodes.
     #[cfg(feature = "neural")]
     pub fn batching_strategy(&self) -> Option<&BatchingStrategy> {
         self.batching_strategy.as_ref()
     }
 
-    /// Check if a node is a neural audio node.
     #[cfg(feature = "neural")]
     pub fn is_neural(&self, node: NodeId) -> bool {
         self.neural_manager.is_neural(&node)
     }
 
-    /// Get the number of neural nodes in the graph.
     #[cfg(feature = "neural")]
     pub fn neural_count(&self) -> usize {
         self.neural_manager.len()
@@ -611,9 +563,6 @@ impl TuttiNet {
         &mut self.net
     }
 
-    /// Direct read-only access to the underlying fundsp `Net`.
-    ///
-    /// Safe for inspection, but see [`inner`](Self::inner) for mutation caveats.
     pub fn inner_ref(&self) -> &Net {
         &self.net
     }
@@ -626,7 +575,6 @@ impl TuttiNet {
         self.pdc_enabled = enabled;
     }
 
-    /// Whether automatic PDC is enabled.
     pub fn pdc_enabled(&self) -> bool {
         self.pdc_enabled
     }

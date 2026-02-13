@@ -1,6 +1,5 @@
 //! Recording configuration types.
 
-/// Recording source type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingSource {
     MidiInput,
@@ -9,7 +8,6 @@ pub enum RecordingSource {
     Pattern,
 }
 
-/// Recording mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingMode {
     Replace,
@@ -17,7 +15,6 @@ pub enum RecordingMode {
     Loop,
 }
 
-/// Recording configuration.
 #[derive(Debug, Clone)]
 pub struct RecordingConfig {
     pub channel_index: usize,
@@ -30,7 +27,6 @@ pub struct RecordingConfig {
     pub punch_out: Option<f64>,
 }
 
-/// Quantize settings.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct QuantizeSettings {
     pub resolution: f64,
@@ -101,19 +97,16 @@ impl Default for RecordingConfigBuilder {
 }
 
 impl RecordingConfigBuilder {
-    /// Set the channel index to record to
     pub fn channel(mut self, index: usize) -> Self {
         self.channel_index = index;
         self
     }
 
-    /// Set the recording source
     pub fn source(mut self, source: RecordingSource) -> Self {
         self.source = source;
         self
     }
 
-    /// Set the recording mode
     pub fn mode(mut self, mode: RecordingMode) -> Self {
         self.mode = mode;
         self
@@ -156,7 +149,6 @@ impl RecordingConfigBuilder {
         self
     }
 
-    /// Build the RecordingConfig
     pub fn build(self) -> RecordingConfig {
         RecordingConfig {
             channel_index: self.channel_index,
@@ -265,7 +257,6 @@ impl QuantizeSettingsBuilder {
         self
     }
 
-    /// Build the QuantizeSettings
     pub fn build(self) -> QuantizeSettings {
         QuantizeSettings {
             resolution: self.resolution,

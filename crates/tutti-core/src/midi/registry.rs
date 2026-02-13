@@ -50,7 +50,6 @@ pub struct MidiRegistry {
 }
 
 impl MidiRegistry {
-    /// Create a new empty MIDI registry.
     pub fn new() -> Self {
         Self {
             slots: Arc::new(DashMap::new()),
@@ -67,7 +66,6 @@ impl MidiRegistry {
             .or_insert_with(|| Arc::new(MidiEventSlot::new()));
     }
 
-    /// Remove a unit's channel (cleanup on teardown).
     pub fn unregister_unit(&self, unit_id: u64) {
         self.slots.remove(&unit_id);
     }
@@ -125,7 +123,6 @@ impl MidiRegistry {
         count
     }
 
-    /// Check if an audio unit has pending MIDI events.
     pub fn has_events(&self, unit_id: u64) -> bool {
         self.slots
             .get(&unit_id)
@@ -142,7 +139,6 @@ impl MidiRegistry {
         }
     }
 
-    /// Get the number of units with pending events.
     pub fn pending_count(&self) -> usize {
         self.slots.iter().filter(|slot| !slot.rx.is_empty()).count()
     }

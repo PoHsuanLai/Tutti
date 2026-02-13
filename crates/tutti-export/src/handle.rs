@@ -1,19 +1,12 @@
-//! Non-blocking export handle with progress polling.
-
 use crate::export_builder::ExportProgress;
 use crossbeam_channel::Receiver;
 use std::thread::JoinHandle;
 
-/// Status of a background export operation.
 #[derive(Debug)]
 pub enum ExportStatus {
-    /// Export is in progress.
     Running(ExportProgress),
-    /// Export completed successfully.
     Complete,
-    /// Export failed with an error message.
     Failed(String),
-    /// No progress yet (just started).
     Pending,
 }
 
@@ -56,17 +49,12 @@ impl ExportHandle {
         }
     }
 
-    /// Poll for the latest export progress (non-blocking).
-    ///
-    /// Drains all pending progress messages and returns the latest one.
-    /// If the export thread has finished, returns `Complete` or `Failed`.
+    /// Drains all pending progress messages and returns the latest status.
     pub fn progress(&mut self) -> ExportStatus {
-        // Drain all pending progress messages to get the latest
         while let Ok(p) = self.progress_rx.try_recv() {
             self.last_progress = Some(p);
         }
 
-        // Check if the thread has finished
         if let Some(ref thread) = self.thread {
             if thread.is_finished() {
                 let thread = self.thread.take().unwrap();
@@ -81,14 +69,12 @@ impl ExportHandle {
             return ExportStatus::Complete;
         }
 
-        // Still running — return latest progress
         match self.last_progress {
             Some(p) => ExportStatus::Running(p),
             None => ExportStatus::Pending,
         }
     }
 
-    /// Block until the export finishes and return the result.
     pub fn wait(mut self) -> crate::Result<()> {
         if let Some(thread) = self.thread.take() {
             match thread.join() {
@@ -100,7 +86,6 @@ impl ExportHandle {
         }
     }
 
-    /// Check if the export has finished (non-blocking).
     pub fn is_done(&self) -> bool {
         self.thread
             .as_ref()

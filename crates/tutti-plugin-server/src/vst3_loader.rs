@@ -1,7 +1,4 @@
-//! VST3 plugin loader
-//!
-//! This module provides VST3 plugin hosting using the `vst3-host` crate.
-//! It wraps the generic VST3 types to work with Tutti's protocol types.
+//! VST3 plugin loader using the `vst3-host` crate.
 
 use std::path::Path;
 
@@ -13,17 +10,14 @@ use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
 
 use tutti_midi_io::{Channel, ChannelVoiceMsg, ControlChange};
 
-// Re-export the vst3-host crate for advanced users
 pub use vst3_host;
 
-/// Wraps `vst3_host::Vst3Instance`, implements `PluginInstance` trait.
 pub struct Vst3Instance {
     inner: vst3_host::Vst3Instance,
     metadata: PluginMetadata,
 }
 
 impl Vst3Instance {
-    /// Load a VST3 plugin from path.
     pub fn load(path: &Path, sample_rate: f64, block_size: usize) -> Result<Self> {
         let inner =
             vst3_host::Vst3Instance::load(path, sample_rate, block_size).map_err(|e| match e {
@@ -92,11 +86,9 @@ impl Vst3Instance {
         buffer: &'a mut AudioBuffer<'a>,
         midi_events: &[MidiEvent],
     ) -> MidiEventVec {
-        // Convert Tutti MIDI events to vst3-host events
         let vst3_midi: Vec<TuttiMidiWrapper> =
             midi_events.iter().map(TuttiMidiWrapper::from).collect();
 
-        // Create vst3-host audio buffer from Tutti buffer
         let mut vst3_buffer = vst3_host::AudioBuffer::new(
             buffer.inputs,
             buffer.outputs,
@@ -106,12 +98,10 @@ impl Vst3Instance {
 
         let transport = vst3_host::TransportState::new();
 
-        // Process through vst3-host (unified API)
         let (output_midi, _) =
             self.inner
                 .process(&mut vst3_buffer, &vst3_midi, None, &[], &transport);
 
-        // Convert output MIDI back to Tutti format
         output_midi
             .into_iter()
             .filter_map(|e| convert_vst3_midi_to_tutti(&e))
@@ -307,12 +297,10 @@ impl Vst3Instance {
         self.inner.get_parameter(param_id)
     }
 
-    /// Note: VST3 ParamIDs are stable identifiers that may be sparse (e.g., 0, 5, 1000).
     pub fn set_parameter_by_id(&mut self, param_id: u32, value: f64) {
         self.inner.set_parameter(param_id, value);
     }
 
-    /// For VST3, the param_id is the native ParamID which may be sparse.
     pub fn get_parameter_list(&self) -> Vec<tutti_plugin::protocol::ParameterInfo> {
         let count = self.inner.get_parameter_count();
         let mut result = Vec::with_capacity(count as usize);
@@ -395,8 +383,6 @@ impl Vst3Instance {
         self.inner.has_editor()
     }
 
-    /// Open plugin editor.
-    ///
     /// # Safety
     ///
     /// The `parent` pointer must be a valid window handle.
@@ -416,7 +402,6 @@ impl Vst3Instance {
     }
 }
 
-/// Wrapper to implement vst3_host::Vst3MidiEvent for Tutti's MidiEvent.
 struct TuttiMidiWrapper<'a> {
     event: &'a MidiEvent,
 }

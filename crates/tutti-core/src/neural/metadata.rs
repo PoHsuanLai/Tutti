@@ -6,25 +6,20 @@ use dashmap::DashMap;
 use fundsp::net::NodeId;
 use serde::{Deserialize, Serialize};
 
-/// Counter for generating unique model IDs
 static MODEL_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-/// Unique identifier for a neural model.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NeuralModelId(pub u64);
 
 impl NeuralModelId {
-    /// Creates a new unique model ID.
     pub fn new() -> Self {
         Self(MODEL_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
     }
 
-    /// Creates a model ID from a raw u64 value.
     pub fn from_raw(id: u64) -> Self {
         Self(id)
     }
 
-    /// Returns the raw u64 value.
     pub fn as_u64(&self) -> u64 {
         self.0
     }
@@ -51,29 +46,24 @@ pub struct NeuralNodeManager {
 }
 
 impl NeuralNodeManager {
-    /// Creates a new empty registry.
     pub fn new() -> Self {
         Self {
             nodes: DashMap::new(),
         }
     }
 
-    /// Register a neural node with its model ID.
     pub fn register(&self, node_id: NodeId, model_id: NeuralModelId) {
         self.nodes.insert(node_id, model_id);
     }
 
-    /// Unregister a neural node.
     pub(crate) fn unregister(&self, node_id: &NodeId) -> Option<NeuralModelId> {
         self.nodes.remove(node_id).map(|(_, v)| v)
     }
 
-    /// Checks if a node is registered as neural.
     pub fn is_neural(&self, node_id: &NodeId) -> bool {
         self.nodes.contains_key(node_id)
     }
 
-    /// Get all neural nodes grouped by model_id.
     pub(crate) fn group_by_model(&self) -> HashMap<NeuralModelId, Vec<NodeId>> {
         let mut groups: HashMap<NeuralModelId, Vec<NodeId>> = HashMap::new();
         for entry in self.nodes.iter() {
@@ -82,22 +72,18 @@ impl NeuralNodeManager {
         groups
     }
 
-    /// Get all registered node IDs.
     pub(crate) fn all_nodes(&self) -> Vec<NodeId> {
         self.nodes.iter().map(|e| *e.key()).collect()
     }
 
-    /// Get count of registered neural nodes.
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    /// Check if registry is empty.
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    /// Clear all registrations.
     pub fn clear(&self) {
         self.nodes.clear();
     }
@@ -117,7 +103,6 @@ impl core::fmt::Debug for NeuralNodeManager {
     }
 }
 
-/// Arc-wrapped manager for shared ownership
 pub type SharedNeuralNodeManager = Arc<NeuralNodeManager>;
 
 #[cfg(test)]

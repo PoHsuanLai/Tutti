@@ -15,7 +15,6 @@ pub enum MotionState {
     DeclickToLocate,
 }
 
-/// Playback direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {
     #[default]

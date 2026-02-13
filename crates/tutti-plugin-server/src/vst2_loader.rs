@@ -692,7 +692,6 @@ impl Vst2Instance {
                 )));
             }
 
-            // Validate param_count against actual plugin parameter count
             let actual_count = self.instance.get_info().parameters;
             if param_count > actual_count {
                 return Err(BridgeError::StateRestoreError(format!(
@@ -710,7 +709,6 @@ impl Vst2Instance {
                     payload[offset + 2],
                     payload[offset + 3],
                 ]);
-                // Clamp to valid range
                 let value = value.clamp(0.0, 1.0);
                 params.set_parameter(i, value);
             }
@@ -827,7 +825,6 @@ impl Host for BridgeHost {
 #[cfg(feature = "vst2")]
 impl Drop for Vst2Instance {
     fn drop(&mut self) {
-        // Close editor before unloading
         if let Some(editor) = self.editor.as_mut() {
             editor.0.close();
         }

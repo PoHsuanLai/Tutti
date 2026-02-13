@@ -11,10 +11,8 @@ use dashmap::DashMap;
 use std::sync::Arc;
 use tutti_core::PdcManager;
 
-/// Check for PDC changes and apply updates to streams.
-///
-/// Called each refill cycle to detect when plugin latencies have changed
-/// and adjust stream positions accordingly with smooth crossfades.
+/// Called each refill cycle. Detects plugin latency changes and
+/// adjusts stream positions with smooth crossfades.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn check_pdc_updates(
     pdc_manager: &Option<Arc<PdcManager>>,

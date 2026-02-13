@@ -1,5 +1,3 @@
-//! Plugin client for multi-process plugin hosting.
-
 use crate::bridge::PluginBridge;
 use crate::error::{BridgeError, LoadStage, Result};
 use crate::lockfree_bridge::{BridgeThreadHandle, LockFreeBridge};
@@ -20,7 +18,6 @@ const TICK_BATCH_SIZE: usize = 64;
 /// Monotonic counter for stable PluginClient IDs that survive cloning.
 static NEXT_CLIENT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
-/// Pre-allocated scratch buffer for RT-safe audio conversion.
 #[derive(Clone)]
 struct ScratchBuffer {
     f32_buf: Vec<f32>,
@@ -36,7 +33,7 @@ impl ScratchBuffer {
     }
 }
 
-/// Per-channel tick accumulation buffer. Batches single-sample tick() calls.
+/// Batches single-sample tick() calls into blocks of TICK_BATCH_SIZE.
 #[derive(Clone)]
 struct TickBuffer<T: Copy + Default> {
     input: Vec<Vec<T>>,
@@ -77,15 +74,12 @@ impl<T: Copy + Default> TickBuffer<T> {
     }
 }
 
-/// Plugin client for multi-process plugin hosting.
-///
 /// Communicates with plugin server via lock-free queues. Implements both
 /// `AudioUnit` (f32) and `AudioUnit<F64>` for native f64 processing.
-///
-/// Cloning is cheap - each instance has independent buffers but shares the bridge.
+/// Cloning is cheap -- independent buffers but shared bridge.
 #[derive(Clone)]
 pub struct PluginClient {
-    /// Stable ID that survives Clone (fundsp clones nodes on commit).
+    /// Survives Clone (fundsp clones nodes on commit).
     stable_id: u64,
     bridge: Option<Arc<dyn PluginBridge>>,
     metadata: PluginMetadata,
@@ -98,11 +92,9 @@ pub struct PluginClient {
     tick_f64: TickBuffer<f64>,
     midi_producer: Arc<UnsafeCell<ringbuf::HeapProd<MidiEvent>>>,
     midi_consumer: Arc<UnsafeCell<ringbuf::HeapCons<MidiEvent>>>,
-    /// Pre-allocated buffer for RT-safe MIDI event draining
     midi_drain_buffer: crate::protocol::MidiEventVec,
-    /// Pull-based MIDI registry (set by engine for graph-routed MIDI)
+    /// Set by engine for graph-routed MIDI via `engine.note_on()` / `engine.note_off()`.
     midi_registry: Option<tutti_core::MidiRegistry>,
-    /// Pre-allocated buffer for polling MIDI registry (RT-safe)
     midi_poll_buffer: Vec<MidiEvent>,
 }
 
@@ -110,9 +102,7 @@ pub struct PluginClient {
 unsafe impl Send for PluginClient {}
 unsafe impl Sync for PluginClient {}
 
-/// Owner handle for plugin process and bridge thread.
-///
-/// Cleans up gracefully on drop.
+/// Owns the plugin server process and bridge thread. Cleans up on drop.
 pub struct PluginClientHandle {
     process: Option<Child>,
     #[allow(dead_code)]
@@ -122,8 +112,6 @@ pub struct PluginClientHandle {
 }
 
 impl PluginClient {
-    /// Load a plugin and spawn bridge process.
-    ///
     /// Returns client (for audio) and handle (for cleanup).
     pub async fn load(
         config: BridgeConfig,
@@ -221,24 +209,17 @@ impl PluginClient {
         self.negotiated_format
     }
 
-    /// Returns true if the plugin server process has crashed.
-    ///
-    /// When this returns true, all audio processing calls produce silence.
-    /// The UI should poll this to show "Plugin crashed" and offer reload.
+    /// When true, all audio processing calls produce silence.
     pub fn is_crashed(&self) -> bool {
         self.bridge.as_ref().is_some_and(|b| b.is_crashed())
     }
 
-    // =========================================================================
     // Non-RT control methods (main thread only)
-    // =========================================================================
 
-    /// Open the plugin editor GUI. Returns (width, height) on success.
     pub fn open_editor(&self, parent_handle: u64) -> Option<(u32, u32)> {
         self.bridge.as_ref()?.open_editor(parent_handle)
     }
 
-    /// Close the plugin editor GUI.
     pub fn close_editor(&self) -> bool {
         self.bridge
             .as_ref()
@@ -246,19 +227,16 @@ impl PluginClient {
             .unwrap_or(false)
     }
 
-    /// Tick the plugin editor idle loop.
     pub fn editor_idle(&self) {
         if let Some(bridge) = &self.bridge {
             bridge.editor_idle();
         }
     }
 
-    /// Save the plugin state. Returns the state bytes on success.
     pub fn save_state(&self) -> Option<Vec<u8>> {
         self.bridge.as_ref()?.save_state()
     }
 
-    /// Load plugin state from bytes.
     pub fn load_state(&self, data: &[u8]) -> bool {
         self.bridge
             .as_ref()
@@ -266,33 +244,23 @@ impl PluginClient {
             .unwrap_or(false)
     }
 
-    /// Get the full parameter list from the plugin.
     pub fn get_parameter_list(&self) -> Option<Vec<crate::protocol::ParameterInfo>> {
         self.bridge.as_ref()?.get_parameter_list()
     }
 
-    /// Get a single parameter value.
     pub fn get_parameter_value(&self, param_id: u32) -> Option<f32> {
         self.bridge.as_ref()?.get_parameter(param_id)
     }
 
-    /// Set the MIDI registry for pull-based MIDI delivery from the engine.
-    ///
-    /// When set, the plugin client polls the registry during audio processing
-    /// to receive MIDI events routed via `engine.note_on()` / `engine.note_off()`.
     pub fn set_midi_registry(&mut self, registry: tutti_core::MidiRegistry) {
         self.midi_registry = Some(registry);
     }
 
-    /// Get an Arc clone of the bridge (for PluginHandle construction).
     pub(crate) fn bridge_arc(&self) -> Option<Arc<dyn PluginBridge>> {
         self.bridge.as_ref().map(Arc::clone)
     }
 
-    /// Create a PluginClient from an in-process bridge.
-    ///
-    /// Used by the in-process plugin loading path where no child process or
-    /// BridgeConfig is involved.
+    /// For in-process plugin loading (no child process or BridgeConfig).
     pub fn from_bridge(
         bridge: Arc<dyn PluginBridge>,
         metadata: PluginMetadata,
@@ -998,9 +966,7 @@ impl AudioUnit<F64> for PluginClient {
 }
 
 impl PluginClient {
-    /// Queue MIDI events to be sent to the plugin server.
-    ///
-    /// Events are buffered and sent during the next audio processing call.
+    /// Events are buffered and sent during the next process() call.
     pub fn queue_midi(&mut self, events: &[MidiEvent]) {
         let prod = unsafe { &mut *self.midi_producer.get() };
         let cons = unsafe { &mut *self.midi_consumer.get() };

@@ -1,5 +1,3 @@
-//! Dithering algorithms for bit depth reduction.
-
 use crate::options::DitherType;
 
 pub(crate) struct DitherState {

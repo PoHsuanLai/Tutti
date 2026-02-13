@@ -56,13 +56,11 @@ impl<'a> StreamBuilder<'a> {
         }
     }
 
-    /// Set channel index for playback (default: 0).
     pub fn channel(mut self, index: usize) -> Self {
         self.channel = index;
         self
     }
 
-    /// Set offset in samples (default: 0).
     pub fn offset_samples(mut self, offset: usize) -> Self {
         self.offset_samples = offset;
         self
@@ -205,10 +203,6 @@ impl<'a> RecordBuilder<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // StreamBuilder tests (disabled path - no SamplerSystem needed)
-    // =========================================================================
 
     #[test]
     fn test_stream_builder_disabled_defaults() {

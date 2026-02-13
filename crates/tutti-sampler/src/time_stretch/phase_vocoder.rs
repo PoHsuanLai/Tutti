@@ -57,12 +57,6 @@ pub struct PhaseVocoderProcessor {
 }
 
 impl PhaseVocoderProcessor {
-    /// Create a new phase vocoder processor
-    ///
-    /// # Arguments
-    ///
-    /// * `fft_size` - FFT size preset (determines latency/quality trade-off)
-    /// * `sample_rate` - Audio sample rate in Hz
     pub fn new(fft_size: FftSize, sample_rate: f64) -> Self {
         let size = fft_size.size();
         let hop = fft_size.hop_size();
@@ -107,19 +101,15 @@ impl PhaseVocoderProcessor {
             .collect()
     }
 
-    /// Get the FFT size
     #[cfg(test)]
     pub fn fft_size(&self) -> usize {
         self.fft_size
     }
 
-    /// Get the latency in samples
     pub fn latency_samples(&self) -> usize {
         self.fft_size
     }
 
-    /// Reset the processor state
-    ///
     /// Call this when seeking or stopping playback.
     pub fn reset(&mut self) {
         self.fft_buffer.fill(0.0);
@@ -135,7 +125,6 @@ impl PhaseVocoderProcessor {
         self.frames_since_onset = 0;
     }
 
-    /// Set the sample rate
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
         if (self.sample_rate - sample_rate).abs() > 0.1 {
             self.sample_rate = sample_rate;
@@ -165,27 +154,19 @@ impl PhaseVocoderProcessor {
         }
     }
 
-    /// Get the number of input samples available
     #[inline]
     pub fn input_available(&self) -> usize {
         self.input_write_pos.saturating_sub(self.input_read_pos)
     }
 
-    /// Get the number of output samples available
     #[inline]
     pub fn output_available(&self) -> usize {
         self.output_write_pos.saturating_sub(self.output_read_pos)
     }
 
-    /// Pop output samples from the processor
+    /// Returns the number of samples actually written to the output buffer.
     ///
-    /// # Returns
-    ///
-    /// The number of samples actually written to the output buffer.
-    ///
-    /// # RT-Safety
-    ///
-    /// This method performs no allocations.
+    /// RT-safe: no allocations.
     #[inline]
     pub fn pop_output(&mut self, output: &mut [f32]) -> usize {
         let available = self.output_available();
@@ -199,16 +180,7 @@ impl PhaseVocoderProcessor {
         count
     }
 
-    /// Process available input and generate stretched output
-    ///
-    /// # Arguments
-    ///
-    /// * `stretch_factor` - Time stretch factor (>1 = slower, <1 = faster)
-    /// * `pitch_shift_ratio` - Pitch shift ratio (>1 = higher, <1 = lower)
-    ///
-    /// # RT-Safety
-    ///
-    /// This method performs no allocations. All buffers are pre-allocated.
+    /// RT-safe: no allocations, all buffers are pre-allocated.
     pub fn process(&mut self, stretch_factor: f32, pitch_shift_ratio: f32) {
         // Calculate synthesis hop based on stretch factor
         let synthesis_hop = (self.hop_analysis as f32 * stretch_factor).round() as usize;

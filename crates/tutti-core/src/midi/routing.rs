@@ -50,7 +50,6 @@ pub struct MidiRoute {
 }
 
 impl MidiRoute {
-    /// Create a new route that matches all events.
     pub fn new() -> Self {
         Self {
             port: None,
@@ -60,7 +59,6 @@ impl MidiRoute {
         }
     }
 
-    /// Create a channel-specific route.
     pub fn for_channel(channel: u8) -> Self {
         Self {
             port: None,
@@ -70,7 +68,6 @@ impl MidiRoute {
         }
     }
 
-    /// Create a port-specific route.
     pub fn for_port(port: usize) -> Self {
         Self {
             port: Some(port),
@@ -80,7 +77,6 @@ impl MidiRoute {
         }
     }
 
-    /// Create a port+channel specific route.
     pub fn for_port_channel(port: usize, channel: u8) -> Self {
         Self {
             port: Some(port),
@@ -90,7 +86,6 @@ impl MidiRoute {
         }
     }
 
-    /// Add a target unit ID.
     pub fn with_target(mut self, unit_id: u64) -> Self {
         if self.targets.len() < MAX_TARGETS_PER_ROUTE {
             self.targets.push(unit_id);
@@ -98,7 +93,6 @@ impl MidiRoute {
         self
     }
 
-    /// Add multiple target unit IDs (for layering).
     pub fn with_targets(mut self, unit_ids: &[u64]) -> Self {
         for &id in unit_ids {
             if self.targets.len() >= MAX_TARGETS_PER_ROUTE {
@@ -109,7 +103,6 @@ impl MidiRoute {
         self
     }
 
-    /// Check if this route matches the given port and event.
     #[inline]
     pub fn matches(&self, port: usize, event: &MidiEvent) -> bool {
         if !self.enabled {
@@ -143,7 +136,6 @@ pub struct MidiRoutingSnapshot {
 }
 
 impl MidiRoutingSnapshot {
-    /// Create an empty snapshot.
     pub fn empty() -> Self {
         Self {
             routes: Vec::new(),
@@ -152,7 +144,6 @@ impl MidiRoutingSnapshot {
         }
     }
 
-    /// Create a snapshot from routes.
     fn from_routes(routes: Vec<MidiRoute>, fallback: Option<u64>) -> Self {
         let mut snapshot = Self {
             routes,
@@ -163,7 +154,6 @@ impl MidiRoutingSnapshot {
         snapshot
     }
 
-    /// Rebuild the channel lookup table from routes.
     fn rebuild_lookup(&mut self) {
         // Clear existing lookup
         for lookup in self.channel_lookup.iter_mut() {
@@ -190,14 +180,7 @@ impl MidiRoutingSnapshot {
         }
     }
 
-    /// Route an event to target units (RT-safe).
-    ///
-    /// Returns an iterator over unit IDs that should receive this event.
-    /// Zero allocations - uses a stack-allocated buffer.
-    ///
-    /// # Arguments
-    /// * `port` - The hardware port index the event came from
-    /// * `event` - The MIDI event to route
+    /// RT-safe. Returns an iterator over target unit IDs. Zero allocations.
     #[inline]
     pub fn route<'a>(&'a self, port: usize, event: &'a MidiEvent) -> RouteIterator<'a> {
         RouteIterator {
@@ -212,9 +195,7 @@ impl MidiRoutingSnapshot {
         }
     }
 
-    /// Simple routing for single-target backwards compatibility.
-    ///
-    /// Returns the first matching target, or the fallback if no routes match.
+    /// Returns the first matching target, or the fallback if none match.
     #[inline]
     pub fn route_single(&self, port: usize, event: &MidiEvent) -> Option<u64> {
         // Fast path: check channel lookup first
@@ -243,13 +224,11 @@ impl MidiRoutingSnapshot {
         self.fallback_target
     }
 
-    /// Check if any routes are configured.
     #[inline]
     pub fn has_routes(&self) -> bool {
         !self.routes.is_empty() || self.fallback_target.is_some()
     }
 
-    /// Get the fallback target (for backwards compatibility).
     #[inline]
     pub fn fallback(&self) -> Option<u64> {
         self.fallback_target
@@ -292,13 +271,11 @@ pub struct RouteIterator<'a> {
 }
 
 impl<'a> RouteIterator<'a> {
-    /// Check if we've already yielded this target.
     #[inline]
     fn is_seen(&self, target: u64) -> bool {
         self.seen[..self.seen_count].contains(&target)
     }
 
-    /// Mark a target as seen.
     #[inline]
     fn mark_seen(&mut self, target: u64) {
         if self.seen_count < self.seen.len() {
@@ -393,7 +370,6 @@ pub struct MidiRoutingTable {
 }
 
 impl MidiRoutingTable {
-    /// Create a new empty routing table.
     pub fn new() -> Self {
         let snapshot = MidiRoutingSnapshot::empty();
         Self {
@@ -404,25 +380,21 @@ impl MidiRoutingTable {
         }
     }
 
-    /// Get the atomic snapshot Arc for sharing with the audio thread.
     pub fn snapshot_arc(&self) -> Arc<ArcSwap<MidiRoutingSnapshot>> {
         self.snapshot.clone()
     }
 
-    /// Load the current snapshot (RT-safe).
     #[inline]
     pub fn load(&self) -> arc_swap::Guard<Arc<MidiRoutingSnapshot>> {
         self.snapshot.load()
     }
 
-    /// Set the fallback target (used when no routes match).
     pub fn fallback(&mut self, target: u64) -> &mut Self {
         self.fallback_target = Some(target);
         self.dirty = true;
         self
     }
 
-    /// Clear the fallback target.
     pub fn clear_fallback(&mut self) -> &mut Self {
         self.fallback_target = None;
         self.dirty = true;
@@ -554,12 +526,10 @@ impl MidiRoutingTable {
         self
     }
 
-    /// Get the number of routes.
     pub fn route_count(&self) -> usize {
         self.routes.len()
     }
 
-    /// Check if there are uncommitted changes.
     pub fn is_dirty(&self) -> bool {
         self.dirty
     }

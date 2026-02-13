@@ -1,46 +1,28 @@
-//! Waveform Analysis
-//!
-//! Generate waveform visualization data from audio samples.
-//!
-//! ## Features
-//!
-//! - **Multi-resolution**: Generate summaries at different zoom levels
-//! - **Min/Max/RMS**: Track peak and average levels per block
-//! - **Streaming**: Process audio incrementally without loading entire file
-//! - **Zero-copy**: Work directly with audio buffers
+//! Multi-resolution min/max/RMS waveform summaries for visualization.
 
-/// A single block of waveform summary data
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(
     feature = "serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct WaveformBlock {
-    /// Minimum sample value in this block
     pub min: f32,
-    /// Maximum sample value in this block
     pub max: f32,
-    /// RMS (root mean square) level of this block
     pub rms: f32,
 }
 
-/// Waveform summary for a single channel
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(
     feature = "serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct WaveformSummary {
-    /// Summary blocks
     pub blocks: Vec<WaveformBlock>,
-    /// Number of samples per block
     pub samples_per_block: usize,
-    /// Total number of samples summarized
     pub total_samples: usize,
 }
 
 impl WaveformSummary {
-    /// Create a new empty summary
     pub fn new(samples_per_block: usize) -> Self {
         Self {
             blocks: Vec::new(),
@@ -49,7 +31,6 @@ impl WaveformSummary {
         }
     }
 
-    /// Create with pre-allocated capacity
     pub(crate) fn with_capacity(samples_per_block: usize, num_blocks: usize) -> Self {
         Self {
             blocks: Vec::with_capacity(num_blocks),
@@ -58,17 +39,14 @@ impl WaveformSummary {
         }
     }
 
-    /// Get the duration in blocks
     pub fn len(&self) -> usize {
         self.blocks.len()
     }
 
-    /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
     }
 
-    /// Get the overall peak level
     pub fn peak(&self) -> f32 {
         self.blocks
             .iter()
@@ -76,7 +54,6 @@ impl WaveformSummary {
             .fold(0.0f32, |a, b| a.max(b))
     }
 
-    /// Get the average RMS level
     pub fn average_rms(&self) -> f32 {
         if self.blocks.is_empty() {
             return 0.0;
@@ -85,21 +62,16 @@ impl WaveformSummary {
         sum / self.blocks.len() as f32
     }
 
-    /// Append samples incrementally (streaming mode)
-    ///
-    /// Call this multiple times to build the summary without loading all samples at once.
+    /// Append samples incrementally without loading the entire file at once.
     pub fn append_samples(&mut self, samples: &[f32]) {
         if samples.is_empty() || self.samples_per_block == 0 {
             return;
         }
 
-        // Calculate how many complete blocks we can form
         let total_so_far = self.total_samples + samples.len();
         let complete_blocks = total_so_far / self.samples_per_block;
         let blocks_to_add = complete_blocks.saturating_sub(self.blocks.len());
 
-        // For simplicity, we'll just compute from the new samples
-        // A more sophisticated implementation would handle partial blocks
         for block_idx in 0..blocks_to_add {
             let global_start = (self.blocks.len() + block_idx) * self.samples_per_block;
             let local_start = global_start.saturating_sub(self.total_samples);
@@ -118,21 +90,17 @@ impl WaveformSummary {
     }
 }
 
-/// Stereo waveform summary (left and right channels)
 #[derive(Debug, Clone, Default)]
 #[cfg_attr(
     feature = "serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct StereoWaveformSummary {
-    /// Left channel summary
     pub left: WaveformSummary,
-    /// Right channel summary
     pub right: WaveformSummary,
 }
 
 impl StereoWaveformSummary {
-    /// Create a new stereo summary
     pub(crate) fn new(samples_per_block: usize) -> Self {
         Self {
             left: WaveformSummary::new(samples_per_block),
@@ -140,18 +108,15 @@ impl StereoWaveformSummary {
         }
     }
 
-    /// Get the number of blocks
     pub fn len(&self) -> usize {
         self.left.len()
     }
 
-    /// Check if empty
     pub fn is_empty(&self) -> bool {
         self.left.is_empty()
     }
 }
 
-/// Compute a single block's statistics
 fn compute_block(samples: &[f32]) -> WaveformBlock {
     if samples.is_empty() {
         return WaveformBlock::default();
@@ -170,15 +135,7 @@ fn compute_block(samples: &[f32]) -> WaveformBlock {
     }
 }
 
-/// Compute waveform summary from mono samples
-///
-/// # Arguments
-/// * `samples` - Audio samples (mono or interleaved)
-/// * `channels` - Number of channels (1 for mono, 2 for interleaved stereo)
-/// * `samples_per_block` - Number of samples to summarize per block
-///
-/// # Returns
-/// Waveform summary for the first channel
+/// Summarizes the first channel. For interleaved stereo, set `channels = 2`.
 pub fn compute_summary(
     samples: &[f32],
     channels: usize,
@@ -218,14 +175,7 @@ pub fn compute_summary(
     summary
 }
 
-/// Compute stereo waveform summary from interleaved samples
-///
-/// # Arguments
-/// * `samples` - Interleaved stereo samples [L, R, L, R, ...]
-/// * `samples_per_block` - Number of samples to summarize per block (per channel)
-///
-/// # Returns
-/// Stereo waveform summary with separate left and right channels
+/// Input: interleaved `[L, R, L, R, ...]`.
 pub(crate) fn compute_stereo_summary(
     samples: &[f32],
     samples_per_block: usize,
@@ -280,29 +230,20 @@ pub(crate) fn compute_stereo_summary(
     StereoWaveformSummary { left, right }
 }
 
-/// Multi-resolution waveform summary
-///
-/// Stores summaries at multiple zoom levels for efficient rendering.
+/// Multiple zoom levels for efficient rendering.
 #[derive(Debug, Clone)]
 #[cfg_attr(
     feature = "serialization",
     derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct MultiResolutionSummary {
-    /// Summaries at different resolutions (index 0 = finest, higher = coarser)
+    /// Index 0 = finest, higher = coarser.
     pub levels: Vec<WaveformSummary>,
-    /// Base samples per block (finest level)
     pub base_samples_per_block: usize,
 }
 
 impl MultiResolutionSummary {
-    /// Create multi-resolution summary with power-of-2 levels
-    ///
-    /// # Arguments
-    /// * `samples` - Audio samples
-    /// * `channels` - Number of channels
-    /// * `base_samples_per_block` - Samples per block at finest level
-    /// * `num_levels` - Number of zoom levels (each level is 2x coarser)
+    /// Each level is 2x coarser than the previous.
     pub fn from_samples(
         samples: &[f32],
         channels: usize,
@@ -311,10 +252,8 @@ impl MultiResolutionSummary {
     ) -> Self {
         let mut levels = Vec::with_capacity(num_levels);
 
-        // Level 0: finest resolution
         levels.push(compute_summary(samples, channels, base_samples_per_block));
 
-        // Higher levels: each is 2x coarser (computed from previous level)
         for level in 1..num_levels {
             let prev = &levels[level - 1];
             let coarse = downsample_summary(prev);
@@ -327,9 +266,6 @@ impl MultiResolutionSummary {
         }
     }
 
-    /// Get summary at a specific level
-    ///
-    /// Level 0 is finest, higher levels are coarser.
     /// Returns the coarsest level if index is out of bounds.
     pub fn at_level(&self, level: usize) -> &WaveformSummary {
         self.levels
@@ -337,15 +273,8 @@ impl MultiResolutionSummary {
             .unwrap_or_else(|| self.levels.last().unwrap())
     }
 
-    /// Get the appropriate level for a given zoom factor
-    ///
-    /// # Arguments
-    /// * `samples_per_pixel` - How many samples each pixel represents
-    ///
-    /// # Returns
-    /// Reference to the best summary level for this zoom
+    /// Picks the coarsest level where `samples_per_block <= samples_per_pixel`.
     pub fn for_zoom(&self, samples_per_pixel: usize) -> &WaveformSummary {
-        // Find the coarsest level where samples_per_block <= samples_per_pixel
         for (i, summary) in self.levels.iter().enumerate() {
             if summary.samples_per_block >= samples_per_pixel {
                 return if i > 0 { &self.levels[i - 1] } else { summary };
@@ -354,13 +283,11 @@ impl MultiResolutionSummary {
         self.levels.last().unwrap()
     }
 
-    /// Get the number of zoom levels
     pub fn num_levels(&self) -> usize {
         self.levels.len()
     }
 }
 
-/// Downsample a summary by combining adjacent blocks (2:1)
 fn downsample_summary(summary: &WaveformSummary) -> WaveformSummary {
     let new_samples_per_block = summary.samples_per_block * 2;
     let num_blocks = summary.blocks.len().div_ceil(2);

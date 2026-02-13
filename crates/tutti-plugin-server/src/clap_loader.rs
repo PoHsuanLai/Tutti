@@ -1,7 +1,4 @@
 //! CLAP plugin loader - thin wrapper around clap-host crate.
-//!
-//! This module wraps `clap_host::ClapInstance` to implement the
-//! `PluginInstance` trait used by tutti-plugin's server.
 
 #![allow(dead_code)] // Some functions used only by server module
 
@@ -16,7 +13,6 @@ use tutti_plugin::{BridgeError, LoadStage, PluginMetadata, Result};
 #[cfg(feature = "clap")]
 use clap_host::ClapInstance as ClapHostInstance;
 
-/// Wraps `clap_host::ClapInstance`, implements `PluginInstance` trait.
 pub struct ClapInstance {
     #[cfg(feature = "clap")]
     inner: ClapHostInstance,
@@ -101,7 +97,6 @@ impl PluginInstance for ClapInstance {
         buffer: &'a mut AudioBuffer<'a>,
         ctx: &ProcessContext,
     ) -> ProcessOutput {
-        // Convert tutti types to clap-host types
         let midi_events: Vec<clap_host::MidiEvent> =
             ctx.midi_events.iter().map(convert_midi_event).collect();
 
@@ -133,7 +128,6 @@ impl PluginInstance for ClapInstance {
             )
             .unwrap_or_default();
 
-        // Convert output back to tutti types
         convert_process_output(result)
     }
 
@@ -142,7 +136,6 @@ impl PluginInstance for ClapInstance {
         buffer: &'a mut AudioBuffer64<'a>,
         ctx: &ProcessContext,
     ) -> ProcessOutput {
-        // Convert tutti types to clap-host types
         let midi_events: Vec<clap_host::MidiEvent> =
             ctx.midi_events.iter().map(convert_midi_event).collect();
 
@@ -174,7 +167,6 @@ impl PluginInstance for ClapInstance {
             )
             .unwrap_or_default();
 
-        // Convert output back to tutti types
         convert_process_output(result)
     }
 

@@ -1,5 +1,3 @@
-//! Plugin instance trait and processing types.
-//!
 //! Re-exported from `tutti-plugin::instance`. The canonical definitions live there
 //! so both the client (in-process bridge) and server can use them.
 

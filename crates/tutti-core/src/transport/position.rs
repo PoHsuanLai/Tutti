@@ -2,7 +2,6 @@
 //!
 //! Provides position handling with Ardour-style "squishing" for seamless loop wrapping.
 
-/// Represents a position in musical time
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Default)]
 pub(crate) struct MusicalPosition {
     pub(crate) beats: f64,
@@ -53,7 +52,6 @@ impl core::ops::Sub<MusicalPosition> for MusicalPosition {
     }
 }
 
-/// A loop range defined by start and end positions in beats
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct LoopRange {
     pub(crate) start: f64,

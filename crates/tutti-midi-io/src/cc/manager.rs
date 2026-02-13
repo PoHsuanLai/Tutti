@@ -21,7 +21,6 @@ struct LearnState {
     channel_filter: Option<MidiChannel>,
 }
 
-/// Lock-free MIDI CC mapping manager with MIDI learn support.
 pub struct CCMappingManager {
     mappings: Arc<DashMap<MappingId, CCMapping>>,
     next_id: AtomicU64,

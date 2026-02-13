@@ -38,41 +38,34 @@ pub struct TuttiSystem {
 }
 
 impl TuttiSystem {
-    /// Create a new Tutti system builder.
     pub fn builder() -> TuttiSystemBuilder {
         TuttiSystemBuilder::default()
     }
 
-    /// Get sample rate.
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
 
-    /// Check if audio is running.
     #[cfg(feature = "std")]
     pub fn is_running(&self) -> bool {
         self.engine.lock().is_running()
     }
 
-    /// List available output devices.
     #[cfg(feature = "std")]
     pub fn list_output_devices() -> Result<Vec<String>> {
         AudioEngine::list_devices()
     }
 
-    /// Get the name of the current output device.
     #[cfg(feature = "std")]
     pub fn current_output_device_name(&self) -> Result<String> {
         self.engine.lock().device_name()
     }
 
-    /// Set output device (requires restart to take effect).
     #[cfg(feature = "std")]
     pub fn set_output_device(&self, index: Option<usize>) {
         self.engine.lock().set_device(index);
     }
 
-    /// Get number of output channels.
     pub fn channels(&self) -> usize {
         #[cfg(feature = "std")]
         {
@@ -149,48 +142,27 @@ impl TuttiSystem {
         TransportHandle::new(self.transport.clone(), self.click_state.clone())
     }
 
-    /// Get the transport manager (advanced use - prefer `transport()` for fluent API).
     pub fn transport_manager(&self) -> &Arc<TransportManager> {
         &self.transport
     }
 
-    /// Get the metering manager.
     pub fn metering(&self) -> &Arc<MeteringManager> {
         &self.metering
     }
 
-    /// Get the click state for creating a ClickNode.
-    ///
-    /// Prefer `transport().metronome()` for fluent configuration,
-    /// or `transport().click_state()` for node creation.
+    /// Prefer `transport().metronome()` for fluent configuration.
     pub fn click_state(&self) -> &Arc<ClickState> {
         &self.click_state
     }
 
-    /// Get the PDC manager.
     pub fn pdc(&self) -> &Arc<PdcManager> {
         &self.pdc
     }
 
-    /// Clone the DSP graph for offline export.
-    ///
-    /// This creates a snapshot of the current audio graph that can be rendered
-    /// offline without affecting the live audio engine.
-    ///
-    /// Used internally by the export system.
     pub fn clone_net(&self) -> fundsp::net::Net {
         self.net.lock().clone_net()
     }
 
-    /// Create an export context for offline rendering.
-    ///
-    /// The context contains:
-    /// - An isolated timeline that advances by sample count
-    /// - A MIDI snapshot (if midi feature enabled)
-    /// - Transport settings (tempo, loop range)
-    ///
-    /// Nodes configured for export will read from this context
-    /// instead of the live transport.
     pub fn create_export_context(&self) -> crate::ExportContext {
         use crate::transport::ExportConfig;
 
@@ -265,7 +237,6 @@ impl TuttiSystem {
     }
 }
 
-/// Builder for TuttiSystem.
 #[derive(Default)]
 pub struct TuttiSystemBuilder {
     #[cfg(feature = "std")]
@@ -281,27 +252,23 @@ pub struct TuttiSystemBuilder {
 }
 
 impl TuttiSystemBuilder {
-    /// Set sample rate (only for no_std mode).
     #[cfg(not(feature = "std"))]
     pub fn sample_rate(mut self, rate: f64) -> Self {
         self.sample_rate = Some(rate);
         self
     }
 
-    /// Set output device index (only for std mode with CPAL).
     #[cfg(feature = "std")]
     pub fn output_device(mut self, index: usize) -> Self {
         self.device_index = Some(index);
         self
     }
 
-    /// Set number of inputs (default: 0).
     pub fn inputs(mut self, count: usize) -> Self {
         self.inputs = count;
         self
     }
 
-    /// Set number of outputs (default: 2 for stereo).
     pub fn outputs(mut self, count: usize) -> Self {
         self.outputs = count;
         self
@@ -330,7 +297,6 @@ impl TuttiSystemBuilder {
         self
     }
 
-    /// Build and start the audio system.
     pub fn build(self) -> Result<TuttiSystem> {
         #[cfg(feature = "std")]
         let (sample_rate, mut engine) = {

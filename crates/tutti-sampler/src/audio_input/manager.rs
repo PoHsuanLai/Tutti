@@ -56,7 +56,6 @@ impl Clone for AudioInputManager {
 }
 
 impl AudioInputManager {
-    /// Create a new audio input state
     pub fn new(sample_rate: u32) -> Self {
         Self {
             input_sender: None,
@@ -73,7 +72,6 @@ impl AudioInputManager {
         }
     }
 
-    /// List available input devices
     pub fn list_input_devices(&self) -> Vec<InputDeviceInfo> {
         let host = cpal::default_host();
         let mut devices = Vec::new();
@@ -102,7 +100,6 @@ impl AudioInputManager {
         devices
     }
 
-    /// Get the default input device info
     pub fn default_device_info(&self) -> Option<InputDeviceInfo> {
         let host = cpal::default_host();
         let device = host.default_input_device()?;
@@ -117,8 +114,7 @@ impl AudioInputManager {
         })
     }
 
-    /// Select an input device by index
-    /// Lock-free: Uses AtomicUsize with Release ordering
+    /// Lock-free: Uses AtomicUsize with Release ordering.
     pub fn select_device(&self, device_index: usize) -> crate::Result<()> {
         let host = cpal::default_host();
         let devices: Vec<_> = host.input_devices()?.collect();
@@ -135,7 +131,6 @@ impl AudioInputManager {
         Ok(())
     }
 
-    /// Request to start capturing (will be picked up by stream manager)
     pub fn request_start(&mut self) {
         let buffer_size = (self.sample_rate as usize) / 2;
         let (tx, rx) = bounded(buffer_size);
@@ -146,77 +141,63 @@ impl AudioInputManager {
         self.start_requested.store(true, Ordering::Release);
     }
 
-    /// Request to stop capturing
     pub fn request_stop(&mut self) {
         self.stop_requested.store(true, Ordering::Release);
     }
 
-    /// Check if start was requested (and clear the flag)
     pub fn take_start_request(&self) -> bool {
         self.start_requested.swap(false, Ordering::AcqRel)
     }
 
-    /// Check if stop was requested (and clear the flag)
     pub fn take_stop_request(&self) -> bool {
         self.stop_requested.swap(false, Ordering::AcqRel)
     }
 
-    /// Take the input sender (moves ownership to stream callback)
     pub fn take_input_sender(&mut self) -> Option<Sender<(f32, f32)>> {
         self.input_sender.take()
     }
 
-    /// Mark as capturing
     pub fn set_capturing(&self, capturing: bool) {
         self.is_capturing.store(capturing, Ordering::Release);
     }
 
-    /// Check if currently capturing
     pub fn is_capturing(&self) -> bool {
         self.is_capturing.load(Ordering::Acquire)
     }
 
-    /// Check if input is running (alias for is_capturing)
     pub fn is_running(&self) -> bool {
         self.is_capturing()
     }
 
-    /// Enable/disable input monitoring (hear yourself)
     pub fn set_monitoring(&self, enabled: bool) {
         self.monitoring_enabled.store(enabled, Ordering::Release);
     }
 
-    /// Check if monitoring is enabled
     pub fn is_monitoring(&self) -> bool {
         self.monitoring_enabled.load(Ordering::Acquire)
     }
 
-    /// Set input gain (0.0 to 2.0)
+    /// Range: 0.0 to 2.0.
     pub fn set_gain(&self, gain: f32) {
         self.input_gain.set(gain.clamp(0.0, 2.0));
     }
 
-    /// Get current input gain
     pub fn gain(&self) -> f32 {
         self.input_gain.get()
     }
 
-    /// Get current peak level (for metering)
     pub fn peak_level(&self) -> f32 {
         self.peak_level.get()
     }
 
-    /// Get input gain Arc (for callback)
     pub fn input_gain_arc(&self) -> Arc<AtomicFloat> {
         Arc::clone(&self.input_gain)
     }
 
-    /// Get peak level Arc (for callback)
     pub fn peak_level_arc(&self) -> Arc<AtomicFloat> {
         Arc::clone(&self.peak_level)
     }
 
-    /// Get dropped samples Arc (for callback)
     pub fn dropped_samples_arc(&self) -> Arc<AtomicU32> {
         Arc::clone(&self.dropped_samples)
     }
@@ -228,14 +209,11 @@ impl AudioInputManager {
         self.input_receiver.clone()
     }
 
-    /// Get monitoring enabled flag (for audio callback)
     pub fn monitoring_enabled_flag(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.monitoring_enabled)
     }
 
-    /// Get selected device index
-    /// Lock-free: Uses AtomicUsize with Acquire ordering
-    /// Returns None if no device selected (sentinel value)
+    /// Returns None if no device selected.
     pub fn selected_device(&self) -> Option<usize> {
         let device = self.selected_device.load(Ordering::Acquire);
         if device == NO_DEVICE_SELECTED {
@@ -245,7 +223,6 @@ impl AudioInputManager {
         }
     }
 
-    /// Get sample rate
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
     }
@@ -267,12 +244,10 @@ impl AudioInputManager {
         (0.0, 0.0)
     }
 
-    /// Get number of dropped samples (for debugging)
     pub fn dropped_samples(&self) -> u32 {
         self.dropped_samples.load(Ordering::Relaxed)
     }
 
-    /// Reset dropped samples counter
     pub fn reset_dropped_samples(&self) {
         self.dropped_samples.store(0, Ordering::Relaxed);
     }

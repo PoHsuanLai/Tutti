@@ -47,8 +47,6 @@ impl SynthBufferPool {
     }
 }
 
-/// Neural synthesizer AudioUnit.
-///
 /// Zero inputs, stereo output. Polls MIDI from [`MidiRegistry`], submits
 /// inference requests, receives ControlParams asynchronously.
 pub struct NeuralSynthNode {
@@ -94,13 +92,11 @@ impl NeuralSynthNode {
         }
     }
 
-    /// Convenience: set a live `MidiRegistry` as the MIDI source.
     pub fn with_midi_registry(mut self, registry: MidiRegistry) -> Self {
         self.midi_source = Some(Box::new(registry));
         self
     }
 
-    /// Set the MIDI source (live registry or export snapshot reader).
     pub fn set_midi_source(&mut self, source: Box<dyn MidiSource>) {
         self.midi_source = Some(source);
     }

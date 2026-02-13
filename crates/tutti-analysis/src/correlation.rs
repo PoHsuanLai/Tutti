@@ -1,19 +1,5 @@
-//! Stereo Correlation and Phase Analysis
-//!
-//! Provides analysis tools for stereo audio:
-//! - **Correlation**: Phase coherence between L/R channels (-1 to +1)
-//! - **Stereo width**: How "wide" the stereo image is
-//! - **Balance**: Left/right balance
-//! - **Mid/Side levels**: M/S encoding analysis
-//!
-//! ## Use Cases
-//!
-//! - Phase correlation meters (prevent mono compatibility issues)
-//! - Stereo width visualization
-//! - Mixing feedback
-//! - Mastering analysis
+//! Stereo correlation, phase analysis, and M/S metering.
 
-/// Stereo analysis results
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(
     feature = "serialization",
@@ -38,37 +24,27 @@ pub struct StereoAnalysis {
     /// - 1.0 = Full right
     pub balance: f32,
 
-    /// Mid (L+R)/2 RMS level
+    /// RMS of (L+R)/2
     pub mid_level: f32,
 
-    /// Side (L-R)/2 RMS level
+    /// RMS of (L-R)/2
     pub side_level: f32,
 
-    /// Left channel RMS level
     pub left_level: f32,
-
-    /// Right channel RMS level
     pub right_level: f32,
 }
 
 impl StereoAnalysis {
-    /// Check if the stereo signal has phase issues
-    ///
-    /// Returns true if correlation is significantly negative,
-    /// which can cause problems when summed to mono.
+    /// True if correlation is negative enough to cause mono summing issues.
     pub fn has_phase_issues(&self) -> bool {
         self.correlation < -0.3
     }
 
-    /// Check if the signal is essentially mono
     pub fn is_mono(&self) -> bool {
         self.correlation > 0.95
     }
 
-    /// Get M/S ratio in dB
-    ///
-    /// Positive values = more mid (narrower)
-    /// Negative values = more side (wider)
+    /// Positive = more mid (narrower), negative = more side (wider).
     pub fn ms_ratio_db(&self) -> f32 {
         if self.side_level > 0.0 && self.mid_level > 0.0 {
             20.0 * (self.mid_level / self.side_level).log10()
@@ -82,23 +58,17 @@ impl StereoAnalysis {
     }
 }
 
-/// Real-time stereo correlation meter
-///
-/// Maintains smoothed state for continuous monitoring.
+/// Maintains smoothed state for continuous real-time monitoring.
 pub struct CorrelationMeter {
     sample_rate: f64,
-    /// Smoothing coefficient (0.0 = no smoothing, 1.0 = infinite smoothing)
+    /// 0.0 = no smoothing, 1.0 = infinite smoothing
     smoothing: f32,
-    /// Current smoothed analysis
     current: StereoAnalysis,
-    /// Attack time in seconds (for increasing values)
-    attack_time: f32,
-    /// Release time in seconds (for decreasing values)
-    release_time: f32,
+    attack_time: f32,  // seconds
+    release_time: f32, // seconds
 }
 
 impl CorrelationMeter {
-    /// Create a new correlation meter
     pub fn new(sample_rate: f64) -> Self {
         Self {
             sample_rate,
@@ -109,32 +79,20 @@ impl CorrelationMeter {
         }
     }
 
-    /// Set smoothing coefficient (0.0 - 0.99)
     pub fn set_smoothing(&mut self, smoothing: f32) {
         self.smoothing = smoothing.clamp(0.0, 0.99);
     }
 
-    /// Set attack/release times in milliseconds
     pub fn set_times(&mut self, attack_ms: f32, release_ms: f32) {
         self.attack_time = attack_ms / 1000.0;
         self.release_time = release_ms / 1000.0;
     }
 
-    /// Process a stereo buffer and update internal state
-    ///
-    /// # Arguments
-    /// * `left` - Left channel samples
-    /// * `right` - Right channel samples
-    ///
-    /// # Returns
-    /// Instantaneous (non-smoothed) analysis of this buffer
+    /// Returns instantaneous (non-smoothed) analysis; updates internal smoothed state.
     pub fn process(&mut self, left: &[f32], right: &[f32]) -> StereoAnalysis {
         let instant = analyze_stereo(left, right);
-
-        // Calculate smoothing coefficients based on attack/release
         let buffer_duration = left.len() as f32 / self.sample_rate as f32;
 
-        // Apply asymmetric smoothing (faster attack, slower release)
         self.current.correlation = self.smooth_value(
             self.current.correlation,
             instant.correlation,
@@ -158,12 +116,10 @@ impl CorrelationMeter {
         instant
     }
 
-    /// Get current smoothed analysis
     pub fn current(&self) -> StereoAnalysis {
         self.current
     }
 
-    /// Reset the meter state
     pub fn reset(&mut self) {
         self.current = StereoAnalysis::default();
     }
@@ -184,14 +140,6 @@ impl CorrelationMeter {
     }
 }
 
-/// Analyze a stereo buffer (non-streaming, instant analysis)
-///
-/// # Arguments
-/// * `left` - Left channel samples
-/// * `right` - Right channel samples
-///
-/// # Returns
-/// Complete stereo analysis
 pub fn analyze_stereo(left: &[f32], right: &[f32]) -> StereoAnalysis {
     let len = left.len().min(right.len());
     if len == 0 {
@@ -220,25 +168,19 @@ pub fn analyze_stereo(left: &[f32], right: &[f32]) -> StereoAnalysis {
 
     let n = len as f64;
 
-    // RMS levels
     let left_rms = (sum_l_sq / n).sqrt() as f32;
     let right_rms = (sum_r_sq / n).sqrt() as f32;
     let mid_rms = (sum_mid_sq / n).sqrt() as f32;
     let side_rms = (sum_side_sq / n).sqrt() as f32;
 
-    // Correlation coefficient
-    // r = Σ(L*R) / sqrt(Σ(L²) * Σ(R²))
+    // r = Σ(L·R) / √(Σ(L²) · Σ(R²))
     let correlation = if sum_l_sq > 0.0 && sum_r_sq > 0.0 {
         (sum_lr / (sum_l_sq.sqrt() * sum_r_sq.sqrt())) as f32
     } else {
         0.0
     };
 
-    // Stereo width (derived from correlation)
-    // width = 1 - correlation maps to: mono=0, normal=0.5-1, wide=1-2
     let width = 1.0 - correlation;
-
-    // Balance
     let total_level = left_rms + right_rms;
     let balance = if total_level > 0.0 {
         (right_rms - left_rms) / total_level

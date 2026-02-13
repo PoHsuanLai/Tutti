@@ -3,18 +3,8 @@ use tutti_core::AtomicFloat;
 
 use super::utils::{ExponentialSmoother, DEFAULT_POSITION_SMOOTH_TIME};
 
-/// Binaural panner using simple ITD/ILD model
-///
-/// Provides basic 3D audio for headphones without requiring HRTF datasets.
-/// Uses Interaural Time Difference (ITD) and Interaural Level Difference (ILD)
-/// to create spatial cues for headphone listening.
-///
-/// For production use, consider integrating a full HRTF library like:
-/// - OpenAL Soft's HRTF dataset
-/// - MIT KEMAR HRTF
-/// - SADIE HRTF database
-///
-/// **Internal implementation detail** - users should use `BinauralPannerNode` instead.
+/// Simple ITD/ILD binaural model for headphone 3D audio.
+/// Internal -- use `BinauralPannerNode` instead.
 pub(crate) struct BinauralPanner {
     azimuth_target: Arc<AtomicFloat>,
     elevation_target: Arc<AtomicFloat>,
@@ -27,7 +17,6 @@ pub(crate) struct BinauralPanner {
 }
 
 impl BinauralPanner {
-    /// Create a new binaural panner.
     pub(crate) fn new(sample_rate: f32) -> Self {
         const MAX_ITD_SAMPLES: usize = 64;
 
@@ -43,16 +32,12 @@ impl BinauralPanner {
         }
     }
 
-    /// Set position in degrees (smoothed over 50ms)
-    ///
-    /// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left, -90 = right)
-    /// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
+    /// Azimuth in degrees (-180..180, 0=front, 90=left), elevation (-90..90, 0=ear level).
     pub(crate) fn set_position(&mut self, azimuth: f32, elevation: f32) {
         self.azimuth_target.set(azimuth.clamp(-180.0, 180.0));
         self.elevation_target.set(elevation.clamp(-90.0, 90.0));
     }
 
-    /// Process mono input to binaural stereo output using ITD/ILD model.
     pub(crate) fn process_mono(&mut self, input: f32) -> (f32, f32) {
         let target_azimuth = self.azimuth_target.get();
         let target_elevation = self.elevation_target.get();
@@ -109,7 +94,6 @@ impl BinauralPanner {
         (left_out, right_out)
     }
 
-    /// Process stereo input to binaural stereo output.
     pub(crate) fn process_stereo(&mut self, left: f32, right: f32, width: f32) -> (f32, f32) {
         let width = width.clamp(0.0, 2.0);
 

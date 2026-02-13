@@ -5,10 +5,7 @@ use vbap::VBAPanner;
 
 use super::utils::{ExponentialSmoother, DEFAULT_POSITION_SMOOTH_TIME};
 
-/// Spatial audio panner using VBAP
-///
-/// Wraps the vbap crate with DAW-friendly API and channel layout handling.
-/// **Internal implementation detail** - users should use `SpatialPannerNode` instead.
+/// VBAP panner internals. Use `SpatialPannerNode` instead.
 pub(crate) struct SpatialPanner {
     panner: VBAPanner,
     azimuth_target: Arc<AtomicFloat>,
@@ -34,37 +31,31 @@ impl SpatialPanner {
         }
     }
 
-    /// Create a stereo panner
     pub(crate) fn stereo() -> Result<Self> {
         let panner = VBAPanner::builder().stereo().build()?;
         Ok(Self::new_with_layout(panner))
     }
 
-    /// Create a quad (4.0) panner
     pub(crate) fn quad() -> Result<Self> {
         let panner = VBAPanner::builder().quad().build()?;
         Ok(Self::new_with_layout(panner))
     }
 
-    /// Create a 5.1 surround panner
     pub(crate) fn surround_5_1() -> Result<Self> {
         let panner = VBAPanner::builder().surround_5_1().build()?;
         Ok(Self::new_with_layout(panner))
     }
 
-    /// Create a 7.1 surround panner
     pub(crate) fn surround_7_1() -> Result<Self> {
         let panner = VBAPanner::builder().surround_7_1().build()?;
         Ok(Self::new_with_layout(panner))
     }
 
-    /// Create a Dolby Atmos 7.1.4 panner
     pub(crate) fn atmos_7_1_4() -> Result<Self> {
         let panner = VBAPanner::builder().atmos_7_1_4().build()?;
         Ok(Self::new_with_layout(panner))
     }
 
-    /// Get number of output channels
     pub(crate) fn num_channels(&self) -> usize {
         self.panner.num_speakers()
     }
@@ -84,10 +75,7 @@ impl SpatialPanner {
         self.spread = spread.clamp(0.0, 1.0);
     }
 
-    /// Compute speaker gains for current position
-    ///
-    /// Returns a vector of gains, one per speaker channel.
-    /// Updates smoothed position values on each call.
+    /// Also advances the position smoothers.
     pub(crate) fn compute_gains(&mut self) -> Vec<f32> {
         let target_azimuth = self.azimuth_target.get();
         let target_elevation = self.elevation_target.get();
@@ -117,7 +105,6 @@ impl SpatialPanner {
         gains
     }
 
-    /// Process mono into pre-allocated output buffer
     pub(crate) fn process_mono_into(&mut self, sample: f32, output: &mut [f32]) {
         let gains = self.compute_gains();
         for (out, gain) in output.iter_mut().zip(gains.iter()) {
@@ -125,7 +112,6 @@ impl SpatialPanner {
         }
     }
 
-    /// Process stereo into multichannel with width preservation
     pub(crate) fn process_stereo_into(
         &mut self,
         left: f32,

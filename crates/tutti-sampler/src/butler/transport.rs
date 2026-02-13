@@ -59,7 +59,6 @@ impl TransportBridge {
         }
     }
 
-    /// Stop the transport bridge.
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::Release);
         if let Some(thread) = self.thread.take() {

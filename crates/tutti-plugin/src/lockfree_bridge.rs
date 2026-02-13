@@ -48,7 +48,6 @@ enum BridgeResponse {
     Error,
 }
 
-/// Response type for non-RT control operations.
 #[derive(Debug)]
 pub(crate) enum ControlResponse {
     EditorOpened { width: u32, height: u32 },
@@ -60,7 +59,7 @@ pub(crate) enum ControlResponse {
     Error,
 }
 
-/// Lock-free bridge for RT-safe plugin communication. Clone is cheap.
+/// Clone is cheap (Arc-based).
 #[derive(Clone)]
 pub struct LockFreeBridge {
     command_queue: Arc<ArrayQueue<BridgeCommand>>,
@@ -74,7 +73,7 @@ pub struct LockFreeBridge {
     recycle_queue: Arc<ArrayQueue<Box<ProcessCommandData>>>,
 }
 
-/// Handle to bridge thread. Shuts down on drop.
+/// Shuts down on drop.
 pub struct BridgeThreadHandle {
     bridge: LockFreeBridge,
     thread_handle: Option<thread::JoinHandle<()>>,
@@ -443,7 +442,7 @@ impl LockFreeBridge {
         self.audio_buffer.read_channel_into_f64(channel, output)
     }
 
-    /// Process audio. RT-safe, lock-free.
+    /// RT-safe, lock-free.
     pub fn process(
         &self,
         num_samples: usize,
@@ -489,7 +488,6 @@ impl LockFreeBridge {
         )
     }
 
-    /// Wait for a control response with timeout.
     fn wait_control_response(&self, timeout: Duration) -> Option<ControlResponse> {
         let start = Instant::now();
         loop {
@@ -503,8 +501,6 @@ impl LockFreeBridge {
         }
     }
 
-    /// Open the plugin editor GUI. Returns (width, height) on success.
-    ///
     /// Non-RT. Must be called from the main thread.
     pub fn open_editor(&self, parent_handle: u64) -> Option<(u32, u32)> {
         if self.crashed.load(Ordering::Acquire) {
@@ -519,8 +515,6 @@ impl LockFreeBridge {
         }
     }
 
-    /// Close the plugin editor GUI.
-    ///
     /// Non-RT. Must be called from the main thread.
     pub fn close_editor(&self) -> bool {
         if self.crashed.load(Ordering::Acquire) {
@@ -535,9 +529,7 @@ impl LockFreeBridge {
         )
     }
 
-    /// Tick the plugin editor idle loop.
-    ///
-    /// Non-RT. Fire-and-forget.
+    /// Non-RT, fire-and-forget.
     pub fn editor_idle(&self) {
         if self.crashed.load(Ordering::Acquire) {
             return;
@@ -545,8 +537,6 @@ impl LockFreeBridge {
         let _ = self.command_queue.push(BridgeCommand::EditorIdle);
     }
 
-    /// Save the plugin state. Returns the state bytes on success.
-    ///
     /// Non-RT. Must be called from the main thread.
     pub fn save_state(&self) -> Option<Vec<u8>> {
         if self.crashed.load(Ordering::Acquire) {
@@ -559,8 +549,6 @@ impl LockFreeBridge {
         }
     }
 
-    /// Load plugin state from bytes.
-    ///
     /// Non-RT. Must be called from the main thread.
     pub fn load_state(&self, data: &[u8]) -> bool {
         if self.crashed.load(Ordering::Acquire) {
@@ -581,8 +569,6 @@ impl LockFreeBridge {
         )
     }
 
-    /// Get the full parameter list from the plugin.
-    ///
     /// Non-RT. Must be called from the main thread.
     pub fn get_parameter_list(&self) -> Option<Vec<ParameterInfo>> {
         if self.crashed.load(Ordering::Acquire) {
@@ -597,8 +583,6 @@ impl LockFreeBridge {
         }
     }
 
-    /// Get a single parameter value.
-    ///
     /// Non-RT. Must be called from the main thread.
     pub fn get_parameter(&self, param_id: u32) -> Option<f32> {
         if self.crashed.load(Ordering::Acquire) {

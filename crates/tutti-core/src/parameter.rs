@@ -61,25 +61,13 @@ pub enum ParameterScale {
 /// normalized (0.0-1.0) and real parameter values.
 #[derive(Debug, Clone)]
 pub struct ParameterRange {
-    /// Minimum real value
     pub min: f32,
-    /// Maximum real value
     pub max: f32,
-    /// Default real value
     pub default: f32,
-    /// Scaling algorithm
     pub scale: ParameterScale,
 }
 
 impl ParameterRange {
-    /// Create a new parameter range.
-    ///
-    /// # Arguments
-    ///
-    /// * `min` - Minimum real value
-    /// * `max` - Maximum real value (must be > min)
-    /// * `default` - Default real value (will be clamped to range)
-    /// * `scale` - Scaling algorithm
     pub fn new(min: f32, max: f32, default: f32, scale: ParameterScale) -> Self {
         debug_assert!(max > min, "max must be greater than min");
 
@@ -91,7 +79,6 @@ impl ParameterRange {
         }
     }
 
-    /// Create a linear parameter range.
     pub fn linear(min: f32, max: f32, default: f32) -> Self {
         Self::new(min, max, default, ParameterScale::Linear)
     }
@@ -106,20 +93,11 @@ impl ParameterRange {
         Self::new(min, max, default, ParameterScale::Logarithmic)
     }
 
-    /// Create an exponential parameter range.
-    ///
-    /// # Arguments
-    ///
-    /// * `curve` - Shape factor. Values > 1.0 give more resolution at low end.
+    /// `curve` shape factor: values > 1.0 give more resolution at low end.
     pub fn exponential(min: f32, max: f32, default: f32, curve: f32) -> Self {
         Self::new(min, max, default, ParameterScale::Exponential { curve })
     }
 
-    /// Create a toggle (on/off) parameter.
-    ///
-    /// * `min` is the "off" value
-    /// * `max` is the "on" value
-    /// * `default` should be either `min` or `max`
     pub fn toggle(off_value: f32, on_value: f32, default_on: bool) -> Self {
         Self::new(
             off_value,
@@ -129,7 +107,6 @@ impl ParameterRange {
         )
     }
 
-    /// Create an integer parameter range.
     pub fn integer(min: i32, max: i32, default: i32) -> Self {
         Self::new(
             min as f32,
@@ -139,7 +116,6 @@ impl ParameterRange {
         )
     }
 
-    /// Convert a real value to normalized (0.0-1.0).
     #[inline]
     pub fn normalize(&self, value: f32) -> f32 {
         let value = value.clamp(self.min, self.max);
@@ -187,7 +163,6 @@ impl ParameterRange {
         }
     }
 
-    /// Convert a normalized value (0.0-1.0) to a real value.
     #[inline]
     pub fn denormalize(&self, normalized: f32) -> f32 {
         let normalized = normalized.clamp(0.0, 1.0);
@@ -231,40 +206,31 @@ impl ParameterRange {
         }
     }
 
-    /// Clamp a real value to this parameter's range.
     #[inline]
     pub fn clamp(&self, value: f32) -> f32 {
         value.clamp(self.min, self.max)
     }
 
-    /// Get the normalized value of the default.
     #[inline]
     pub fn default_normalized(&self) -> f32 {
         self.normalize(self.default)
     }
 
-    /// Check if a real value is within range.
     #[inline]
     pub fn contains(&self, value: f32) -> bool {
         value >= self.min && value <= self.max
     }
 
-    /// Get the range span (max - min).
     #[inline]
     pub fn span(&self) -> f32 {
         self.max - self.min
     }
 
-    /// Convert dB value to linear amplitude.
-    ///
-    /// Useful for gain parameters stored in dB.
     #[inline]
     pub fn db_to_linear(db: f32) -> f32 {
         10.0_f32.powf(db / 20.0)
     }
 
-    /// Convert linear amplitude to dB.
-    ///
     /// Returns -inf for amplitude <= 0.
     #[inline]
     pub fn linear_to_db(linear: f32) -> f32 {

@@ -129,42 +129,34 @@ impl TransportManager {
         &self.current_beat
     }
 
-    /// Get the paused flag Arc for sharing with ClickState.
     pub fn paused(&self) -> &Arc<AtomicFlag> {
         &self.paused
     }
 
-    /// Get the recording flag Arc for sharing with ClickState.
     pub fn recording(&self) -> &Arc<AtomicFlag> {
         &self.recording
     }
 
-    /// Get the preroll flag Arc for sharing with ClickState.
     pub fn in_preroll(&self) -> &Arc<AtomicFlag> {
         &self.in_preroll
     }
 
-    /// Get the loop enabled flag Arc for sharing with TransportClock.
     pub fn loop_enabled_flag(&self) -> &Arc<AtomicFlag> {
         &self.loop_enabled
     }
 
-    /// Get the loop start beat Arc for sharing with TransportClock.
     pub fn loop_start_beat_atomic(&self) -> &Arc<AtomicDouble> {
         &self.loop_start_beat
     }
 
-    /// Get the loop end beat Arc for sharing with TransportClock.
     pub fn loop_end_beat_atomic(&self) -> &Arc<AtomicDouble> {
         &self.loop_end_beat
     }
 
-    /// Get the seek target Arc for sharing with TransportClock.
     pub fn seek_target(&self) -> &Arc<AtomicDouble> {
         &self.seek_target
     }
 
-    /// Get the seek pending flag Arc for sharing with TransportClock.
     pub fn seek_pending(&self) -> &Arc<AtomicFlag> {
         &self.seek_pending
     }
@@ -181,22 +173,18 @@ impl TransportManager {
         self.paused.get()
     }
 
-    /// Check if recording is active.
     pub fn is_recording(&self) -> bool {
         self.recording.get()
     }
 
-    /// Check if in preroll count-in.
     pub fn is_in_preroll(&self) -> bool {
         self.in_preroll.get()
     }
 
-    /// Check if playback is in reverse direction.
     pub fn is_reverse(&self) -> bool {
         self.reverse.get()
     }
 
-    /// Get current playback direction.
     pub fn direction(&self) -> Direction {
         if self.reverse.get() {
             Direction::Backwards
@@ -231,18 +219,15 @@ impl TransportManager {
         self.current_beat.set(beat);
     }
 
-    /// Set recording state.
     pub fn set_recording(&self, recording: bool) {
         self.recording.set(recording);
     }
 
-    /// Set preroll state.
     pub fn set_in_preroll(&self, in_preroll: bool) {
         self.in_preroll.set(in_preroll);
     }
 
-    /// Advance position (called from audio callback - RT-safe).
-    /// Returns true if loop boundary was hit.
+    /// RT-safe. Returns true if loop boundary was hit.
     pub fn advance_position_rt(&self, beat_increment: f64) -> bool {
         let current = self.current_beat.get();
         let reverse = self.reverse.get();
@@ -283,40 +268,33 @@ impl TransportManager {
         false
     }
 
-    /// Start playback.
     pub fn play(&self) {
         self.send_command(TransportEvent::Play);
     }
 
-    /// Stop playback with declick.
     pub fn stop(&self) {
         self.send_command(TransportEvent::StopWithDeclick);
     }
 
-    /// Stop playback immediately (no declick).
     pub fn stop_immediate(&self) {
         self.send_command(TransportEvent::Stop);
     }
 
-    /// Locate to a position in beats.
     pub fn locate(&self, beats: f64) {
         let position = MusicalPosition::from_beats(beats);
         self.send_command(TransportEvent::Locate(position));
     }
 
-    /// Locate to a position and start playing.
     pub fn locate_and_play(&self, beats: f64) {
         let position = MusicalPosition::from_beats(beats);
         self.send_command(TransportEvent::LocateAndPlay(position));
     }
 
-    /// Locate with declick (smooth seeking).
     pub fn locate_with_declick(&self, beats: f64) {
         let position = MusicalPosition::from_beats(beats);
         self.send_command(TransportEvent::LocateWithDeclick(position));
     }
 
-    /// Toggle loop enabled/disabled.
     pub fn toggle_loop(&self) {
         // Flip atomic immediately so readers see the change right away,
         // then sync the FSM on the next audio callback.
@@ -325,7 +303,6 @@ impl TransportManager {
         self.send_command(TransportEvent::SetLoopEnabled(!current));
     }
 
-    /// Set loop range (start and end in beats).
     pub fn set_loop_range_fsm(&self, start: f64, end: f64) {
         // Set atomics immediately so advance_position_rt sees them right away
         self.loop_start_beat.set(start);
@@ -335,38 +312,31 @@ impl TransportManager {
         self.send_command(TransportEvent::SetLoopRange(range));
     }
 
-    /// Clear loop range.
     pub fn clear_loop(&self) {
         self.loop_enabled.set(false);
         self.send_command(TransportEvent::ClearLoop);
     }
 
-    /// Start fast forward.
     pub fn fast_forward(&self) {
         self.send_command(TransportEvent::FastForward);
     }
 
-    /// Start rewind.
     pub fn rewind(&self) {
         self.send_command(TransportEvent::Rewind);
     }
 
-    /// End scrub/shuttle mode.
     pub fn end_scrub(&self) {
         self.send_command(TransportEvent::EndScrub);
     }
 
-    /// Toggle reverse playback.
     pub fn reverse(&self) {
         self.send_command(TransportEvent::Reverse);
     }
 
-    /// Get current motion state (RT-safe).
     pub fn motion_state(&self) -> MotionState {
         MotionState::from_u8(self.motion_state.load(Ordering::Acquire))
     }
 
-    /// Apply FSM transition result to atomic state.
     fn apply_fsm_result(&self, result: super::fsm::TransitionResult) {
         use super::fsm::TransitionResult;
 
@@ -490,27 +460,22 @@ impl TransportManager {
         self.sample_rate / self.beats_per_second()
     }
 
-    /// Get shared sync state (for butler thread access).
     pub fn sync_state(&self) -> &Arc<SyncState> {
         &self.sync_state
     }
 
-    /// Set sync source (Internal, MTC, MIDI Clock, LTC).
     pub fn set_sync_source(&self, source: SyncSource) {
         self.sync_state.set_source(source);
     }
 
-    /// Get current sync source.
     pub fn get_sync_source(&self) -> SyncSource {
         self.sync_state.source()
     }
 
-    /// Get sync status snapshot for UI display.
     pub fn sync_snapshot(&self) -> SyncSnapshot {
         self.sync_state.snapshot()
     }
 
-    /// Check if transport is slaved to external source.
     /// Returns true only when external, following, AND locked.
     pub fn is_slaved(&self) -> bool {
         self.sync_state.is_external()
@@ -518,8 +483,6 @@ impl TransportManager {
             && self.sync_state.is_locked()
     }
 
-    /// Receive external position update (call when receiving MTC/LTC/MIDI Clock).
-    /// Updates sync state and optionally chases to external position.
     pub fn receive_external_position(&self, beats: f64) {
         self.sync_state.set_external_position(beats);
 
@@ -536,7 +499,6 @@ impl TransportManager {
         }
     }
 
-    /// Receive external tempo update (from MIDI Clock tempo detection).
     pub fn receive_external_tempo(&self, bpm: f32) {
         self.sync_state.set_external_tempo(bpm);
 
@@ -546,17 +508,15 @@ impl TransportManager {
         }
     }
 
-    /// Set sync offset in samples (positive = delay internal, negative = advance).
+    /// Positive = delay internal, negative = advance.
     pub fn set_sync_offset(&self, samples: f64) {
         self.sync_state.set_offset_samples(samples);
     }
 
-    /// Enable/disable following external position.
     pub fn set_following(&self, follow: bool) {
         self.sync_state.set_following(follow);
     }
 
-    /// Set SMPTE frame rate for MTC/LTC.
     pub fn set_smpte_frame_rate(&self, rate: super::sync::SmpteFrameRate) {
         self.sync_state.set_smpte_frame_rate(rate);
     }

@@ -7,17 +7,12 @@ use crate::error::{ExportError, Result};
 #[cfg(any(feature = "wav", feature = "flac"))]
 use rubato::{FftFixedIn, Resampler};
 
-/// Resampling quality presets
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ResampleQuality {
-    /// Fast resampling (lower quality)
     Fast,
-    /// Balanced quality/speed (default)
     #[default]
     Medium,
-    /// High quality
     High,
-    /// Best quality (slowest)
     Best,
 }
 

@@ -4,8 +4,8 @@ use std::cell::UnsafeCell;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
-/// Double-buffered lock-free audio queue for effect processing.
-/// SPSC: audio thread writes input, inference thread reads; inference writes output, audio reads.
+/// SPSC lock-free double-buffered audio queue for effect processing.
+/// Audio thread writes input / reads output; inference thread reads input / writes output.
 pub struct EffectAudioQueue {
     input_buffers: [UnsafeCell<Vec<f32>>; 2],
     output_buffers: [UnsafeCell<Vec<f32>>; 2],
@@ -50,8 +50,7 @@ impl EffectAudioQueue {
         self.channels
     }
 
-    /// Write a sample to input buffer. Returns true when buffer is full.
-    /// Audio thread only.
+    /// Audio thread only. Returns true when buffer is full.
     #[inline]
     pub fn write_input(&self, channel: usize, sample: f32) -> bool {
         let write_idx = self.input_write_idx.load(Ordering::Acquire);
@@ -79,8 +78,7 @@ impl EffectAudioQueue {
         false
     }
 
-    /// Read a sample from output buffer. Returns 0.0 if no output ready.
-    /// Audio thread only.
+    /// Audio thread only. Returns 0.0 if no output ready.
     #[inline]
     pub fn read_output(&self, channel: usize) -> f32 {
         if !self.output_ready.load(Ordering::Acquire) {
@@ -123,7 +121,7 @@ impl EffectAudioQueue {
         self.input_ready.load(Ordering::Acquire)
     }
 
-    /// Take input buffer for inference. Inference thread only.
+    /// Inference thread only.
     pub fn take_input(&self) -> Option<&[f32]> {
         if !self.input_ready.load(Ordering::Acquire) {
             return None;
@@ -136,7 +134,7 @@ impl EffectAudioQueue {
         Some(unsafe { &*self.input_buffers[read_idx].get() })
     }
 
-    /// Write processed output. Inference thread only.
+    /// Inference thread only.
     pub fn write_output(&self, data: &[f32]) {
         let read_idx = self.output_read_idx.load(Ordering::Acquire);
         let write_idx = 1 - read_idx;

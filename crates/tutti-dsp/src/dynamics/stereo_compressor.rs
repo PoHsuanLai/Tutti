@@ -1,25 +1,11 @@
-//! Stereo sidechain compressor
-
 use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use tutti_core::{dsp::DEFAULT_SR, AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 use super::utils::{amplitude_to_db, db_to_amplitude, time_to_coeff};
 
-/// Stereo compressor with stereo sidechain input
-///
-/// Links both channels for consistent stereo imaging while using
-/// external sidechain for detection.
-///
-/// ## Inputs
-/// - Port 0: Left audio
-/// - Port 1: Right audio
-/// - Port 2: Left sidechain (or mono sidechain)
-/// - Port 3: Right sidechain (optional, uses left if not connected)
-///
-/// ## Outputs
-/// - Port 0: Compressed left
-/// - Port 1: Compressed right
+/// Stereo compressor with stereo sidechain input (4-in: L/R audio + L/R sidechain, 2-out).
+/// Links both channels for consistent stereo imaging.
 pub struct StereoSidechainCompressor {
     threshold_db: Arc<AtomicFloat>,
     ratio: Arc<AtomicFloat>,

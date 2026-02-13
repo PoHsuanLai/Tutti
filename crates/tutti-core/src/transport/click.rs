@@ -84,7 +84,6 @@ impl Default for ClickSettings {
     }
 }
 
-/// Legacy type alias — keeps existing callers working.
 pub type ClickState = ClickSettings;
 
 /// Click generator AudioNode.
@@ -105,14 +104,12 @@ pub struct ClickNode<R: TransportReader = TransportHandle> {
 }
 
 impl ClickNode<TransportHandle> {
-    /// Create a click node with a live transport handle.
     pub fn new(transport: TransportHandle, settings: Arc<ClickSettings>, sample_rate: f64) -> Self {
         Self::with_transport(transport, settings, sample_rate)
     }
 }
 
 impl<R: TransportReader + Clone> ClickNode<R> {
-    /// Create a click node with any transport reader.
     pub fn with_transport(transport: R, settings: Arc<ClickSettings>, sample_rate: f64) -> Self {
         let click_normal = Self::generate_click(sample_rate, false);
         let click_accent = Self::generate_click(sample_rate, true);

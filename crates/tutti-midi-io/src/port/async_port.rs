@@ -1,11 +1,7 @@
-//! Async MIDI Port - Lock-free MIDI I/O using ring buffers
+//! Lock-free MIDI port using SPSC ring buffers.
 //!
-//! Fully lock-free SPSC pattern:
-//! - Input: midir callback (producer) → audio thread (consumer)
-//! - Output: audio thread (producer) → output thread (consumer)
-//!
-//! Both sides use UnsafeCell for zero-overhead access. Safety is guaranteed
-//! by the SPSC (Single Producer Single Consumer) invariant.
+//! - Input: midir callback (producer) -> audio thread (consumer)
+//! - Output: audio thread (producer) -> output thread (consumer)
 
 use ringbuf::{
     traits::{Consumer, Producer, Split},
@@ -16,105 +12,76 @@ use std::time::Instant;
 
 pub use crate::MidiEvent;
 
-/// Lock-free producer handle for MIDI input (used by midir callback).
-///
 /// # Safety
-/// This handle must only be used from a single thread (the midir callback thread).
-/// SPSC ring buffers require exactly one producer - concurrent pushes are undefined behavior.
+/// Must only be used from a single thread (the midir callback thread).
+/// SPSC ring buffers require exactly one producer -- concurrent pushes are UB.
 pub struct InputProducerHandle {
     producer: *mut ringbuf::HeapProd<(Instant, MidiEvent)>,
 }
 
-// SAFETY: InputProducerHandle is Send because the underlying HeapProd is Send.
-// It's used to transfer ownership from the port creator to the midir callback thread.
+// SAFETY: HeapProd is Send. Ownership is transferred to the midir callback thread.
 unsafe impl Send for InputProducerHandle {}
 
-// SAFETY: InputProducerHandle is Sync because we document that only one thread
-// may call push() at a time (the midir callback thread). This is the SPSC invariant.
+// SAFETY: Only one thread calls push() (SPSC invariant).
 unsafe impl Sync for InputProducerHandle {}
 
 impl InputProducerHandle {
-    /// # Safety
-    /// Must only be called from a single thread (the midir callback thread).
     #[inline]
     pub fn push(&self, event: MidiEvent, timestamp: Instant) -> bool {
-        // SAFETY: We have exclusive access as the single producer (SPSC invariant).
+        // SAFETY: Exclusive access as single producer (SPSC invariant).
         let prod = unsafe { &mut *self.producer };
         prod.try_push((timestamp, event)).is_ok()
     }
 }
 
-/// Lock-free producer handle for unified MIDI input (MIDI 1.0 or 2.0).
-///
 /// # Safety
-/// This handle must only be used from a single thread.
-/// SPSC ring buffers require exactly one producer - concurrent pushes are undefined behavior.
+/// Must only be used from a single thread (SPSC invariant).
 #[cfg(feature = "midi2")]
 pub struct UnifiedInputProducerHandle {
     producer: *mut ringbuf::HeapProd<crate::event::UnifiedMidiEvent>,
 }
 
 #[cfg(feature = "midi2")]
-// SAFETY: UnifiedInputProducerHandle is Send because the underlying HeapProd is Send.
-// It's used to transfer ownership from the port creator to the caller's thread.
+// SAFETY: HeapProd is Send.
 unsafe impl Send for UnifiedInputProducerHandle {}
 
 #[cfg(feature = "midi2")]
-// SAFETY: UnifiedInputProducerHandle is Sync because we document that only one thread
-// may call push() at a time. This is the SPSC invariant.
+// SAFETY: Only one thread calls push() (SPSC invariant).
 unsafe impl Sync for UnifiedInputProducerHandle {}
 
 #[cfg(feature = "midi2")]
 impl UnifiedInputProducerHandle {
-    /// # Safety
-    /// Must only be called from a single thread (SPSC invariant).
     #[inline]
     pub fn push(&self, event: crate::event::UnifiedMidiEvent) -> bool {
-        // SAFETY: We have exclusive access as the single producer (SPSC invariant).
+        // SAFETY: Exclusive access as single producer (SPSC invariant).
         let prod = unsafe { &mut *self.producer };
         prod.try_push(event).is_ok()
     }
 }
 
-/// Lock-free producer handle for MIDI output (used by audio thread).
-///
 /// # Safety
-/// This handle must only be used from a single thread (the audio thread).
-/// SPSC ring buffers require exactly one producer - concurrent pushes are undefined behavior.
-///
-/// Clone is safe because we're just copying the pointer. The safety invariant is that
-/// only one thread actually calls push() at a time, which is enforced by documentation.
+/// Must only be used from a single thread (the audio thread).
+/// Clone copies the pointer; only one thread may call push() (SPSC invariant).
 #[derive(Clone)]
 pub struct OutputProducerHandle {
     producer: *mut ringbuf::HeapProd<MidiEvent>,
 }
 
-// SAFETY: OutputProducerHandle is Send because the underlying HeapProd is Send.
-// It's used to transfer ownership to the audio thread.
+// SAFETY: HeapProd is Send. Ownership is transferred to the audio thread.
 unsafe impl Send for OutputProducerHandle {}
 
-// SAFETY: OutputProducerHandle is Sync because we document that only one thread
-// may call push() at a time (the audio thread). This is the SPSC invariant.
-// While the handle can be shared (via Arc), the safety contract requires that
-// only the audio thread actually calls push().
+// SAFETY: Only one thread calls push() (SPSC invariant).
 unsafe impl Sync for OutputProducerHandle {}
 
 impl OutputProducerHandle {
-    /// # Safety
-    /// Must only be called from a single thread (the audio thread).
-    /// Even though this handle can be cloned, only one thread may call push() at a time (SPSC invariant).
     #[inline]
     pub fn push(&self, event: MidiEvent) -> bool {
-        // SAFETY: We have exclusive access as the single producer (SPSC invariant).
+        // SAFETY: Exclusive access as single producer (SPSC invariant).
         let prod = unsafe { &mut *self.producer };
         prod.try_push(event).is_ok()
     }
 }
 
-/// Lock-free MIDI port using SPSC ring buffers.
-///
-/// Uses UnsafeCell for zero-overhead access on both producer and consumer sides.
-/// Safety is guaranteed by the SPSC invariant: one producer, one consumer per buffer.
 pub struct AsyncMidiPort {
     name: String,
     active: std::sync::atomic::AtomicBool,
@@ -159,30 +126,23 @@ impl AsyncMidiPort {
         &self.name
     }
 
-    /// RT-safe (lock-free atomic load).
     #[inline]
     pub fn is_active(&self) -> bool {
         self.active.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Can be called from any thread.
     #[inline]
     pub fn set_active(&self, active: bool) {
         self.active
             .store(active, std::sync::atomic::Ordering::Release);
     }
 
-    /// # Safety
-    /// The returned handle must only be used from a single thread (typically
-    /// the midir callback thread). This is the SPSC invariant.
     pub fn input_producer_handle(&self) -> InputProducerHandle {
         InputProducerHandle {
             producer: self.input_producer.get(),
         }
     }
 
-    /// # Safety
-    /// The returned handle must only be used from a single thread (SPSC invariant).
     #[cfg(feature = "midi2")]
     pub fn unified_input_producer_handle(&self) -> UnifiedInputProducerHandle {
         UnifiedInputProducerHandle {
@@ -190,17 +150,12 @@ impl AsyncMidiPort {
         }
     }
 
-    /// # Safety
-    /// The returned handle must only be used from a single thread (typically
-    /// the audio thread). This is the SPSC invariant.
     pub fn output_producer_handle(&self) -> OutputProducerHandle {
         OutputProducerHandle {
             producer: self.output_producer.get(),
         }
     }
 
-    /// RT-safe: drain input ring buffer directly into caller's pre-allocated buffer.
-    /// Returns timestamped events for frame_offset conversion.
     #[inline]
     pub fn cycle_start_read_input_into(
         &self,
@@ -213,7 +168,6 @@ impl AsyncMidiPort {
         }
     }
 
-    /// RT-safe: drain unified input ring buffer directly into caller's pre-allocated buffer.
     #[inline]
     #[cfg(feature = "midi2")]
     pub fn cycle_start_read_unified_input_into(
@@ -227,7 +181,6 @@ impl AsyncMidiPort {
         }
     }
 
-    /// RT-safe: drain output ring buffer directly into caller's pre-allocated buffer.
     #[inline]
     pub fn cycle_end_flush_output_into(
         &self,
@@ -241,14 +194,8 @@ impl AsyncMidiPort {
     }
 }
 
-// SAFETY: AsyncMidiPort is Sync because all UnsafeCell fields follow SPSC invariants:
-// 1. input_producer: Only accessed by midir callback thread (single producer)
-// 2. input_consumer: Only accessed by audio thread (single consumer)
-// 3. output_producer: Only accessed by audio thread (single producer)
-// 4. output_consumer: Only accessed by output thread (single consumer)
-// 5. unified_input_producer: Only accessed by the programmatic input thread (single producer)
-// 6. unified_input_consumer: Only accessed by audio thread (single consumer)
-// Each buffer has exactly one producer and one consumer, never accessed concurrently.
+// SAFETY: All UnsafeCell fields follow SPSC invariants -- each ring buffer
+// has exactly one producer and one consumer, never accessed concurrently.
 unsafe impl Sync for AsyncMidiPort {}
 
 impl std::fmt::Debug for AsyncMidiPort {

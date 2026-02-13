@@ -5,7 +5,6 @@ use audio_automation::{AutomationEnvelope, AutomationPoint, AutomationState};
 use dashmap::DashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Automation lane manager.
 #[derive(Debug)]
 pub struct AutomationManager {
     lanes: DashMap<AutomationTarget, AutomationLane>,
@@ -14,7 +13,6 @@ pub struct AutomationManager {
 }
 
 impl AutomationManager {
-    /// Create a new automation manager
     pub fn new() -> Self {
         Self {
             lanes: DashMap::new(),
@@ -23,7 +21,6 @@ impl AutomationManager {
         }
     }
 
-    /// Create with custom default recording configuration
     pub fn with_config(config: AutomationRecordingConfig) -> Self {
         Self {
             lanes: DashMap::new(),
@@ -32,17 +29,14 @@ impl AutomationManager {
         }
     }
 
-    /// Enable or disable all automation
     pub fn set_enabled(&self, enabled: bool) {
         self.enabled.store(enabled, Ordering::Relaxed);
     }
 
-    /// Check if automation is globally enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled.load(Ordering::Relaxed)
     }
 
-    /// Set the default recording configuration for new lanes
     pub fn set_default_config(&mut self, config: AutomationRecordingConfig) {
         self.default_config = config;
     }
@@ -61,7 +55,6 @@ impl AutomationManager {
         })
     }
 
-    /// Get an existing lane (returns None if not found)
     pub fn get_lane(
         &self,
         target: &AutomationTarget,
@@ -69,7 +62,6 @@ impl AutomationManager {
         self.lanes.get(target)
     }
 
-    /// Get a mutable reference to an existing lane
     pub fn get_lane_mut(
         &self,
         target: &AutomationTarget,
@@ -77,7 +69,6 @@ impl AutomationManager {
         self.lanes.get_mut(target)
     }
 
-    /// Create a new lane with custom configuration
     pub fn create_lane(
         &self,
         target: AutomationTarget,
@@ -90,14 +81,12 @@ impl AutomationManager {
         })
     }
 
-    /// Create a lane with an existing envelope
     pub fn create_lane_with_envelope(&self, envelope: AutomationEnvelope<AutomationTarget>) {
         let target = envelope.target.clone();
         let lane = AutomationLane::with_envelope(envelope);
         self.lanes.insert(target, lane);
     }
 
-    /// Remove a lane
     pub fn remove_lane(
         &self,
         target: &AutomationTarget,
@@ -105,22 +94,18 @@ impl AutomationManager {
         self.lanes.remove(target)
     }
 
-    /// Check if a lane exists
     pub fn has_lane(&self, target: &AutomationTarget) -> bool {
         self.lanes.contains_key(target)
     }
 
-    /// Get the number of lanes
     pub fn lane_count(&self) -> usize {
         self.lanes.len()
     }
 
-    /// Get all targets (for iteration)
     pub fn targets(&self) -> Vec<AutomationTarget> {
         self.lanes.iter().map(|r| r.key().clone()).collect()
     }
 
-    /// Clear all lanes
     pub fn clear(&self) {
         self.lanes.clear();
     }
@@ -150,26 +135,22 @@ impl AutomationManager {
             .collect()
     }
 
-    /// Set the automation state for a specific target
     pub fn set_state(&self, target: &AutomationTarget, state: AutomationState) {
         if let Some(mut lane) = self.lanes.get_mut(target) {
             lane.set_state(state);
         }
     }
 
-    /// Get the automation state for a specific target
     pub fn get_state(&self, target: &AutomationTarget) -> Option<AutomationState> {
         self.lanes.get(target).map(|lane| lane.state())
     }
 
-    /// Set all lanes to the same state
     pub fn set_all_states(&self, state: AutomationState) {
         for mut lane_ref in self.lanes.iter_mut() {
             lane_ref.set_state(state);
         }
     }
 
-    /// Set state for all lanes matching a predicate
     pub fn set_states_where<F>(&self, state: AutomationState, predicate: F)
     where
         F: Fn(&AutomationTarget) -> bool,
@@ -181,70 +162,60 @@ impl AutomationManager {
         }
     }
 
-    /// Signal that a control has been "touched" (user started interacting)
     pub fn touch(&self, target: &AutomationTarget, beat: f64, value: f32) {
         if let Some(mut lane) = self.lanes.get_mut(target) {
             lane.touch(beat, value);
         }
     }
 
-    /// Record a value for a target
     pub fn record(&self, target: &AutomationTarget, beat: f64, value: f32) {
         if let Some(mut lane) = self.lanes.get_mut(target) {
             lane.record(beat, value);
         }
     }
 
-    /// Signal that a control has been "released" (user stopped interacting)
     pub fn release(&self, target: &AutomationTarget, beat: f64, value: f32) {
         if let Some(mut lane) = self.lanes.get_mut(target) {
             lane.release(beat, value);
         }
     }
 
-    /// Batch recording: record the same beat for multiple targets
     pub fn record_batch(&self, beat: f64, values: &[(AutomationTarget, f32)]) {
         for (target, value) in values {
             self.record(target, beat, *value);
         }
     }
 
-    /// Add a point to a specific lane
     pub fn add_point(&self, target: &AutomationTarget, point: AutomationPoint) {
         if let Some(lane) = self.lanes.get(target) {
             lane.add_point(point);
         }
     }
 
-    /// Remove a point from a specific lane
     pub fn remove_point_at(&self, target: &AutomationTarget, beat: f64) -> Option<AutomationPoint> {
         self.lanes
             .get(target)
             .and_then(|lane| lane.remove_point_at(beat))
     }
 
-    /// Clear all points from a specific lane
     pub fn clear_lane(&self, target: &AutomationTarget) {
         if let Some(lane) = self.lanes.get(target) {
             lane.clear();
         }
     }
 
-    /// Simplify a specific lane
     pub fn simplify_lane(&self, target: &AutomationTarget, tolerance: f32) {
         if let Some(lane) = self.lanes.get(target) {
             lane.simplify(tolerance);
         }
     }
 
-    /// Simplify all lanes
     pub fn simplify_all(&self, tolerance: f32) {
         for lane_ref in self.lanes.iter() {
             lane_ref.simplify(tolerance);
         }
     }
 
-    /// Get all lanes for a specific node (by node_id)
     pub fn lanes_for_node(&self, node_id: u64) -> Vec<AutomationTarget> {
         self.lanes
             .iter()
@@ -258,7 +229,6 @@ impl AutomationManager {
             .collect()
     }
 
-    /// Remove all lanes for a specific node
     pub fn remove_lanes_for_node(&self, node_id: u64) {
         let targets: Vec<_> = self.lanes_for_node(node_id);
         for target in targets {
@@ -266,7 +236,6 @@ impl AutomationManager {
         }
     }
 
-    /// Get all master control lanes
     pub fn master_lanes(&self) -> Vec<AutomationTarget> {
         self.lanes
             .iter()
@@ -323,12 +292,10 @@ impl Clone for AutomationManager {
     }
 }
 
-/// Snapshot of automation state (for undo/redo)
+/// Snapshot of automation state for undo/redo.
 #[derive(Debug, Clone)]
 pub struct AutomationSnapshot {
-    /// All lanes and their data
     pub lanes: Vec<(AutomationTarget, AutomationLane)>,
-    /// Global enabled state
     pub enabled: bool,
 }
 

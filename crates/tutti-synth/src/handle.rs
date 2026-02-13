@@ -46,10 +46,6 @@ impl SynthHandle {
         }
     }
 
-    // =========================================================================
-    // Oscillators
-    // =========================================================================
-
     synth_setter! {
         sine() => oscillator(OscillatorType::Sine);
         saw() => oscillator(OscillatorType::Saw);
@@ -59,10 +55,6 @@ impl SynthHandle {
         noise() => oscillator(OscillatorType::Noise);
     }
 
-    // =========================================================================
-    // Polyphony
-    // =========================================================================
-
     synth_setter! {
         poly(voices: usize) => poly(voices);
         /// Single voice, retriggers on each note.
@@ -70,10 +62,6 @@ impl SynthHandle {
         /// Single voice, glides between overlapping notes.
         legato() => legato();
     }
-
-    // =========================================================================
-    // Filters
-    // =========================================================================
 
     synth_setter! {
         /// Cutoff in Hz, resonance 0.0-1.0.
@@ -90,10 +78,6 @@ impl SynthHandle {
         no_filter() => filter(FilterType::None);
     }
 
-    // =========================================================================
-    // Envelopes
-    // =========================================================================
-
     synth_setter! {
         /// All times in seconds, sustain is a level (0.0-1.0).
         adsr(attack: f32, decay: f32, sustain: f32, release: f32) =>
@@ -102,10 +86,6 @@ impl SynthHandle {
         envelope_pluck() => envelope_config(EnvelopeConfig::pluck());
         envelope_pad() => envelope_config(EnvelopeConfig::pad());
     }
-
-    // =========================================================================
-    // Voice stealing
-    // =========================================================================
 
     synth_setter! {
         /// When all voices are in use, steal the voice that started earliest (default).
@@ -121,10 +101,6 @@ impl SynthHandle {
         /// When all voices are in use, new notes are ignored.
         no_voice_steal() => voice_stealing(AllocationStrategy::NoSteal);
     }
-
-    // =========================================================================
-    // Tuning
-    // =========================================================================
 
     synth_setter! {
         tuning_equal() => tuning(Tuning::equal_temperament());
@@ -152,10 +128,6 @@ impl SynthHandle {
         self
     }
 
-    // =========================================================================
-    // Modulation
-    // =========================================================================
-
     synth_setter! {
         /// Default: 2 semitones.
         pitch_bend_range(semitones: f32) => pitch_bend_range(semitones);
@@ -166,10 +138,6 @@ impl SynthHandle {
         /// Rate in Hz, depth 0.0-1.0 (at 1.0 sweeps cutoff +/-50%).
         lfo_to_filter(rate: f32, depth: f32) => lfo_to_filter(rate, depth);
     }
-
-    // =========================================================================
-    // Unison
-    // =========================================================================
 
     /// Voices 1-16, detune_cents is total spread (e.g., 15.0 for +/-7.5 cents).
     pub fn unison(mut self, voices: u8, detune_cents: f32) -> Self {
@@ -192,10 +160,6 @@ impl SynthHandle {
         });
         self
     }
-
-    // =========================================================================
-    // Portamento
-    // =========================================================================
 
     /// Glide time in seconds, applies to all notes.
     pub fn portamento(mut self, time: f32) -> Self {
@@ -240,10 +204,6 @@ impl SynthHandle {
         });
         self
     }
-
-    // =========================================================================
-    // Build
-    // =========================================================================
 
     /// Registers the synth's ID with the MidiRegistry automatically.
     pub fn build(self) -> crate::Result<PolySynth> {

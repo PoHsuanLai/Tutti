@@ -1,12 +1,4 @@
-//! Thumbnail Caching
-//!
-//! Provides memory and disk caching for waveform thumbnails.
-//!
-//! ## Features
-//!
-//! - LRU memory cache with configurable size
-//! - Optional disk persistence
-//! - Hash-based file identification (path + mtime + size)
+//! LRU memory cache with optional disk persistence for waveform thumbnails.
 
 use crate::waveform::MultiResolutionSummary;
 use lru::LruCache;
@@ -15,19 +7,12 @@ use std::io::{self, Read, Write};
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
-/// Thumbnail cache with LRU memory cache and optional disk persistence
 pub struct ThumbnailCache {
-    /// In-memory LRU cache
     memory_cache: LruCache<u64, MultiResolutionSummary>,
-    /// Optional disk cache directory
     disk_path: Option<PathBuf>,
 }
 
 impl ThumbnailCache {
-    /// Create a memory-only cache
-    ///
-    /// # Arguments
-    /// * `max_entries` - Maximum number of thumbnails to keep in memory
     pub fn new(max_entries: usize) -> Self {
         let capacity =
             NonZeroUsize::new(max_entries.max(1)).expect("BUG: max(1) should always be non-zero");
@@ -37,13 +22,7 @@ impl ThumbnailCache {
         }
     }
 
-    /// Create a cache with disk persistence
-    ///
-    /// # Arguments
-    /// * `max_memory_entries` - Maximum entries in memory
-    /// * `disk_path` - Directory for disk cache storage
     pub fn with_disk_cache(max_memory_entries: usize, disk_path: PathBuf) -> io::Result<Self> {
-        // Ensure disk cache directory exists
         fs::create_dir_all(&disk_path)?;
 
         let capacity = NonZeroUsize::new(max_memory_entries.max(1))
@@ -54,18 +33,11 @@ impl ThumbnailCache {
         })
     }
 
-    /// Get a cached thumbnail or compute it.
-    ///
-    /// Checks memory cache first, then disk cache, then computes.
-    ///
-    /// # Arguments
-    /// * `hash` - Unique identifier for this audio
-    /// * `compute` - Function to compute the thumbnail if not cached
+    /// Checks memory, then disk, then calls `compute`.
     pub fn get_or_compute<F>(&mut self, hash: u64, compute: F) -> &MultiResolutionSummary
     where
         F: FnOnce() -> MultiResolutionSummary,
     {
-        // Check memory cache
         if self.memory_cache.contains(&hash) {
             return self
                 .memory_cache
@@ -73,7 +45,6 @@ impl ThumbnailCache {
                 .expect("BUG: entry should exist (checked with contains)");
         }
 
-        // Check disk cache
         if let Some(ref disk_path) = self.disk_path {
             if let Some(summary) = self.load_from_disk(disk_path, hash) {
                 self.memory_cache.put(hash, summary);
@@ -84,10 +55,8 @@ impl ThumbnailCache {
             }
         }
 
-        // Compute and cache
         let summary = compute();
 
-        // Save to disk if enabled
         if let Some(ref disk_path) = self.disk_path {
             let _ = self.save_to_disk(disk_path, hash, &summary);
         }
@@ -98,14 +67,11 @@ impl ThumbnailCache {
             .expect("BUG: entry should exist (just put)")
     }
 
-    /// Get a cached thumbnail without computing
     pub fn get(&mut self, hash: u64) -> Option<&MultiResolutionSummary> {
-        // Check memory cache first
         if self.memory_cache.contains(&hash) {
             return self.memory_cache.get(&hash);
         }
 
-        // Check disk cache
         if let Some(ref disk_path) = self.disk_path {
             if let Some(summary) = self.load_from_disk(disk_path, hash) {
                 self.memory_cache.put(hash, summary);
@@ -116,9 +82,7 @@ impl ThumbnailCache {
         None
     }
 
-    /// Store a thumbnail in the cache
     pub fn put(&mut self, hash: u64, summary: MultiResolutionSummary) {
-        // Save to disk if enabled
         if let Some(ref disk_path) = self.disk_path {
             let _ = self.save_to_disk(disk_path, hash, &summary);
         }
@@ -126,22 +90,18 @@ impl ThumbnailCache {
         self.memory_cache.put(hash, summary);
     }
 
-    /// Remove a thumbnail from cache
     pub fn remove(&mut self, hash: u64) {
         self.memory_cache.pop(&hash);
 
-        // Remove from disk if present
         if let Some(ref disk_path) = self.disk_path {
             let path = self.disk_cache_path(disk_path, hash);
             let _ = fs::remove_file(path);
         }
     }
 
-    /// Clear all cached thumbnails
     pub fn clear(&mut self) {
         self.memory_cache.clear();
 
-        // Clear disk cache if enabled
         if let Some(ref disk_path) = self.disk_path {
             if let Ok(entries) = fs::read_dir(disk_path) {
                 for entry in entries.flatten() {
@@ -153,12 +113,10 @@ impl ThumbnailCache {
         }
     }
 
-    /// Get number of entries in memory cache
     pub fn len(&self) -> usize {
         self.memory_cache.len()
     }
 
-    /// Check if cache is empty
     pub fn is_empty(&self) -> bool {
         self.memory_cache.is_empty()
     }
@@ -196,24 +154,15 @@ impl ThumbnailCache {
     fn serialize_summary(&self, summary: &MultiResolutionSummary) -> Vec<u8> {
         let mut data = Vec::new();
 
-        // Version byte
-        data.push(1u8);
-
-        // Base samples per block
+        data.push(1u8); // version
         data.extend_from_slice(&(summary.base_samples_per_block as u32).to_le_bytes());
-
-        // Number of levels
         data.extend_from_slice(&(summary.levels.len() as u32).to_le_bytes());
 
         for level in &summary.levels {
-            // Samples per block for this level
             data.extend_from_slice(&(level.samples_per_block as u32).to_le_bytes());
-            // Total samples
             data.extend_from_slice(&(level.total_samples as u64).to_le_bytes());
-            // Number of blocks
             data.extend_from_slice(&(level.blocks.len() as u32).to_le_bytes());
 
-            // Blocks (min, max, rms as f32)
             for block in &level.blocks {
                 data.extend_from_slice(&block.min.to_le_bytes());
                 data.extend_from_slice(&block.max.to_le_bytes());
@@ -231,36 +180,30 @@ impl ThumbnailCache {
 
         let mut pos = 0;
 
-        // Version check
         let version = data.get(pos)?;
         if *version != 1 {
             return None;
         }
         pos += 1;
 
-        // Base samples per block
         let base_samples_per_block =
             u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
         pos += 4;
 
-        // Number of levels
         let num_levels = u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
         pos += 4;
 
         let mut levels = Vec::with_capacity(num_levels);
 
         for _ in 0..num_levels {
-            // Samples per block
             let samples_per_block =
                 u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
             pos += 4;
 
-            // Total samples
             let total_samples =
                 u64::from_le_bytes(data.get(pos..pos + 8)?.try_into().ok()?) as usize;
             pos += 8;
 
-            // Number of blocks
             let num_blocks = u32::from_le_bytes(data.get(pos..pos + 4)?.try_into().ok()?) as usize;
             pos += 4;
 

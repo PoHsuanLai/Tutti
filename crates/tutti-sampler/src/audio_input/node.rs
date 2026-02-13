@@ -12,12 +12,10 @@ pub struct AudioInput {
 }
 
 impl AudioInput {
-    /// Create new audio input.
     pub fn new() -> Self {
         Self::with_buffer_size(22050)
     }
 
-    /// Create with custom buffer size.
     pub fn with_buffer_size(buffer_size: usize) -> Self {
         let (sender, receiver) = bounded(buffer_size);
         Self {
@@ -27,32 +25,26 @@ impl AudioInput {
         }
     }
 
-    /// Take sender for CPAL callback.
     pub fn take_sender(&mut self) -> Option<Sender<(f32, f32)>> {
         self.sender.take()
     }
 
-    /// Check if sender was taken.
     pub fn sender_taken(&self) -> bool {
         self.sender.is_none()
     }
 
-    /// Create backend for Net.
     pub fn backend(&self) -> AudioInputBackend {
         AudioInputBackend::new(self.receiver.clone())
     }
 
-    /// Get buffer size.
     pub fn buffer_size(&self) -> usize {
         self.buffer_size
     }
 
-    /// Get buffered sample count.
     pub fn buffered_samples(&self) -> usize {
         self.receiver.len()
     }
 
-    /// Check if buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.receiver.is_empty()
     }
@@ -71,7 +63,6 @@ pub struct AudioInputBackend {
 }
 
 impl AudioInputBackend {
-    /// Create new backend.
     pub fn new(receiver: Arc<Receiver<(f32, f32)>>) -> Self {
         Self {
             receiver,
@@ -79,12 +70,10 @@ impl AudioInputBackend {
         }
     }
 
-    /// Get available sample count.
     pub fn available(&self) -> usize {
         self.receiver.len()
     }
 
-    /// Check if buffer is empty.
     pub fn is_empty(&self) -> bool {
         self.receiver.is_empty()
     }

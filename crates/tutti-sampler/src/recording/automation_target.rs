@@ -3,7 +3,6 @@
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Automation target identifier.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum AutomationTarget {
     /// A parameter on a specific audio node in the FunDSP graph
@@ -33,7 +32,6 @@ pub enum AutomationTarget {
 }
 
 impl AutomationTarget {
-    /// Create a node parameter target with only the essential fields
     pub fn node_param(node_id: u64, param_index: usize) -> Self {
         Self::NodeParam {
             node_id,
@@ -51,7 +49,6 @@ impl AutomationTarget {
         }
     }
 
-    /// Create a custom target
     pub fn custom(id: impl Into<String>) -> Self {
         Self::Custom(id.into())
     }
@@ -92,22 +89,18 @@ impl AutomationTarget {
         }
     }
 
-    /// Returns true if this target is a node parameter
     pub fn is_node_param(&self) -> bool {
         matches!(self, Self::NodeParam { .. })
     }
 
-    /// Returns true if this target is a master control
     pub fn is_master(&self) -> bool {
         matches!(self, Self::MasterVolume | Self::MasterPan)
     }
 
-    /// Returns true if this target is the transport tempo
     pub fn is_tempo(&self) -> bool {
         matches!(self, Self::Tempo)
     }
 
-    /// Get the node ID if this is a NodeParam target
     pub fn node_id(&self) -> Option<u64> {
         match self {
             Self::NodeParam { node_id, .. } => Some(*node_id),

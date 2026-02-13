@@ -68,82 +68,67 @@ impl MeteringManager {
         }
     }
 
-    /// Returns the sample rate used for metering calculations.
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
 
-    /// Enables amplitude metering (peak levels).
     pub fn enable_amp(&self) {
         self.amp_enabled.set(true);
     }
 
-    /// Disables amplitude metering.
     pub fn disable_amp(&self) {
         self.amp_enabled.set(false);
     }
 
-    /// Returns whether amplitude metering is enabled.
     pub fn amp_enabled(&self) -> bool {
         self.amp_enabled.get()
     }
 
-    /// Returns current amplitude levels: (left_peak, right_peak, left_rms, right_rms).
+    /// Returns (left_peak, right_peak, left_rms, right_rms).
     pub fn amplitude(&self) -> (f32, f32, f32, f32) {
         self.amplitude.get()
     }
 
-    /// Returns the atomic amplitude meter for direct access from audio thread.
     pub fn amplitude_atomic(&self) -> &Arc<AtomicAmplitude> {
         &self.amplitude
     }
 
-    /// Enables stereo correlation analysis.
     pub fn enable_correlation(&self) {
         self.correlation_enabled.set(true);
     }
 
-    /// Disables stereo correlation analysis.
     pub fn disable_correlation(&self) {
         self.correlation_enabled.set(false);
     }
 
-    /// Returns whether stereo correlation analysis is enabled.
     pub fn correlation_enabled(&self) -> bool {
         self.correlation_enabled.get()
     }
 
-    /// Returns current stereo analysis (correlation, balance, width).
     pub fn stereo_analysis(&self) -> StereoAnalysisSnapshot {
         self.stereo.get()
     }
 
-    /// Returns the atomic stereo analyzer for direct access from audio thread.
     pub fn stereo_atomic(&self) -> &Arc<AtomicStereoAnalysis> {
         &self.stereo
     }
 
-    /// Returns the CPU meter for tracking audio callback load.
     pub fn cpu(&self) -> &Arc<CpuMeter> {
         &self.cpu
     }
 
-    /// Enables LUFS loudness metering.
     pub fn enable_lufs(&self) {
         self.lufs_enabled.set(true);
     }
 
-    /// Disables LUFS loudness metering.
     pub fn disable_lufs(&self) {
         self.lufs_enabled.set(false);
     }
 
-    /// Returns whether LUFS metering is enabled.
     pub fn is_lufs_enabled(&self) -> bool {
         self.lufs_enabled.get()
     }
 
-    /// Returns integrated loudness (LUFS) over the entire measurement period.
     pub fn loudness_global(&self) -> crate::Result<f64> {
         self.ebur128
             .lock()

@@ -91,18 +91,15 @@ impl GranularProcessor {
         }
     }
 
-    /// Get grain size in samples
     #[cfg(test)]
     pub fn grain_size(&self) -> usize {
         self.grain_size
     }
 
-    /// Get latency in samples
     pub fn latency_samples(&self) -> usize {
         self.grain_size
     }
 
-    /// Reset processor state
     pub fn reset(&mut self) {
         self.input_fifo.fill(0.0);
         self.output_fifo.fill(0.0);
@@ -113,7 +110,6 @@ impl GranularProcessor {
         self.fractional_input_pos = 0.0;
     }
 
-    /// Set sample rate
     pub fn set_sample_rate(&mut self, sample_rate: f64) {
         if (self.sample_rate - sample_rate).abs() > 0.1 {
             self.sample_rate = sample_rate;
@@ -121,7 +117,6 @@ impl GranularProcessor {
         }
     }
 
-    /// Push input samples
     #[inline]
     pub fn push_input(&mut self, samples: &[f32]) {
         let fifo_len = self.input_fifo.len();
@@ -131,19 +126,16 @@ impl GranularProcessor {
         }
     }
 
-    /// Get available input samples
     #[inline]
     pub fn input_available(&self) -> usize {
         self.input_write_pos.saturating_sub(self.input_read_pos)
     }
 
-    /// Get available output samples
     #[inline]
     pub fn output_available(&self) -> usize {
         self.output_write_pos.saturating_sub(self.output_read_pos)
     }
 
-    /// Pop output samples
     #[inline]
     pub fn pop_output(&mut self, output: &mut [f32]) -> usize {
         let available = self.output_available();

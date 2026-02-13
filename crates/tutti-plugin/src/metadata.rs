@@ -1,5 +1,3 @@
-//! Plugin metadata for IPC serialization.
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -17,7 +15,6 @@ impl AudioIO {
     }
 }
 
-/// Plugin metadata exchanged over IPC.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct PluginMetadata {
     pub id: String,

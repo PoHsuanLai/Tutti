@@ -10,7 +10,6 @@ use fundsp::audiounit::AudioUnit;
 use fundsp::net::{Net, NodeId, Source};
 use hashbrown::HashSet;
 
-/// Compensation needed at a specific node input port.
 #[derive(Debug, Clone)]
 pub(crate) struct PdcCompensation {
     pub(crate) node_id: NodeId,
@@ -18,14 +17,12 @@ pub(crate) struct PdcCompensation {
     pub(crate) delay_samples: usize,
 }
 
-/// Compensation needed at a graph output channel.
 #[derive(Debug, Clone)]
 pub(crate) struct PdcOutputCompensation {
     pub(crate) output_channel: usize,
     pub(crate) delay_samples: usize,
 }
 
-/// Result of PDC graph analysis.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PdcAnalysis {
     /// Per-input-port compensation delays.

@@ -92,7 +92,6 @@ impl AudioCallbackState {
         }
     }
 
-    /// Set the click node for metronome audio.
     pub(crate) fn set_click_node(
         &mut self,
         transport: TransportHandle,
@@ -109,7 +108,6 @@ impl AudioCallbackState {
         &mut *self.click_node.get()
     }
 
-    /// Set the transport clock for per-sample position advancement.
     pub(crate) fn set_transport_clock(&mut self, clock: TransportClock) {
         unsafe { *self.transport_clock.get() = Some(clock) }
     }
@@ -124,20 +122,16 @@ impl AudioCallbackState {
         unsafe { *self.net_backend.get() = Some(backend) }
     }
 
-    /// Set the MIDI input source for hardware MIDI routing.
     #[cfg(feature = "midi")]
     pub(crate) fn set_midi_input(&mut self, input: Arc<dyn MidiInputSource>) {
         self.midi_input = Some(input);
     }
 
-    /// Set the MIDI registry for routing events to audio nodes.
     #[cfg(feature = "midi")]
     pub(crate) fn set_midi_registry(&mut self, registry: MidiRegistry) {
         self.midi_registry = Some(registry);
     }
 
-    /// Set the MIDI routing snapshot Arc for RT-safe access.
-    /// The MidiRoutingTable commits changes to this Arc.
     #[cfg(feature = "midi")]
     pub(crate) fn set_midi_routing(&mut self, routing: Arc<ArcSwap<MidiRoutingSnapshot>>) {
         self.midi_routing = routing;
@@ -150,7 +144,6 @@ impl AudioCallbackState {
     }
 }
 
-/// Process audio through the FunDSP Net. Output is interleaved stereo.
 #[inline]
 pub(crate) fn process_audio(state: &AudioCallbackState, output: &mut [f32], buffer_start: Instant) {
     process_audio_inner(state, output, buffer_start);

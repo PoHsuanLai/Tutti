@@ -33,7 +33,6 @@ pub struct ExportBuilder {
     duration_seconds: Option<f64>,
     options: ExportOptions,
     compensate_latency: bool,
-    /// Export context for timeline and MIDI isolation.
     context: Option<ExportContext>,
 }
 
@@ -53,10 +52,8 @@ impl ExportBuilder {
         }
     }
 
-    /// Set export context for proper MIDI and timeline handling.
-    ///
-    /// When set, the export will use the context's timeline for beat
-    /// position and MIDI snapshot for non-destructive event delivery.
+    /// When set, the export uses the context's timeline for beat position
+    /// and MIDI snapshot for non-destructive event delivery.
     pub fn with_context(mut self, context: ExportContext) -> Self {
         self.context = Some(context);
         self

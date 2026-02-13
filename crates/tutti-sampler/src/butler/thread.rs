@@ -61,13 +61,11 @@ pub struct ButlerThread {
 }
 
 impl ButlerThread {
-    /// Create a new butler thread with default configuration.
     #[allow(dead_code)]
     pub fn new(channel_capacity: usize, sample_rate: f64) -> Self {
         Self::with_config(channel_capacity, sample_rate, BufferConfig::default())
     }
 
-    /// Create a new butler thread with custom configuration.
     pub fn with_config(channel_capacity: usize, sample_rate: f64, config: BufferConfig) -> Self {
         let (tx, rx) = bounded(channel_capacity);
         let sample_cache = Arc::new(LruCache::new(
@@ -147,12 +145,10 @@ impl ButlerThread {
         Arc::clone(&self.stream_states)
     }
 
-    /// Get I/O metrics.
     pub fn metrics(&self) -> Arc<IOMetrics> {
         Arc::clone(&self.metrics)
     }
 
-    /// Get cache reference.
     pub fn cache(&self) -> Arc<LruCache> {
         Arc::clone(&self.sample_cache)
     }
@@ -164,7 +160,6 @@ impl Drop for ButlerThread {
     }
 }
 
-/// Butler thread main loop for disk I/O operations.
 fn butler_loop(
     rx: Receiver<ButlerCommand>,
     res: ButlerResources,
@@ -258,7 +253,6 @@ fn butler_loop(
     }
 }
 
-/// Process incoming commands from the command channel.
 fn process_commands(
     rx: &Receiver<ButlerCommand>,
     res: &ButlerResources,
@@ -285,7 +279,6 @@ fn process_commands(
     }
 }
 
-/// Handle a single butler command.
 fn handle_command(
     cmd: ButlerCommand,
     res: &ButlerResources,
@@ -424,7 +417,6 @@ fn handle_command(
     }
 }
 
-/// Handle StreamAudioFile command.
 fn handle_stream_audio_file(
     channel_index: usize,
     file_path: std::path::PathBuf,
@@ -493,7 +485,6 @@ fn handle_stream_audio_file(
     }
 }
 
-/// Handle SeekStream command.
 fn handle_seek_stream(
     channel_index: usize,
     position_samples: u64,
@@ -536,7 +527,6 @@ fn handle_seek_stream(
     }
 }
 
-/// Handle SetLoopRange command.
 fn handle_set_loop_range(
     channel_index: usize,
     start_samples: u64,
@@ -569,7 +559,6 @@ fn handle_set_loop_range(
     }
 }
 
-/// Handle UpdatePdcPreroll command.
 fn handle_update_pdc_preroll(
     channel_index: usize,
     new_preroll: u64,

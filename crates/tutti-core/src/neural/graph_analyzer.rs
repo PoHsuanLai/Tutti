@@ -6,7 +6,6 @@ use alloc::collections::VecDeque;
 use fundsp::net::{Net, NodeId, Source};
 use hashbrown::HashSet;
 
-/// Result of graph analysis for neural batching.
 #[derive(Debug, Clone, Default)]
 pub struct BatchingStrategy {
     pub model_batches: HashMap<NeuralModelId, Vec<NodeId>>,
@@ -15,12 +14,11 @@ pub struct BatchingStrategy {
 }
 
 impl BatchingStrategy {
-    /// Check if strategy is empty (no neural nodes).
     pub fn is_empty(&self) -> bool {
         self.total_neural_nodes == 0
     }
 
-    /// Batch efficiency ratio (total nodes / GPU calls needed).
+    /// Total nodes / GPU calls needed.
     pub fn batch_efficiency(&self) -> f32 {
         if self.model_batches.is_empty() {
             return 0.0;
@@ -30,7 +28,6 @@ impl BatchingStrategy {
         total_nodes as f32 / num_batches as f32
     }
 
-    /// Get count of unique models.
     pub fn model_count(&self) -> usize {
         self.model_batches.len()
     }
@@ -43,12 +40,10 @@ pub(crate) struct GraphAnalyzer<'a> {
 }
 
 impl<'a> GraphAnalyzer<'a> {
-    /// Creates a new graph analyzer.
     pub fn new(net: &'a Net, manager: &'a NeuralNodeManager) -> Self {
         Self { net, manager }
     }
 
-    /// Analyze the graph and compute batching strategy.
     pub fn analyze(&self) -> BatchingStrategy {
         // 1. Group neural nodes by model_id
         let model_batches = self.manager.group_by_model();
@@ -69,7 +64,6 @@ impl<'a> GraphAnalyzer<'a> {
         }
     }
 
-    /// Compute topological execution order for neural nodes.
     fn compute_execution_order(&self) -> HashMap<NodeId, usize> {
         let neural_nodes: HashSet<NodeId> = self.manager.all_nodes().into_iter().collect();
         let node_count = neural_nodes.len();

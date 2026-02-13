@@ -1,8 +1,6 @@
-//! Loudness normalization utilities.
-
 use tutti_core::analyze_true_peak;
 
-/// Apply loudness normalization (EBU R128).
+/// EBU R128 loudness normalization.
 pub(crate) fn normalize_loudness(
     left: &mut [f32],
     right: &mut [f32],
@@ -27,7 +25,6 @@ pub(crate) fn normalize_loudness(
     });
 }
 
-/// Normalize audio to target peak level.
 pub(crate) fn normalize_peak(left: &mut [f32], right: &mut [f32], target_db: f64) {
     let current_peak = analyze_true_peak(left, right);
     let gain_db = target_db - current_peak;

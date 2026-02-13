@@ -2,18 +2,6 @@
 //!
 //! Load VST2, VST3, and CLAP plugins in isolated server processes.
 //! Server implementation is in `tutti-plugin-server`.
-//!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_plugin::{PluginClient, BridgeConfig};
-//!
-//! let (client, handle) = PluginClient::load(
-//!     BridgeConfig::default(),
-//!     "/path/to/plugin.vst3".into(),
-//!     44100.0,
-//! ).await?;
-//! ```
 
 pub mod error;
 pub use error::{BridgeError, LoadStage, Result};

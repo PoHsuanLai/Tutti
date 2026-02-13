@@ -31,7 +31,6 @@ impl TimeStretchParams {
     /// Maximum pitch shift (+2 octaves)
     pub const MAX_PITCH_CENTS: f32 = 2400.0;
 
-    /// Create new time-stretch parameters with default values (no effect)
     pub fn new() -> Self {
         Self {
             stretch_factor: 1.0,
@@ -139,12 +138,11 @@ pub enum FftSize {
 }
 
 impl FftSize {
-    /// Get the FFT size as usize
     pub fn size(&self) -> usize {
         *self as usize
     }
 
-    /// Get the default hop size (FFT size / 4 = 75% overlap)
+    /// FFT size / 4 = 75% overlap.
     pub fn hop_size(&self) -> usize {
         self.size() / 4
     }

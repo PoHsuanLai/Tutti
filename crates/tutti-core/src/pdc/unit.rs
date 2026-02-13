@@ -5,7 +5,6 @@ use crate::pdc::DelayBuffer;
 use crate::{AudioUnit, BufferMut, BufferRef};
 use fundsp::signal::SignalFrame;
 
-/// PDC delay compensation as an AudioUnit.
 pub struct PdcDelayUnit {
     delay_buffer: DelayBuffer,
     delay_samples: AtomicUsize,
@@ -68,7 +67,6 @@ impl AudioUnit for PdcDelayUnit {
     }
 
     fn tick(&mut self, input: &[f32], output: &mut [f32]) {
-        // Check if delay needs resizing
         let target_delay = self.delay_samples.load(Ordering::Relaxed);
         if target_delay != self.delay_buffer.delay_samples() {
             self.delay_buffer.set_delay(target_delay);
@@ -86,13 +84,11 @@ impl AudioUnit for PdcDelayUnit {
     }
 
     fn process(&mut self, size: usize, input: &BufferRef, output: &mut BufferMut) {
-        // Check if delay needs resizing
         let target_delay = self.delay_samples.load(Ordering::Relaxed);
         if target_delay != self.delay_buffer.delay_samples() {
             self.delay_buffer.set_delay(target_delay);
         }
 
-        // Process sample-by-sample (DelayBuffer handles the circular buffer)
         for i in 0..size {
             let left_in = input.at_f32(0, i);
             let right_in = input.at_f32(1, i);
@@ -105,8 +101,7 @@ impl AudioUnit for PdcDelayUnit {
     }
 
     fn get_id(&self) -> u64 {
-        // Unique ID for PDC delay
-        0x5044434445_u64 // "PDCDE" in hex
+        0x5044434445_u64 // "PDCDE"
     }
 
     fn as_any(&self) -> &dyn any::Any {

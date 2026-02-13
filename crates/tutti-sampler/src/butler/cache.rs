@@ -8,10 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tutti_core::Wave;
 
-/// LRU cache for audio files.
-///
-/// Limits cache by entry count and/or total bytes, evicting
-/// least-recently-used entries when limits are exceeded.
+/// Bounded LRU cache with entry count and byte limits.
 pub struct LruCache {
     cache: DashMap<PathBuf, CacheEntry>,
     max_entries: usize,
@@ -26,11 +23,6 @@ struct CacheEntry {
 }
 
 impl LruCache {
-    /// Create a new LRU cache with given limits.
-    ///
-    /// # Arguments
-    /// * `max_entries` - Maximum number of cached files
-    /// * `max_bytes` - Maximum total bytes (approximate, based on sample count)
     pub fn new(max_entries: usize, max_bytes: u64) -> Self {
         Self {
             cache: DashMap::new(),
@@ -40,7 +32,6 @@ impl LruCache {
         }
     }
 
-    /// Get a cached wave file, updating its access time.
     pub fn get(&self, path: &PathBuf) -> Option<Arc<Wave>> {
         self.cache.get(path).map(|entry| {
             entry.last_access.store(now_ms(), Ordering::Relaxed);
@@ -48,9 +39,7 @@ impl LruCache {
         })
     }
 
-    /// Insert a wave file into the cache.
-    ///
-    /// Evicts LRU entries if necessary to make room.
+    /// Evicts LRU entries if necessary.
     pub fn insert(&self, path: PathBuf, wave: Arc<Wave>) {
         let size = wave.len() as u64 * wave.channels() as u64 * 4;
 
@@ -79,9 +68,6 @@ impl LruCache {
         self.current_bytes.fetch_add(size, Ordering::Relaxed);
     }
 
-    /// Evict the least-recently-used entry.
-    ///
-    /// Returns true if an entry was evicted, false if cache is empty.
     fn evict_lru(&self) -> bool {
         let oldest_path = self
             .cache
@@ -99,7 +85,6 @@ impl LruCache {
         false
     }
 
-    /// Get cache statistics.
     pub fn stats(&self) -> CacheStats {
         CacheStats {
             entries: self.cache.len(),
@@ -109,29 +94,24 @@ impl LruCache {
         }
     }
 
-    /// Clear all cached entries.
     pub fn clear(&self) {
         self.cache.clear();
         self.current_bytes.store(0, Ordering::Relaxed);
     }
 
-    /// Check if a path is cached.
     pub fn contains(&self, path: &PathBuf) -> bool {
         self.cache.contains_key(path)
     }
 
-    /// Number of cached entries.
     pub fn len(&self) -> usize {
         self.cache.len()
     }
 
-    /// Check if cache is empty.
     pub fn is_empty(&self) -> bool {
         self.cache.is_empty()
     }
 }
 
-/// Get current time in milliseconds since UNIX epoch.
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -139,21 +119,16 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Cache statistics snapshot.
 #[derive(Debug, Clone, Default)]
 pub struct CacheStats {
-    /// Current number of cached entries
     pub entries: usize,
-    /// Current total bytes cached
     pub bytes: u64,
-    /// Maximum entries allowed
     pub max_entries: usize,
-    /// Maximum bytes allowed
     pub max_bytes: u64,
 }
 
 impl CacheStats {
-    /// Get fill percentage (0.0 - 1.0) based on entry count.
+    /// Fill percentage 0.0..1.0 based on entry count.
     pub fn entry_fill(&self) -> f32 {
         if self.max_entries == 0 {
             0.0
@@ -162,7 +137,7 @@ impl CacheStats {
         }
     }
 
-    /// Get fill percentage (0.0 - 1.0) based on bytes.
+    /// Fill percentage 0.0..1.0 based on bytes.
     pub fn byte_fill(&self) -> f32 {
         if self.max_bytes == 0 {
             0.0

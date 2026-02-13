@@ -12,7 +12,6 @@ use std::sync::Arc;
 pub use tutti_core::InferenceConfig;
 use tutti_core::{AudioUnit, BackendFactory, InferenceBackend};
 
-/// Main neural audio system.
 #[derive(Clone)]
 pub struct NeuralSystem {
     inner: Arc<NeuralSystemInner>,

@@ -22,18 +22,9 @@ use std::time::Instant;
 /// - O(n) where n is the number of events, not unbounded
 #[cfg(feature = "std")]
 pub trait MidiInputSource: Send + Sync {
-    /// Read all pending MIDI events for this audio cycle.
+    /// Returns `(port_index, event)` tuples. Valid until the next call.
     ///
-    /// Returns a slice of (port_index, event) tuples. The slice is valid until
-    /// the next call to `cycle_read`.
-    ///
-    /// # Arguments
-    /// * `nframes` - Number of audio frames in this cycle (for timing context)
-    /// * `buffer_start` - Instant when this audio buffer started processing
-    /// * `sample_rate` - Audio sample rate for timestamp conversion
-    ///
-    /// # RT Safety
-    /// This method is called from the audio thread and must be lock-free.
+    /// RT-safe: called from the audio thread, must be lock-free.
     fn cycle_read(
         &self,
         nframes: usize,
@@ -41,15 +32,12 @@ pub trait MidiInputSource: Send + Sync {
         sample_rate: f64,
     ) -> &[(usize, MidiEvent)];
 
-    /// Check if any input ports are active.
-    ///
-    /// Can be used to skip MIDI processing when no ports are connected.
     fn has_active_inputs(&self) -> bool {
         true
     }
 }
 
-/// Fallback trait for no_std environments (no timestamp support).
+/// Fallback for `no_std` (no timestamp support).
 #[cfg(not(feature = "std"))]
 pub trait MidiInputSource: Send + Sync {
     fn cycle_read(&self, nframes: usize) -> &[(usize, MidiEvent)];
@@ -59,7 +47,7 @@ pub trait MidiInputSource: Send + Sync {
     }
 }
 
-/// A no-op MIDI input source for when MIDI is disabled.
+/// No-op source for when MIDI is disabled.
 #[derive(Debug, Default)]
 pub struct NoMidiInput;
 

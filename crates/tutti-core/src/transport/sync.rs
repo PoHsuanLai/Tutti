@@ -78,7 +78,6 @@ pub enum SmpteFrameRate {
 }
 
 impl SmpteFrameRate {
-    /// Get frames per second as f64.
     pub fn fps(&self) -> f64 {
         match self {
             SmpteFrameRate::Fps24 => 24.0,
@@ -88,7 +87,6 @@ impl SmpteFrameRate {
         }
     }
 
-    /// Check if drop-frame.
     pub fn is_drop_frame(&self) -> bool {
         matches!(self, SmpteFrameRate::Fps2997Df)
     }
@@ -119,7 +117,6 @@ impl Default for SyncState {
 }
 
 impl SyncState {
-    /// Create new sync state (internal clock, unlocked).
     pub fn new() -> Self {
         Self {
             source: AtomicU8::new(SyncSource::Internal as u8),
@@ -132,12 +129,10 @@ impl SyncState {
         }
     }
 
-    /// Get current sync source.
     pub fn source(&self) -> SyncSource {
         SyncSource::from_u8(self.source.load(Ordering::Acquire))
     }
 
-    /// Set sync source.
     pub fn set_source(&self, source: SyncSource) {
         self.source.store(source as u8, Ordering::Release);
         // Reset status when changing source
@@ -151,72 +146,59 @@ impl SyncState {
         }
     }
 
-    /// Check if using internal clock.
     pub fn is_internal(&self) -> bool {
         self.source() == SyncSource::Internal
     }
 
-    /// Check if synced to external source.
     pub fn is_external(&self) -> bool {
         !self.is_internal()
     }
 
-    /// Get current sync status.
     pub fn status(&self) -> SyncStatus {
         SyncStatus::from_u8(self.status.load(Ordering::Acquire))
     }
 
-    /// Set sync status.
     pub fn set_status(&self, status: SyncStatus) {
         self.status.store(status as u8, Ordering::Release);
     }
 
-    /// Check if locked to external source.
     pub fn is_locked(&self) -> bool {
         self.status() == SyncStatus::Locked
     }
 
-    /// Get external position in beats.
     pub fn external_position(&self) -> f64 {
         self.external_position_beats.get()
     }
 
-    /// Set external position in beats (called when receiving MTC/LTC/MIDI Clock).
     pub fn set_external_position(&self, beats: f64) {
         self.external_position_beats.set(beats);
     }
 
-    /// Get external tempo in BPM.
     pub fn external_tempo(&self) -> f32 {
         self.external_tempo.get()
     }
 
-    /// Set external tempo in BPM.
     pub fn set_external_tempo(&self, bpm: f32) {
         self.external_tempo.set(bpm.clamp(20.0, 300.0));
     }
 
-    /// Get sync offset in samples.
     pub fn offset_samples(&self) -> f64 {
         self.offset_samples.get()
     }
 
-    /// Set sync offset in samples (positive = delay internal, negative = advance internal).
+    /// Positive = delay internal, negative = advance internal.
     pub fn set_offset_samples(&self, samples: f64) {
         self.offset_samples.set(samples);
     }
 
-    /// Check if transport should follow external position.
     pub fn is_following(&self) -> bool {
         self.following.get()
     }
 
-    /// Set whether transport should follow external position.
     pub fn set_following(&self, follow: bool) {
         self.following.set(follow);
     }
 
-    /// Get SMPTE frame rate.
     pub fn smpte_frame_rate(&self) -> SmpteFrameRate {
         match self.smpte_frame_rate.load(Ordering::Acquire) {
             0 => SmpteFrameRate::Fps24,
@@ -228,12 +210,10 @@ impl SyncState {
         }
     }
 
-    /// Set SMPTE frame rate.
     pub fn set_smpte_frame_rate(&self, rate: SmpteFrameRate) {
         self.smpte_frame_rate.store(rate as u8, Ordering::Release);
     }
 
-    /// Get a snapshot of sync state for UI display.
     pub fn snapshot(&self) -> SyncSnapshot {
         SyncSnapshot {
             source: self.source(),
@@ -247,7 +227,6 @@ impl SyncState {
     }
 }
 
-/// Snapshot of sync state for UI display.
 #[derive(Debug, Clone, Copy)]
 pub struct SyncSnapshot {
     pub source: SyncSource,

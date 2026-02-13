@@ -1,7 +1,4 @@
-//! Multi-Port MIDI Manager
-//!
-//! Manages multiple AsyncMidiPort instances for simultaneous MIDI I/O.
-//! Index-based for RT-safe direct Vec access, with arc-swap for lock-free updates.
+//! Multi-port MIDI manager with lock-free access for the audio thread.
 
 use super::async_port::{AsyncMidiPort, OutputProducerHandle};
 use crate::MidiEvent;
@@ -32,7 +29,6 @@ pub struct MidiPortManager {
     port_info: Arc<RwLock<Vec<PortInfo>>>,
     fifo_size: usize,
     event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
-    /// Intermediate buffer for timestamped events before frame_offset conversion.
     timestamped_buffer: std::cell::UnsafeCell<Vec<(Instant, usize, MidiEvent)>>,
     output_event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
 }
@@ -163,7 +159,7 @@ impl MidiPortManager {
         }
     }
 
-    /// NOT RT-safe (acquires lock). For RT-safe access, use the port's `is_active()` directly.
+    /// NOT RT-safe (acquires lock).
     pub fn is_port_active(&self, port_type: PortType, port_index: usize) -> bool {
         let port_info = self.port_info.read();
         port_info
@@ -319,8 +315,7 @@ impl MidiPortManager {
         all_events
     }
 
-    /// Push a MIDI 1.0 event into a port's input buffer programmatically.
-    /// Uses `Instant::now()` as the timestamp. RT-safe (lock-free).
+    /// RT-safe (lock-free). Uses `Instant::now()` as the timestamp.
     pub fn push_input_event(&self, port_index: usize, event: MidiEvent) -> bool {
         let input_ports = self.input_ports.load();
         if let Some(port) = input_ports.get(port_index) {
@@ -353,10 +348,7 @@ impl Default for MidiPortManager {
     }
 }
 
-// Implement MidiInputSource trait from tutti-core for audio callback integration
 impl tutti_core::midi::MidiInputSource for MidiPortManager {
-    /// Bridge between hardware MIDI (via midir) and the audio callback.
-    /// Called once per audio buffer to collect all events that arrived since the last call.
     fn cycle_read(
         &self,
         nframes: usize,

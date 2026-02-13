@@ -1,5 +1,3 @@
-//! Error types for plugin bridge
-
 use std::path::PathBuf;
 use thiserror::Error;
 

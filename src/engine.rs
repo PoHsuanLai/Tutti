@@ -1,4 +1,4 @@
-//! TuttiEngine that coordinates all audio subsystems
+//! Top-level engine that coordinates all audio subsystems.
 
 use crate::core::{
     MeteringManager, NodeId, NodeRegistry, PdcManager, TransportHandle, TransportManager, TuttiNet,
@@ -7,7 +7,6 @@ use crate::core::{
 use crate::Result;
 use tutti_core::Arc;
 
-// Synth types (feature-gated)
 #[cfg(all(feature = "synth", feature = "midi"))]
 use tutti_synth::SynthHandle;
 
@@ -42,31 +41,18 @@ use crate::sampler::{SamplerHandle, SamplerSystem};
 #[cfg(feature = "neural")]
 use crate::neural::{NeuralHandle, NeuralSystem};
 
-/// Main audio engine that coordinates all subsystems.
-///
-/// TuttiEngine wraps tutti-core's TuttiSystem and integrates subsystems based on
-/// enabled Cargo features:
-/// - MIDI subsystem (feature "midi") - requires `.midi()` to connect hardware
-/// - Sampler subsystem (feature "sampler") - automatically initialized
-/// - Neural subsystem (feature "neural") - automatically initialized
-/// - SoundFont support (feature "soundfont") - automatically initialized
-/// - Plugin hosting (feature "plugin") - in-process loading, GUI editor support
+/// Coordinates all audio subsystems based on enabled Cargo features:
+/// MIDI (opt-in via `.midi()`), sampler, neural, soundfont (auto-initialized),
+/// and plugin hosting (in-process, GUI editor support).
 ///
 /// # Example
 ///
 /// ```ignore
 /// use tutti::prelude::*;
 ///
-/// // Enable features in Cargo.toml:
-/// // tutti = { version = "...", features = ["sampler", "neural"] }
-///
 /// let engine = TuttiEngine::builder()
 ///     .sample_rate(44100.0)
 ///     .build()?;
-///
-/// // Subsystems are ready to use
-/// let sampler = engine.sampler();
-/// let neural = engine.neural();
 ///
 /// engine.graph_mut(|net| {
 ///     let osc = net.add(Box::new(sine_hz(440.0)));
@@ -76,25 +62,18 @@ use crate::neural::{NeuralHandle, NeuralSystem};
 /// engine.transport().play();
 /// ```
 pub struct TuttiEngine {
-    /// Core audio system (always present)
     core: TuttiSystem,
-
-    /// Node registry for dynamic node creation
     registry: NodeRegistry,
 
-    /// MIDI subsystem (optional)
     #[cfg(feature = "midi")]
     midi: Option<Arc<MidiSystem>>,
 
-    /// Sampler subsystem (feature-gated)
     #[cfg(feature = "sampler")]
     sampler: Arc<SamplerSystem>,
 
-    /// Neural subsystem (feature-gated)
     #[cfg(feature = "neural")]
     neural: Arc<NeuralSystem>,
 
-    /// SoundFont manager (feature-gated)
     #[cfg(feature = "soundfont")]
     soundfont: Arc<crate::synth::SoundFontSystem>,
 
@@ -106,52 +85,44 @@ pub struct TuttiEngine {
     #[cfg(feature = "plugin")]
     inprocess_handles: Mutex<Vec<tutti_plugin::InProcessThreadHandle>>,
 
-    /// Live analysis state + thread handle (opt-in via enable_live_analysis)
+    /// Opt-in via enable_live_analysis; stopped via disable_live_analysis.
     #[cfg(feature = "analysis")]
     live_analysis: Mutex<Option<(Arc<crate::analysis::LiveAnalysisState>, JoinHandle<()>)>>,
 
-    /// Cache for loaded audio samples (Wave)
     #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
     sample_cache: Mutex<HashMap<PathBuf, Arc<Wave>>>,
 }
 
 impl TuttiEngine {
-    /// Create a new engine builder
     pub fn builder() -> crate::TuttiEngineBuilder {
         crate::TuttiEngineBuilder::default()
     }
 
-    /// Get sample rate
     pub fn sample_rate(&self) -> f64 {
         self.core.sample_rate()
     }
 
-    /// Check if audio is running
     #[cfg(feature = "std")]
     pub fn is_running(&self) -> bool {
         self.core.is_running()
     }
 
-    /// List available output devices
     #[cfg(feature = "std")]
     pub fn list_output_devices() -> Result<Vec<String>> {
         Ok(TuttiSystem::list_output_devices()?)
     }
 
-    /// Get current output device name
     #[cfg(feature = "std")]
     pub fn current_output_device_name(&self) -> Result<String> {
         Ok(self.core.current_output_device_name()?)
     }
 
-    /// Set output device
     #[cfg(feature = "std")]
     pub fn set_output_device(&self, index: Option<usize>) -> &Self {
         self.core.set_output_device(index);
         self
     }
 
-    /// Get number of output channels
     pub fn channels(&self) -> usize {
         self.core.channels()
     }
@@ -189,8 +160,6 @@ impl TuttiEngine {
         self.core.graph_mut(f)
     }
 
-    /// Get fluent transport API handle.
-    ///
     /// # Example
     /// ```ignore
     /// engine.transport()
@@ -212,8 +181,6 @@ impl TuttiEngine {
         self.core.transport_manager()
     }
 
-    /// Get the metering handle for fluent meter control.
-    ///
     /// # Example
     /// ```ignore
     /// // Enable meters with chaining
@@ -229,23 +196,17 @@ impl TuttiEngine {
         crate::core::MeteringHandle::new(self.core.metering().clone())
     }
 
-    /// Get direct access to the metering manager.
-    ///
-    /// Use `metering()` for the fluent API. This provides low-level access
-    /// for advanced use cases like analysis taps.
+    /// Low-level access for advanced use cases like analysis taps.
+    /// Prefer `metering()` for the fluent API.
     pub fn metering_manager(&self) -> &Arc<MeteringManager> {
         self.core.metering()
     }
 
-    /// Get the PDC manager
     pub fn pdc(&self) -> &Arc<PdcManager> {
         self.core.pdc()
     }
 
-    /// Get the DSP node builder handle.
-    ///
-    /// Provides methods for registering DSP nodes (LFO, dynamics, spatial, etc.)
-    /// via fluent API. Nodes are registered once and can be instantiated multiple
+    /// Nodes are registered once and can be instantiated multiple
     /// times with different parameters.
     ///
     /// # Example
@@ -300,10 +261,6 @@ impl TuttiEngine {
         SynthHandle::new(self.sample_rate(), midi_registry)
     }
 
-    // =========================================================================
-    // Fluent Builders - Resource Loading
-    // =========================================================================
-
     /// Create a SoundFont synthesizer.
     ///
     /// Returns a fluent builder for configuring preset and channel. Call `.build()`
@@ -337,28 +294,19 @@ impl TuttiEngine {
         crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
     }
 
-    /// Load a FLAC audio sample.
-    ///
-    /// Returns a fluent builder for configuring gain, speed, and looping.
-    /// Call `.build()` to get a `SamplerUnit`. The audio file is loaded and cached.
+    /// Load a FLAC audio sample. See [`wav()`](Self::wav) for builder API.
     #[cfg(all(feature = "sampler", feature = "flac"))]
     pub fn flac(&self, path: impl AsRef<Path>) -> crate::builders::SampleBuilder<'_> {
         crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
     }
 
-    /// Load an MP3 audio sample.
-    ///
-    /// Returns a fluent builder for configuring gain, speed, and looping.
-    /// Call `.build()` to get a `SamplerUnit`. The audio file is loaded and cached.
+    /// Load an MP3 audio sample. See [`wav()`](Self::wav) for builder API.
     #[cfg(all(feature = "sampler", feature = "mp3"))]
     pub fn mp3(&self, path: impl AsRef<Path>) -> crate::builders::SampleBuilder<'_> {
         crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
     }
 
-    /// Load an OGG Vorbis audio sample.
-    ///
-    /// Returns a fluent builder for configuring gain, speed, and looping.
-    /// Call `.build()` to get a `SamplerUnit`. The audio file is loaded and cached.
+    /// Load an OGG Vorbis audio sample. See [`wav()`](Self::wav) for builder API.
     #[cfg(all(feature = "sampler", feature = "ogg"))]
     pub fn ogg(&self, path: impl AsRef<Path>) -> crate::builders::SampleBuilder<'_> {
         crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
@@ -452,33 +400,8 @@ impl TuttiEngine {
         crate::builders::NeuralEffectFnBuilder::new(self, infer_fn)
     }
 
-    /// Get the audio analysis subsystem handle.
-    ///
-    /// Provides tools for audio analysis: transient detection, pitch detection,
-    /// stereo correlation, and waveform thumbnails.
-    ///
-    /// # Example
-    /// ```ignore
-    /// use tutti::prelude::*;
-    ///
-    /// let engine = TuttiEngine::builder().build()?;
-    /// let analysis = engine.analysis();
-    ///
-    /// // Detect transients (kick drum hits, etc.)
-    /// let transients = analysis.detect_transients(&drum_samples);
-    /// for t in transients {
-    ///     println!("Transient at {}s: strength {}", t.time, t.strength);
-    /// }
-    ///
-    /// // Detect pitch
-    /// let pitch = analysis.detect_pitch(&vocal_samples);
-    /// if pitch.confidence > 0.7 {
-    ///     println!("Detected: {} Hz (MIDI {:?})", pitch.frequency, pitch.midi_note);
-    /// }
-    ///
-    /// // Generate waveform summary for UI
-    /// let waveform = analysis.waveform_summary(&samples, 512);
-    /// ```
+    /// Transient detection, pitch detection, stereo correlation, waveform thumbnails.
+    /// If live analysis is enabled, the handle includes live state.
     #[cfg(feature = "analysis")]
     pub fn analysis(&self) -> crate::analysis::AnalysisHandle {
         let guard = self.live_analysis.lock();
@@ -533,16 +456,7 @@ impl TuttiEngine {
         self
     }
 
-    /// Get the MIDI subsystem handle.
-    ///
-    /// Returns a handle that works whether or not MIDI is enabled.
-    /// Methods are no-ops when MIDI is disabled.
-    ///
-    /// # Example
-    /// ```ignore
-    /// // Always works, even if MIDI not enabled
-    /// engine.midi().send().note_on(0, 60, 100);
-    /// ```
+    /// Methods are no-ops when MIDI hardware is not connected.
     #[cfg(feature = "midi")]
     pub fn midi(&self) -> MidiHandle {
         MidiHandle::new(self.midi.clone())
@@ -606,19 +520,12 @@ impl TuttiEngine {
     /// ```
     #[cfg(feature = "midi")]
     pub fn set_midi_target(&self, node: NodeId) -> &Self {
-        // Get the unit ID from the node
         let unit_id = self.graph(|net| net.node(node).get_id());
         self.core.set_midi_target(unit_id);
         self
     }
 
-    /// Queue MIDI events to a specific node
-    ///
-    /// Events are queued and will be delivered to the node before the next audio callback.
-    ///
-    /// # Arguments
-    /// * `node` - The node ID to send MIDI to
-    /// * `events` - Slice of MIDI events to queue
+    /// Events are delivered to the node before the next audio callback.
     #[cfg(feature = "midi")]
     pub fn queue_midi(&self, node: NodeId, events: &[MidiEvent]) -> &Self {
         self.graph(|net| {
@@ -627,31 +534,13 @@ impl TuttiEngine {
         self
     }
 
-    /// Get the sampler subsystem handle.
-    ///
-    /// Available when the "sampler" feature is enabled in Cargo.toml.
-    /// The subsystem is automatically initialized when the engine is built.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let sampler = engine.sampler();
-    /// sampler.stream("file.wav").gain(0.8).start();
-    /// ```
+    /// Automatically initialized when the engine is built.
     #[cfg(feature = "sampler")]
     pub fn sampler(&self) -> SamplerHandle {
         SamplerHandle::new(Some(self.sampler.clone()))
     }
 
-    /// Get the neural subsystem handle.
-    ///
-    /// Available when the "neural" feature is enabled in Cargo.toml.
-    /// The subsystem is automatically initialized when the engine is built.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let neural = engine.neural();
-    /// neural.load_synth("model.mpk")?;
-    /// ```
+    /// Automatically initialized when the engine is built.
     #[cfg(feature = "neural")]
     pub fn neural(&self) -> NeuralHandle {
         NeuralHandle::new(Some(self.neural.clone()))
@@ -665,10 +554,6 @@ impl TuttiEngine {
     ) -> crate::LiveAutomationLane<T> {
         crate::AutomationLane::new(envelope, self.transport())
     }
-
-    // =========================================================================
-    // Internal helpers for fluent builders
-    // =========================================================================
 
     /// Get direct access to the SoundFont system (for builders).
     #[cfg(feature = "soundfont")]
@@ -687,28 +572,19 @@ impl TuttiEngine {
         self.plugin_control_handles.lock().push(control_handle);
     }
 
-    /// Get a control handle for a loaded plugin by index.
-    ///
     /// Index corresponds to the order in which plugins were loaded.
     #[cfg(feature = "plugin")]
     pub fn plugin(&self, index: usize) -> Option<tutti_plugin::PluginHandle> {
         self.plugin_control_handles.lock().get(index).cloned()
     }
 
-    /// Get the number of loaded plugins.
     #[cfg(feature = "plugin")]
     pub fn plugin_count(&self) -> usize {
         self.plugin_control_handles.lock().len()
     }
 
-    /// Load a Wave from file and return the decoded audio data.
-    ///
-    /// Uses an internal cache — repeated loads of the same path return the
-    /// cached `Arc<Wave>` without re-decoding. This is the same cache used
-    /// by `engine.wav()`, `engine.mp3()`, etc. for playback.
-    ///
-    /// Useful for waveform analysis / peak computation without creating
-    /// a SamplerUnit.
+    /// Decode and cache audio data. Repeated loads return the cached `Arc<Wave>`
+    /// without re-decoding. Same cache used by `wav()`, `mp3()`, etc.
     #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
     pub fn load_wave(&self, path: impl AsRef<Path>) -> Result<Arc<Wave>> {
         self.get_wave_cached(path.as_ref())
@@ -751,10 +627,7 @@ impl TuttiEngine {
         crate::ImportHandle::start(path_buf)
     }
 
-    /// Internal: Return a cached Wave or error if not yet loaded.
-    ///
-    /// Used by `SampleBuilder::build()` so it never blocks on disk I/O.
-    /// The caller should use `start_load_wave()` to kick off background loading.
+    /// Return a cached Wave or error if not yet loaded. Never blocks on disk I/O.
     #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
     pub(crate) fn get_wave_cached(&self, path: &Path) -> Result<Arc<Wave>> {
         let cache = self.sample_cache.lock();
@@ -766,10 +639,8 @@ impl TuttiEngine {
         })
     }
 
-    /// Store a wave in the cache for future lookups.
-    ///
-    /// Called after a background import completes so subsequent
-    /// `load_wave()` calls return the cached copy.
+    /// Store a wave in the cache so subsequent `load_wave()` calls
+    /// return the cached copy.
     #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
     pub fn cache_wave(&self, path: impl AsRef<Path>, wave: Arc<Wave>) {
         let mut cache = self.sample_cache.lock();
@@ -947,12 +818,6 @@ impl TuttiEngine {
         }
     }
 
-    // =========================================================================
-    // MIDI Event Helpers
-    // =========================================================================
-
-    /// Send a Note On event to a node.
-    ///
     /// Accepts either a raw MIDI note number (0-127) or a `Note` enum variant.
     ///
     /// # Example
@@ -969,7 +834,6 @@ impl TuttiEngine {
         self.queue_midi(node, &[event])
     }
 
-    /// Send a Note On event to a specific MIDI channel.
     #[cfg(feature = "midi")]
     pub fn note_on_ch(
         &self,
@@ -984,7 +848,6 @@ impl TuttiEngine {
         self.queue_midi(node, &[event])
     }
 
-    /// Send a Note Off event to a node.
     #[cfg(feature = "midi")]
     pub fn note_off(&self, node: crate::core::NodeId, note: impl Into<u8>) -> &Self {
         let event = crate::MidiEvent::note_off_builder(note.into())
@@ -993,7 +856,6 @@ impl TuttiEngine {
         self.queue_midi(node, &[event])
     }
 
-    /// Send a Note Off event to a specific MIDI channel.
     #[cfg(feature = "midi")]
     pub fn note_off_ch(
         &self,
@@ -1007,7 +869,6 @@ impl TuttiEngine {
         self.queue_midi(node, &[event])
     }
 
-    /// Send a Control Change event to a node.
     #[cfg(feature = "midi")]
     pub fn control_change(
         &self,
@@ -1022,9 +883,7 @@ impl TuttiEngine {
         self.queue_midi(node, &[event])
     }
 
-    /// Send a Pitch Bend event to a node.
-    ///
-    /// `value` is a 14-bit unsigned value: 0-16383, where 8192 = center (no bend).
+    /// `value` is 14-bit unsigned: 0-16383, where 8192 = center (no bend).
     #[cfg(feature = "midi")]
     pub fn pitch_bend(&self, node: crate::core::NodeId, channel: u8, value: u16) -> &Self {
         let event = crate::MidiEvent::bend_builder(value.min(16383))
@@ -1032,10 +891,6 @@ impl TuttiEngine {
             .build();
         self.queue_midi(node, &[event])
     }
-
-    // =========================================================================
-    // Custom DSP Registration (for user-defined nodes)
-    // =========================================================================
 
     /// Register a parameterized node with clean API.
     ///
@@ -1103,7 +958,6 @@ impl TuttiEngine {
         self
     }
 
-    /// Internal: create engine from builder
     pub(crate) fn from_parts(
         core: TuttiSystem,
         #[cfg(feature = "midi")] midi: Option<Arc<MidiSystem>>,

@@ -2,8 +2,6 @@
 
 pub const MIDI_FEATURE_COUNT: usize = 12;
 
-/// Per-voice MIDI state converted to feature vectors for inference.
-///
 /// Feature layout: `[pitch_hz, loudness, pitch_bend, mod_wheel, brightness,
 /// expression, channel_pressure, sustain, note_number, velocity_raw, bend_range, reserved]`
 #[derive(Debug, Clone)]

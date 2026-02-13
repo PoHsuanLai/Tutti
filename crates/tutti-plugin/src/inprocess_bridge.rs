@@ -23,11 +23,7 @@ type SharedPlugin = Arc<Mutex<Box<dyn PluginInstance>>>;
 const COMMAND_QUEUE_SIZE: usize = 128;
 const RESPONSE_QUEUE_SIZE: usize = 128;
 
-/// In-process audio buffer using plain Vec allocations.
-///
-/// Each channel has a separate f32 and f64 buffer. The audio thread writes input
-/// and reads output; the bridge thread reads input and writes output. Access is
-/// serialized by the command queue (no concurrent access to the same data).
+/// Access is serialized by the command queue (no concurrent access to the same data).
 pub(crate) struct InProcessAudioBuffer {
     f32_channels: Vec<parking_lot::Mutex<Vec<f32>>>,
     f64_channels: Vec<parking_lot::Mutex<Vec<f64>>>,
@@ -103,7 +99,6 @@ impl InProcessAudioBuffer {
         Ok(samples)
     }
 
-    /// Build input/output slices for f32 processing, call the plugin, and write back.
     fn process_f32(
         &self,
         plugin: &SharedPlugin,
@@ -141,7 +136,6 @@ impl InProcessAudioBuffer {
         result
     }
 
-    /// Build input/output slices for f64 processing, call the plugin, and write back.
     fn process_f64(
         &self,
         plugin: &SharedPlugin,
@@ -183,7 +177,6 @@ struct ProcessCommandData {
     transport: TransportInfo,
 }
 
-/// Commands sent to the bridge thread (audio-thread operations only).
 enum BridgeCommand {
     Process(Box<ProcessCommandData>),
     SetParameter { param_id: u32, value: f32 },
@@ -199,11 +192,8 @@ enum BridgeResponse {
     Error,
 }
 
-/// In-process bridge that hosts a plugin on a dedicated thread.
-///
-/// Audio/param/state operations go through an ArrayQueue to the bridge thread.
-/// GUI methods (`open_editor`, `close_editor`, `editor_idle`) are called directly
-/// on the caller's thread via a shared mutex, as required by CLAP/VST3.
+/// Audio/param operations go through an ArrayQueue to the bridge thread.
+/// GUI methods are called directly on the caller's thread (CLAP/VST3 requirement).
 #[derive(Clone)]
 pub struct InProcessBridge {
     plugin: SharedPlugin,
@@ -216,14 +206,13 @@ pub struct InProcessBridge {
     recycle_queue: Arc<ArrayQueue<Box<ProcessCommandData>>>,
 }
 
-/// Handle to in-process bridge thread. Shuts down on drop.
+/// Shuts down on drop.
 pub struct InProcessThreadHandle {
     bridge: InProcessBridge,
     thread_handle: Option<thread::JoinHandle<()>>,
 }
 
 impl InProcessBridge {
-    /// Create a new in-process bridge hosting the given plugin instance.
     pub fn new(
         plugin: Box<dyn PluginInstance>,
         num_channels: usize,
@@ -272,8 +261,7 @@ impl InProcessBridge {
         (bridge, handle)
     }
 
-    /// Bridge thread loop — handles audio processing and RT parameter changes.
-    /// All other operations (GUI, state, param queries) go direct via the shared mutex.
+    /// GUI, state, and param queries bypass this loop -- they go direct via the shared mutex.
     fn run_loop(
         commands: &ArrayQueue<BridgeCommand>,
         responses: &ArrayQueue<BridgeResponse>,
@@ -433,7 +421,6 @@ impl PluginBridge for InProcessBridge {
         if self.crashed.load(Ordering::Acquire) {
             return false;
         }
-        // Called directly on the caller's thread (must be main thread for CLAP/VST3).
         self.plugin.lock().close_editor();
         true
     }
@@ -442,7 +429,6 @@ impl PluginBridge for InProcessBridge {
         if self.crashed.load(Ordering::Acquire) {
             return;
         }
-        // Called directly on the caller's thread (must be main thread for CLAP/VST3).
         self.plugin.lock().editor_idle();
     }
 

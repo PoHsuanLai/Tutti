@@ -1,22 +1,10 @@
-//! Stereo sidechain gate
-
 use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use tutti_core::{dsp::DEFAULT_SR, AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 use super::utils::{amplitude_to_db, db_to_amplitude, time_to_coeff};
 
-/// Stereo gate with stereo sidechain input
-///
-/// ## Inputs
-/// - Port 0: Left audio
-/// - Port 1: Right audio
-/// - Port 2: Left sidechain
-/// - Port 3: Right sidechain (optional)
-///
-/// ## Outputs
-/// - Port 0: Gated left
-/// - Port 1: Gated right
+/// Stereo gate with stereo sidechain input (4-in: L/R audio + L/R sidechain, 2-out).
 pub struct StereoSidechainGate {
     threshold_db: Arc<AtomicFloat>,
     attack: Arc<AtomicFloat>,

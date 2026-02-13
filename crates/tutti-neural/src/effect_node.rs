@@ -51,10 +51,8 @@ impl ArcBufferPool {
 
 static INSTANCE_COUNTER: AtomicU64 = AtomicU64::new(1);
 
-/// Neural effect AudioUnit.
-///
 /// Stereo input/output. Latency = buffer_size samples (reported for PDC).
-/// Uses lock-free double-buffered queue for audio ↔ inference thread transfer.
+/// Uses lock-free double-buffered queue for audio <-> inference thread transfer.
 pub struct NeuralEffectNode {
     instance_id: u64,
     model_id: NeuralModelId,

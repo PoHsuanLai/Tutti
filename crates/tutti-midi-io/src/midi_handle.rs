@@ -28,22 +28,11 @@ impl MidiHandle {
         Self { midi }
     }
 
-    /// # Example
-    /// ```ignore
-    /// midi.send()
-    ///     .note_on(0, 60, 100)
-    ///     .cc(0, 74, 64)
-    ///     .pitch_bend(0, 0);
-    /// ```
     #[cfg(feature = "midi-io")]
     pub fn send(&self) -> crate::midi_builder::MidiBuilder<'_> {
         crate::midi_builder::MidiBuilder::new(self.midi.as_deref())
     }
 
-    /// # Example
-    /// ```ignore
-    /// let bend = engine.midi().mpe().pitch_bend(60);  // Returns 0.0 if disabled
-    /// ```
     #[cfg(feature = "mpe")]
     pub fn mpe(&self) -> MpeHandle {
         if let Some(ref midi) = self.midi {
@@ -53,16 +42,11 @@ impl MidiHandle {
         }
     }
 
-    /// # Example
-    /// ```ignore
-    /// let event = engine.midi().midi2().note_on(60, 0.8, 0);
-    /// ```
     #[cfg(feature = "midi2")]
     pub fn midi2(&self) -> Midi2Handle {
         Midi2Handle
     }
 
-    /// No-op when MIDI is disabled.
     #[cfg(feature = "midi-io")]
     pub fn connect_device_by_name(&self, name: &str) -> crate::Result<()> {
         if let Some(ref midi) = self.midi {
@@ -72,7 +56,6 @@ impl MidiHandle {
         }
     }
 
-    /// Returns empty list when MIDI is disabled.
     #[cfg(feature = "midi-io")]
     pub fn list_devices(&self) -> Vec<crate::MidiInputDevice> {
         if let Some(ref midi) = self.midi {
@@ -82,7 +65,6 @@ impl MidiHandle {
         }
     }
 
-    /// No-op when MIDI is disabled.
     #[cfg(feature = "midi-io")]
     pub fn disconnect_device(&self) {
         if let Some(ref midi) = self.midi {
@@ -94,7 +76,6 @@ impl MidiHandle {
         self.midi.is_some()
     }
 
-    /// Direct access to the underlying `MidiSystem` for advanced operations.
     pub fn inner(&self) -> Option<&Arc<MidiSystem>> {
         self.midi.as_ref()
     }

@@ -6,7 +6,6 @@ use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
 
 const DEFAULT_CAPACITY: usize = 256;
 
-/// Producer side -- push MIDI events from the audio thread.
 pub struct MidiOutputProducer {
     producer: HeapProd<MidiEvent>,
 }
@@ -24,7 +23,6 @@ impl MidiOutputProducer {
     }
 }
 
-/// Consumer side -- drain MIDI events from the output thread.
 pub struct MidiOutputConsumer {
     consumer: HeapCons<MidiEvent>,
 }
@@ -70,7 +68,6 @@ pub fn midi_output_channel_with_capacity(
     )
 }
 
-/// Merges multiple `MidiOutputConsumer`s into a single drain point.
 pub struct MidiOutputAggregator {
     consumers: Mutex<Vec<MidiOutputConsumer>>,
 }

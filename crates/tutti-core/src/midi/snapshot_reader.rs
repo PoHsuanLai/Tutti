@@ -23,7 +23,6 @@ pub struct MidiSnapshotReader {
 }
 
 impl MidiSnapshotReader {
-    /// Create a new snapshot reader for export.
     pub fn new(snapshot: MidiSnapshot, timeline: Arc<ExportTimeline>) -> Self {
         let start_beat = timeline.current_beat();
         Self {

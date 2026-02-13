@@ -11,12 +11,9 @@ fn data_to_array(data: &[u32]) -> [u32; 2] {
     [data[0], data[1]]
 }
 
-/// RT-safe MIDI 2.0 event with sample-accurate timing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Midi2Event {
-    /// Sample offset within the current buffer (0 = first sample)
     pub frame_offset: usize,
-    /// UMP packet data (64-bit for channel voice 2)
     pub data: [u32; 2],
 }
 
@@ -173,19 +170,16 @@ impl Midi2Event {
         })
     }
 
-    /// UMP group (0-15).
     #[inline]
     pub fn group(&self) -> u8 {
         ((self.data[0] >> 24) & 0x0F) as u8
     }
 
-    /// MIDI channel (0-15).
     #[inline]
     pub fn channel(&self) -> u8 {
         ((self.data[0] >> 16) & 0x0F) as u8
     }
 
-    /// Opcode nibble (message type within channel voice 2).
     #[inline]
     fn opcode(&self) -> u8 {
         ((self.data[0] >> 20) & 0x0F) as u8
@@ -332,7 +326,6 @@ impl Midi2Event {
         }
     }
 
-    /// 16-bit velocity, or `None` for non-note events.
     #[inline]
     pub fn velocity_16bit(&self) -> Option<u16> {
         match self.message_type() {
@@ -342,13 +335,11 @@ impl Midi2Event {
         }
     }
 
-    /// Velocity as normalized f32 (0.0 to 1.0).
     #[inline]
     pub fn velocity_normalized(&self) -> Option<f32> {
         self.velocity_16bit().map(|v| v as f32 / 65535.0)
     }
 
-    /// Velocity downsampled to 7-bit MIDI 1.0 range.
     #[inline]
     pub fn velocity(&self) -> Option<u8> {
         self.velocity_16bit().map(midi2_velocity_to_midi1)

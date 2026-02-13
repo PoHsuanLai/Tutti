@@ -134,7 +134,6 @@ pub struct RecordedAudioChunk {
 }
 
 impl RecordedAudioChunk {
-    /// Create new audio chunk
     pub fn new(capacity: usize, start_beat: f64) -> Self {
         Self {
             samples: Vec::with_capacity(capacity),
@@ -142,23 +141,19 @@ impl RecordedAudioChunk {
         }
     }
 
-    /// Add stereo sample pair
     pub fn push_sample(&mut self, left: f32, right: f32) {
         self.samples.push(left);
         self.samples.push(right);
     }
 
-    /// Get number of stereo frames
     pub fn frame_count(&self) -> usize {
         self.samples.len() / 2
     }
 
-    /// Check if chunk is empty
     pub fn is_empty(&self) -> bool {
         self.samples.is_empty()
     }
 
-    /// Check if chunk is at capacity
     pub fn is_full(&self, max_frames: usize) -> bool {
         self.frame_count() >= max_frames
     }
@@ -187,57 +182,29 @@ struct ActiveNoteData {
     start_sample: Option<u64>,
 }
 
-/// Recording buffer for all event types
+/// Recording buffer for all event types.
 #[derive(Debug, Clone)]
 pub struct RecordingBuffer {
-    /// Completed MIDI note events (note on + note off received)
     pub midi_events: Vec<RecordedMidiEvent>,
-
-    /// Active MIDI notes (note on received, waiting for note off)
     active_notes: std::collections::HashMap<u8, ActiveNoteData>,
-
-    /// MIDI CC events
     pub cc_events: Vec<RecordedCCEvent>,
-
-    /// MIDI pitch bend events
     pub pitch_bend_events: Vec<RecordedPitchBendEvent>,
-
-    /// MIDI pressure events (channel and poly aftertouch)
     pub pressure_events: Vec<RecordedPressureEvent>,
-
-    /// MIDI program change events
     pub program_change_events: Vec<RecordedProgramChangeEvent>,
-
-    /// Per-note pitch bend events (MIDI 2.0 only)
+    /// MIDI 2.0 only
     pub per_note_pitch_bend_events: Vec<RecordedPerNotePitchBendEvent>,
-
-    /// Per-note controller events (MIDI 2.0 only)
+    /// MIDI 2.0 only
     pub per_note_controller_events: Vec<RecordedPerNoteControllerEvent>,
-
-    /// Audio sample chunks (chunked for efficiency)
     pub audio_chunks: VecDeque<RecordedAudioChunk>,
-
-    /// Maximum samples per chunk
     pub max_chunk_frames: usize,
-
-    /// Total audio sample count (frames)
     pub audio_frame_count: usize,
-
-    /// Pattern trigger events
     pub pattern_events: Vec<RecordedPatternEvent>,
-
-    /// Recording start beat
     pub start_beat: f64,
-
-    /// Current recording beat
     pub current_beat: f64,
-
-    /// Sample rate
     pub sample_rate: f64,
 }
 
 impl RecordingBuffer {
-    /// Create new recording buffer
     pub fn new(start_beat: f64, sample_rate: f64) -> Self {
         Self {
             midi_events: Vec::new(),
@@ -580,7 +547,6 @@ impl RecordingBuffer {
         self.current_beat = beat.max(self.current_beat);
     }
 
-    /// Record stereo audio sample pair
     pub fn record_audio(&mut self, left: f32, right: f32, beat: f64) {
         if self.audio_chunks.is_empty()
             || self
@@ -601,7 +567,6 @@ impl RecordingBuffer {
         self.current_beat = beat.max(self.current_beat);
     }
 
-    /// Record pattern trigger event
     pub fn record_pattern_trigger(&mut self, symbol: String, step: u32, beat: f64, velocity: f32) {
         self.pattern_events.push(RecordedPatternEvent {
             symbol,
@@ -612,12 +577,10 @@ impl RecordingBuffer {
         self.current_beat = beat.max(self.current_beat);
     }
 
-    /// Get recording duration in beats
     pub fn duration_beats(&self) -> f64 {
         self.current_beat - self.start_beat
     }
 
-    /// Get recording duration in seconds
     pub fn duration_seconds(&self) -> f64 {
         if self.audio_frame_count == 0 {
             0.0
@@ -626,7 +589,6 @@ impl RecordingBuffer {
         }
     }
 
-    /// Check if buffer has any recorded content
     pub fn is_empty(&self) -> bool {
         let base_empty = self.midi_events.is_empty()
             && self.active_notes.is_empty()
@@ -642,7 +604,6 @@ impl RecordingBuffer {
             && self.per_note_controller_events.is_empty()
     }
 
-    /// Clear all recorded content
     pub fn clear(&mut self) {
         self.midi_events.clear();
         self.active_notes.clear();
@@ -660,12 +621,10 @@ impl RecordingBuffer {
         self.current_beat = self.start_beat;
     }
 
-    /// Get the number of active notes (notes that have started but not yet ended)
     pub fn active_note_count(&self) -> usize {
         self.active_notes.len()
     }
 
-    /// Check if there are any active notes
     pub fn has_active_notes(&self) -> bool {
         !self.active_notes.is_empty()
     }

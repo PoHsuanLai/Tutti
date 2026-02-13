@@ -1,31 +1,4 @@
 //! Unified MIDI system with port management, I/O, MPE, and MIDI 2.0.
-//!
-//! ## Quick Start
-//!
-//! ```ignore
-//! use tutti_midi_io::{MidiSystem, MpeMode, MpeZoneConfig};
-//!
-//! // Create MIDI system with I/O and MPE
-//! let midi = MidiSystem::builder()
-//!     .io()
-//!     .mpe(MpeMode::LowerZone(MpeZoneConfig::lower(15)))
-//!     .build()?;
-//!
-//! // List and connect devices
-//! let devices = midi.list_devices();
-//! midi.connect_device_by_name("Keyboard")?;
-//!
-//! // Send MIDI messages
-//! midi.send_note_on(0, 60, 100)?;
-//! midi.send_cc(0, 74, 64)?;
-//!
-//! // Use MPE
-//! let pitch = midi.mpe().pitch_bend(60);
-//! let pressure = midi.mpe().pressure(60);
-//!
-//! // Create events for scheduling/sequencing
-//! let event = midi.note_on(0, 60, 100);
-//! ```
 
 mod builder;
 
@@ -62,7 +35,6 @@ use parking_lot::RwLock;
 #[cfg(feature = "midi2")]
 use crate::midi2::Midi2Event;
 
-/// Complete MIDI system - the main entry point for tutti-midi.
 /// Clone is cheap (Arc internally).
 #[derive(Clone)]
 pub struct MidiSystem {
@@ -84,13 +56,6 @@ pub(crate) struct MidiSystemInner {
 }
 
 impl MidiSystem {
-    /// # Example
-    ///
-    /// ```ignore
-    /// let midi = MidiSystem::builder()
-    ///     .io()
-    ///     .build()?;
-    /// ```
     pub fn builder() -> MidiSystemBuilder {
         MidiSystemBuilder::default()
     }
@@ -107,7 +72,6 @@ impl MidiSystem {
         self.inner.port_manager.get_port_info(port_type, port_index)
     }
 
-    /// Returns both input and output ports.
     pub fn list_ports(&self) -> Vec<PortInfo> {
         let mut ports = self.inner.port_manager.list_input_ports();
         ports.extend(self.inner.port_manager.list_output_ports());
@@ -127,7 +91,6 @@ impl MidiSystem {
         MidiInputManager::list_devices()
     }
 
-    /// Creates an input port automatically and connects to the device.
     #[cfg(feature = "midi-io")]
     pub fn connect_device(&self, device_index: usize) -> Result<()> {
         self.inner
@@ -137,7 +100,6 @@ impl MidiSystem {
             .connect(device_index)
     }
 
-    /// Connects by partial name match.
     #[cfg(feature = "midi-io")]
     pub fn connect_device_by_name(&self, name: &str) -> Result<()> {
         self.inner
@@ -242,13 +204,6 @@ impl MidiSystem {
         Ok(())
     }
 
-    /// # Example
-    /// ```ignore
-    /// midi.send()
-    ///     .note_on(0, 60, 100)
-    ///     .cc(0, 74, 64)
-    ///     .pitch_bend(0, 0);
-    /// ```
     pub fn send(&self) -> crate::midi_builder::MidiBuilder<'_> {
         crate::midi_builder::MidiBuilder::new(Some(self))
     }
@@ -257,7 +212,6 @@ impl MidiSystem {
         MidiEvent::note_on(0, channel.min(15), note, velocity)
     }
 
-    /// Frame offset enables sample-accurate timing within a buffer.
     pub fn note_on_at(
         &self,
         frame_offset: usize,
@@ -312,7 +266,6 @@ impl MidiSystem {
         MpeHandle::new(self.inner.mpe_processor.clone())
     }
 
-    /// Shared expression state for synth voice rendering.
     #[cfg(feature = "mpe")]
     pub fn expression(&self) -> Option<Arc<PerNoteExpression>> {
         self.inner
@@ -335,12 +288,8 @@ impl MidiSystem {
         Midi2Handle
     }
 
-    /// Inject a MIDI 2.0 event into the processing pipeline without hardware.
-    ///
-    /// Converts to MIDI 1.0 and pushes through the standard audio pipeline.
-    /// MIDI 2.0-only messages (e.g. `PerNotePitchBend`) that have no MIDI 1.0
-    /// equivalent are routed to the MPE processor (when `mpe` feature is enabled)
-    /// instead.
+    /// MIDI 2.0-only messages with no MIDI 1.0 equivalent (e.g. `PerNotePitchBend`)
+    /// are routed to the MPE processor when the `mpe` feature is enabled.
     #[cfg(feature = "midi2")]
     pub fn push_midi2_event(&self, port_index: usize, event: Midi2Event) -> bool {
         // Also feed MPE processor for MIDI 2.0-only per-note messages
@@ -360,7 +309,6 @@ impl MidiSystem {
         }
     }
 
-    /// Inject a unified MIDI event (1.0 or 2.0) into the processing pipeline.
     #[cfg(feature = "midi2")]
     pub fn push_unified_event(
         &self,
@@ -375,8 +323,6 @@ impl MidiSystem {
         }
     }
 
-    /// Set a UI observer that receives a copy of all incoming MIDI events.
-    /// Used by framework integrations (e.g. Bevy) to expose MIDI input as events.
     #[cfg(feature = "midi-io")]
     pub fn set_ui_observer(&self, sender: crossbeam_channel::Sender<MidiEvent>) {
         if let Some(ref manager) = self.inner.input_manager {
@@ -384,7 +330,6 @@ impl MidiSystem {
         }
     }
 
-    /// For framework integration; prefer the high-level API methods.
     pub fn port_manager(&self) -> Arc<MidiPortManager> {
         self.inner.port_manager.clone()
     }

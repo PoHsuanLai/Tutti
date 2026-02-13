@@ -4,13 +4,7 @@ use midi2::prelude::*;
 
 use super::Midi2Event;
 
-/// Convert 7-bit MIDI 1.0 velocity to 16-bit MIDI 2.0.
-///
-/// Uses the MIDI 2.0 specification's recommended scaling:
-/// - 0 stays 0 (note off)
-/// - 1-127 maps linearly to 0x0200-0xFFFF
-///
-/// This ensures perfect round-trip conversion.
+/// 7-bit -> 16-bit with perfect round-trip (MIDI 2.0 spec scaling).
 #[inline]
 pub fn midi1_velocity_to_midi2(v: u8) -> u16 {
     if v == 0 {
@@ -25,7 +19,6 @@ pub fn midi1_velocity_to_midi2(v: u8) -> u16 {
     }
 }
 
-/// Convert 16-bit MIDI 2.0 velocity to 7-bit MIDI 1.0.
 #[inline]
 pub fn midi2_velocity_to_midi1(v: u16) -> u8 {
     if v == 0 {
@@ -36,7 +29,6 @@ pub fn midi2_velocity_to_midi1(v: u16) -> u8 {
     }
 }
 
-/// Convert 7-bit MIDI 1.0 CC value to 32-bit MIDI 2.0.
 #[inline]
 pub fn midi1_cc_to_midi2(v: u8) -> u32 {
     if v == 0 {
@@ -49,7 +41,6 @@ pub fn midi1_cc_to_midi2(v: u8) -> u32 {
     }
 }
 
-/// Convert 32-bit MIDI 2.0 CC value to 7-bit MIDI 1.0.
 #[inline]
 pub fn midi2_cc_to_midi1(v: u32) -> u8 {
     if v == 0 {
@@ -60,10 +51,7 @@ pub fn midi2_cc_to_midi1(v: u32) -> u8 {
     }
 }
 
-/// Convert 14-bit MIDI 1.0 pitch bend to 32-bit MIDI 2.0.
-///
-/// MIDI 1.0: 0-16383, center at 8192
-/// MIDI 2.0: 0-0xFFFFFFFF, center at 0x80000000
+/// 14-bit (center 8192) -> 32-bit (center 0x80000000).
 #[inline]
 pub fn midi1_pitch_bend_to_midi2(v: u16) -> u32 {
     if v == 0 {
@@ -76,7 +64,6 @@ pub fn midi1_pitch_bend_to_midi2(v: u16) -> u32 {
     }
 }
 
-/// Convert 32-bit MIDI 2.0 pitch bend to 14-bit MIDI 1.0.
 #[inline]
 pub fn midi2_pitch_bend_to_midi1(v: u32) -> u16 {
     if v == 0 {
@@ -87,9 +74,6 @@ pub fn midi2_pitch_bend_to_midi1(v: u32) -> u16 {
     }
 }
 
-/// Convert MIDI 1.0 MidiEvent to MIDI 2.0 Midi2Event.
-///
-/// This upsamples resolution (7-bit to 16-bit velocity, etc).
 pub fn midi1_to_midi2(event: &crate::MidiEvent) -> Option<Midi2Event> {
     use crate::ChannelVoiceMsg;
 

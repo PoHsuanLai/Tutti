@@ -25,7 +25,6 @@ impl TransportClock {
         (tempo as f64 / 60.0) / sample_rate
     }
 
-    /// Create a minimal transport clock (seek/loop added via builder methods).
     pub fn new(tempo: Arc<AtomicFloat>, paused: Arc<AtomicFlag>, sample_rate: f64) -> Self {
         let initial_tempo = tempo.get();
 
@@ -45,7 +44,6 @@ impl TransportClock {
         }
     }
 
-    /// Attach external seek atomics.
     pub fn with_seek(
         mut self,
         seek_target: Arc<AtomicDouble>,
@@ -56,7 +54,6 @@ impl TransportClock {
         self
     }
 
-    /// Attach external loop atomics.
     pub fn with_loop(
         mut self,
         loop_enabled: Arc<AtomicFlag>,
@@ -69,7 +66,6 @@ impl TransportClock {
         self
     }
 
-    /// Attach external position writeback atomic.
     pub fn with_position_writeback(mut self, writeback: Arc<AtomicDouble>) -> Self {
         self.position_writeback = Some(writeback);
         self

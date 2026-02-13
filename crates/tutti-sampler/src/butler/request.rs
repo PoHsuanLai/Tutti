@@ -2,12 +2,10 @@
 
 use std::path::PathBuf;
 
-/// Unique identifier for a region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct RegionId(pub u64);
 
 impl RegionId {
-    /// Generate a new unique region ID.
     pub fn generate() -> Self {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -15,12 +13,10 @@ impl RegionId {
     }
 }
 
-/// Unique identifier for a capture buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CaptureId(pub u64);
 
 impl CaptureId {
-    /// Generate a new unique capture ID.
     pub fn generate() -> Self {
         use std::sync::atomic::{AtomicU64, Ordering};
         static COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -31,7 +27,6 @@ impl CaptureId {
 use super::prefetch::CaptureBufferConsumer;
 use super::varispeed::PlayDirection;
 
-/// Butler transport state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum ButlerState {
     #[default]
@@ -41,7 +36,6 @@ pub(crate) enum ButlerState {
     Shutdown,
 }
 
-/// Request to flush captured audio to disk.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FlushRequest {
     pub capture_id: CaptureId,

@@ -18,24 +18,8 @@ pub struct LoudnessResult {
     pub loudness_range_lu: f64,
 }
 
-/// Analyze loudness of stereo audio (EBU R128).
-///
-/// This is a one-shot analysis for offline processing. For real-time
-/// metering during playback, use `MeteringManager` instead.
-///
-/// # Arguments
-/// * `left` - Left channel samples
-/// * `right` - Right channel samples
-/// * `sample_rate` - Sample rate in Hz
-///
-/// # Returns
-/// Loudness measurement result with integrated LUFS, true peak, and loudness range.
-///
-/// # Example
-/// ```ignore
-/// let result = analyze_loudness(&left, &right, 44100);
-/// println!("Loudness: {:.1} LUFS", result.integrated_lufs);
-/// ```
+/// One-shot EBU R128 loudness analysis for offline processing.
+/// For real-time metering, use `MeteringManager` instead.
 pub fn analyze_loudness(left: &[f32], right: &[f32], sample_rate: u32) -> LoudnessResult {
     let mut meter = EbuR128::new(2, sample_rate, Mode::I | Mode::LRA | Mode::TRUE_PEAK)
         .expect("Failed to create EBU R128 meter");
@@ -66,12 +50,7 @@ pub fn analyze_loudness(left: &[f32], right: &[f32], sample_rate: u32) -> Loudne
     }
 }
 
-/// Calculate true peak level of stereo audio.
-///
-/// Uses 4x oversampling for accurate true peak detection.
-///
-/// # Returns
-/// True peak level in dBTP.
+/// Returns true peak level in dBTP (uses 4x oversampling).
 pub fn analyze_true_peak(left: &[f32], right: &[f32]) -> f64 {
     let mut meter =
         EbuR128::new(2, 48000, Mode::TRUE_PEAK).expect("Failed to create EBU R128 meter for peak");

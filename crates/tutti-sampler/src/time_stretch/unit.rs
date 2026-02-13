@@ -7,7 +7,6 @@ use super::granular::{GrainSize, GranularProcessor};
 use super::phase_vocoder::PhaseVocoderProcessor;
 use super::types::{FftSize, TimeStretchAlgorithm};
 
-/// Internal processor enum for algorithm switching
 enum Processor {
     PhaseVocoder(PhaseVocoderProcessor),
     Granular(GranularProcessor),
@@ -142,7 +141,6 @@ impl TimeStretchUnit {
         }
     }
 
-    /// Get the current algorithm
     pub fn algorithm(&self) -> TimeStretchAlgorithm {
         self.algorithm
     }
@@ -152,7 +150,6 @@ impl TimeStretchUnit {
         self.stretch_factor.set(factor.clamp(0.25, 4.0));
     }
 
-    /// Get current stretch factor
     pub fn stretch_factor(&self) -> f32 {
         self.stretch_factor.get()
     }
@@ -167,7 +164,6 @@ impl TimeStretchUnit {
         self.pitch_cents.set(cents.clamp(-2400.0, 2400.0));
     }
 
-    /// Get current pitch shift in cents
     pub fn pitch_cents(&self) -> f32 {
         self.pitch_cents.get()
     }
@@ -177,17 +173,14 @@ impl TimeStretchUnit {
         Arc::clone(&self.pitch_cents)
     }
 
-    /// Enable/disable processing
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
 
-    /// Check if enabled
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    /// Check if processing is active (not passthrough)
     pub fn is_processing(&self) -> bool {
         if !self.enabled {
             return false;
@@ -197,17 +190,14 @@ impl TimeStretchUnit {
         (stretch - 1.0).abs() > 0.001 || pitch.abs() > 0.5
     }
 
-    /// Get latency in samples
     pub fn latency_samples(&self) -> usize {
         self.processor_left.latency_samples()
     }
 
-    /// Get source unit
     pub fn source(&self) -> &dyn AudioUnit {
         &*self.source
     }
 
-    /// Get mutable source unit
     pub fn source_mut(&mut self) -> &mut dyn AudioUnit {
         &mut *self.source
     }

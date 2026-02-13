@@ -34,16 +34,13 @@ use crate::midi::MidiSnapshot;
 /// ```
 #[derive(Debug)]
 pub struct ExportContext {
-    /// Simulated transport timeline.
     pub timeline: Arc<ExportTimeline>,
 
-    /// MIDI event snapshot for non-destructive playback.
     #[cfg(feature = "midi")]
     pub midi_snapshot: MidiSnapshot,
 }
 
 impl ExportContext {
-    /// Create a new export context from configuration.
     #[cfg(feature = "midi")]
     pub fn new(config: ExportConfig) -> Self {
         Self {
@@ -52,7 +49,6 @@ impl ExportContext {
         }
     }
 
-    /// Create a new export context from configuration.
     #[cfg(not(feature = "midi"))]
     pub fn new(config: ExportConfig) -> Self {
         Self {
@@ -60,7 +56,6 @@ impl ExportContext {
         }
     }
 
-    /// Create export context with a pre-built MIDI snapshot.
     #[cfg(feature = "midi")]
     pub fn with_midi_snapshot(config: ExportConfig, midi_snapshot: MidiSnapshot) -> Self {
         Self {
@@ -69,12 +64,10 @@ impl ExportContext {
         }
     }
 
-    /// Get the export timeline.
     pub fn timeline(&self) -> &Arc<ExportTimeline> {
         &self.timeline
     }
 
-    /// Get mutable reference to MIDI snapshot for adding events.
     #[cfg(feature = "midi")]
     pub fn midi_snapshot_mut(&mut self) -> &mut MidiSnapshot {
         &mut self.midi_snapshot

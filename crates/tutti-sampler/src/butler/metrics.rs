@@ -6,23 +6,16 @@ use parking_lot::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-/// I/O metrics for butler thread operations.
 pub struct IOMetrics {
-    /// Bytes read from disk
     bytes_read: AtomicU64,
-    /// Bytes written to disk (recording)
     bytes_written: AtomicU64,
-    /// Read operations count
     read_ops: AtomicU64,
-    /// Write operations count
     write_ops: AtomicU64,
-    /// Cache hits
     cache_hits: AtomicU64,
-    /// Cache misses
     cache_misses: AtomicU64,
-    /// Low buffer events (<10% fill)
+    /// Events where fill < 10%
     low_buffer_events: AtomicU64,
-    /// Throughput tracking for varifill (protected by mutex, only accessed from butler thread)
+    /// Only accessed from butler thread
     throughput: Mutex<ThroughputTracker>,
 }
 
@@ -41,13 +34,10 @@ impl Default for IOMetrics {
     }
 }
 
-/// Tracks recent I/O throughput using a sliding window.
+/// Sliding window throughput tracker (1-second window).
 struct ThroughputTracker {
-    /// Recent read operations (bytes, timestamp)
     recent_reads: Vec<(u64, Instant)>,
-    /// Window duration for throughput calculation (1 second)
     window_secs: f64,
-    /// Cached read rate (bytes/sec), updated on each record
     cached_read_rate: f64,
 }
 
@@ -95,12 +85,10 @@ impl ThroughputTracker {
 }
 
 impl IOMetrics {
-    /// Create new metrics tracker.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Record bytes read from disk.
     #[inline]
     pub fn record_read(&self, bytes: u64) {
         self.bytes_read.fetch_add(bytes, Ordering::Relaxed);
@@ -110,38 +98,32 @@ impl IOMetrics {
         }
     }
 
-    /// Get recent read throughput in bytes/second.
-    /// Used by varifill strategy to adapt chunk sizes.
+    /// Recent read throughput in bytes/second. Used by varifill to adapt chunk sizes.
     pub fn read_rate(&self) -> f64 {
         self.throughput.lock().read_rate()
     }
 
-    /// Record bytes written to disk.
     #[inline]
     pub fn record_write(&self, bytes: u64) {
         self.bytes_written.fetch_add(bytes, Ordering::Relaxed);
         self.write_ops.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Record a cache hit.
     #[inline]
     pub fn record_cache_hit(&self) {
         self.cache_hits.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Record a cache miss.
     #[inline]
     pub fn record_cache_miss(&self) {
         self.cache_misses.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Record a low buffer event.
     #[inline]
     pub fn record_low_buffer(&self) {
         self.low_buffer_events.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Take a snapshot of current metrics.
     pub fn snapshot(&self) -> IOMetricsSnapshot {
         IOMetricsSnapshot {
             bytes_read: self.bytes_read.load(Ordering::Relaxed),
@@ -155,7 +137,6 @@ impl IOMetrics {
         }
     }
 
-    /// Reset all metrics to zero.
     pub fn reset(&self) {
         self.bytes_read.store(0, Ordering::Relaxed);
         self.bytes_written.store(0, Ordering::Relaxed);
@@ -167,31 +148,21 @@ impl IOMetrics {
     }
 }
 
-/// Snapshot of I/O metrics at a point in time.
 #[derive(Debug, Clone, Default)]
 pub struct IOMetricsSnapshot {
-    /// Bytes read from disk
     pub bytes_read: u64,
-    /// Bytes written to disk (recording)
     pub bytes_written: u64,
-    /// Read operations count
     pub read_ops: u64,
-    /// Write operations count
     pub write_ops: u64,
-    /// Cache hits
     pub cache_hits: u64,
-    /// Cache misses
     pub cache_misses: u64,
-    /// Low buffer events (<10% fill)
     pub low_buffer_events: u64,
-    /// Recent read throughput (bytes/second)
+    /// bytes/second
     pub read_rate: f64,
 }
 
 impl IOMetricsSnapshot {
-    /// Calculate cache hit rate (0.0 - 1.0).
-    ///
-    /// Returns 1.0 if no cache operations have occurred.
+    /// 0.0..1.0. Returns 1.0 if no cache operations have occurred.
     pub fn cache_hit_rate(&self) -> f32 {
         let total = self.cache_hits + self.cache_misses;
         if total == 0 {
@@ -201,7 +172,6 @@ impl IOMetricsSnapshot {
         }
     }
 
-    /// Calculate average bytes per read operation.
     pub fn avg_read_size(&self) -> u64 {
         if self.read_ops == 0 {
             0
@@ -210,7 +180,6 @@ impl IOMetricsSnapshot {
         }
     }
 
-    /// Calculate average bytes per write operation.
     pub fn avg_write_size(&self) -> u64 {
         if self.write_ops == 0 {
             0

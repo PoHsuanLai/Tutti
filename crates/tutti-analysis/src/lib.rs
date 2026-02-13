@@ -50,10 +50,8 @@ pub mod pitch;
 pub mod transient;
 pub mod waveform;
 
-// Fluent API handle
 mod handle;
 
-// Re-export main types at crate root for convenience
 pub use cache::ThumbnailCache;
 pub use correlation::{CorrelationMeter, StereoAnalysis};
 pub use handle::AnalysisHandle;

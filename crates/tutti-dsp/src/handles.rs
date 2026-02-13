@@ -1,21 +1,4 @@
-//! Fluent API handles for DSP node registration
-//!
-//! This module provides ergonomic handles for adding DSP nodes to the engine's node registry.
-//! Nodes are registered once and can be instantiated multiple times with different parameters.
-//!
-//! # Example
-//! ```ignore
-//! use tutti::prelude::*;
-//! use tutti::dsp_nodes::{LfoShape, ChannelLayout};
-//!
-//! let engine = TuttiEngine::builder().build()?;
-//!
-//! // Register DSP node types via handles
-//! let dsp = engine.dsp();
-//! dsp.lfo("bass_lfo", LfoShape::Sine, 0.5);
-//! dsp.sidechain().compressor("comp", -20.0, 4.0, 0.001, 0.05);
-//! dsp.spatial().vbap("panner", ChannelLayout::stereo());
-//! ```
+//! Fluent API handles for registering DSP nodes in the engine's node registry.
 
 #[cfg(feature = "spatial")]
 use crate::{BinauralPannerNode, ChannelLayout, SpatialPannerNode};
@@ -25,16 +8,12 @@ use crate::{SidechainCompressor, SidechainGate, StereoSidechainCompressor, Stere
 use tutti_core::AudioUnit;
 use tutti_core::NodeRegistry;
 
-/// Main DSP handle for registering DSP nodes
-///
-/// Provides methods for adding LFO and grouped handles for dynamics and spatial audio nodes.
 pub struct DspHandle<'a> {
     registry: &'a NodeRegistry,
     sample_rate: f64,
 }
 
 impl<'a> DspHandle<'a> {
-    /// Create a new DSP handle
     pub fn new(registry: &'a NodeRegistry, sample_rate: f64) -> Self {
         Self {
             registry,
@@ -42,22 +21,18 @@ impl<'a> DspHandle<'a> {
         }
     }
 
-    /// Remove a registered DSP node type
     pub fn remove(&self, name: &str) -> bool {
         self.registry.unregister(name)
     }
 
-    /// Check if a DSP node type is registered
     pub fn has(&self, name: &str) -> bool {
         self.registry.has_type(name)
     }
 
-    /// List all registered DSP node type names
     pub fn list(&self) -> Vec<String> {
         self.registry.list_types()
     }
 
-    /// Register an LFO node
     pub fn lfo(&self, name: impl Into<String>, shape: LfoShape, frequency: f32) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;
@@ -80,20 +55,17 @@ impl<'a> DspHandle<'a> {
         self
     }
 
-    /// Get sidechain dynamics handle (compressor, gate)
     #[cfg(feature = "dynamics")]
     pub fn sidechain(&self) -> SidechainHandle<'a> {
         SidechainHandle::new(self.registry, self.sample_rate)
     }
 
-    /// Get spatial audio handle (VBAP, binaural)
     #[cfg(feature = "spatial")]
     pub fn spatial(&self) -> SpatialHandle<'a> {
         SpatialHandle::new(self.registry, self.sample_rate)
     }
 }
 
-/// Sidechain dynamics handle for compressors and gates
 #[cfg(feature = "dynamics")]
 pub struct SidechainHandle<'a> {
     registry: &'a NodeRegistry,
@@ -109,8 +81,6 @@ impl<'a> SidechainHandle<'a> {
         }
     }
 
-    /// Register a sidechain compressor (mono)
-    ///
     /// Inputs: Channel 0 = audio, Channel 1 = sidechain
     pub fn compressor(
         &self,
@@ -132,8 +102,6 @@ impl<'a> SidechainHandle<'a> {
         self
     }
 
-    /// Register a sidechain gate (mono)
-    ///
     /// Inputs: Channel 0 = audio, Channel 1 = sidechain
     pub fn gate(
         &self,
@@ -155,8 +123,6 @@ impl<'a> SidechainHandle<'a> {
         self
     }
 
-    /// Register a stereo sidechain compressor
-    ///
     /// Inputs: Channels 0-1 = stereo audio, Channels 2-3 = stereo sidechain
     pub fn stereo_compressor(
         &self,
@@ -179,8 +145,6 @@ impl<'a> SidechainHandle<'a> {
         self
     }
 
-    /// Register a stereo sidechain gate
-    ///
     /// Inputs: Channels 0-1 = stereo audio, Channels 2-3 = stereo sidechain
     pub fn stereo_gate(
         &self,
@@ -204,7 +168,6 @@ impl<'a> SidechainHandle<'a> {
     }
 }
 
-/// Spatial audio handle for VBAP and binaural panners
 #[cfg(feature = "spatial")]
 pub struct SpatialHandle<'a> {
     registry: &'a NodeRegistry,
@@ -220,7 +183,6 @@ impl<'a> SpatialHandle<'a> {
         }
     }
 
-    /// Register a VBAP spatial panner
     pub fn vbap(&self, name: impl Into<String>, layout: ChannelLayout) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;
@@ -280,7 +242,6 @@ impl<'a> SpatialHandle<'a> {
         self
     }
 
-    /// Register a binaural panner for headphone 3D audio
     pub fn binaural(&self, name: impl Into<String>) -> &Self {
         let name = name.into();
         let sample_rate = self.sample_rate;

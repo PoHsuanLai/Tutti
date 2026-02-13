@@ -7,7 +7,6 @@ use thiserror::Error;
 #[allow(unused_extern_crates)]
 extern crate std;
 
-/// Error type for tutti-core operations.
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Invalid config: {0}")]
@@ -65,10 +64,8 @@ pub enum Error {
     Synth(String),
 }
 
-/// Result type alias.
 pub type Result<T> = core::result::Result<T, Error>;
 
-/// Errors from node registry operations.
 #[derive(Error, Debug)]
 pub enum NodeRegistryError {
     #[error("Unknown node type: {0}")]

@@ -61,7 +61,6 @@ impl AtomicStereoAnalysis {
     }
 }
 
-/// Stereo analysis snapshot.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StereoAnalysisSnapshot {
     pub correlation: f32,

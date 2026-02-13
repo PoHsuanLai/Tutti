@@ -12,7 +12,6 @@ use tokio::{
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::ClientOptions;
 
-/// IPC transport to plugin server.
 pub struct MessageTransport {
     #[cfg(unix)]
     stream: UnixStream,
@@ -77,7 +76,7 @@ impl MessageTransport {
         Self { stream }
     }
 
-    /// Create from a std UnixStream. Must be called inside a tokio runtime context.
+    /// Must be called inside a tokio runtime context.
     #[cfg(all(test, unix))]
     pub(crate) fn from_std_stream(stream: std::os::unix::net::UnixStream) -> Result<Self> {
         let stream = UnixStream::from_std(stream)?;

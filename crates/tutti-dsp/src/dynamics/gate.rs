@@ -1,22 +1,10 @@
-//! Sidechain gate (mono)
-
 use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use tutti_core::{dsp::DEFAULT_SR, AudioUnit, BufferMut, BufferRef, SignalFrame};
 
 use super::utils::{amplitude_to_db, db_to_amplitude, time_to_coeff};
 
-/// Gate with external sidechain input
-///
-/// Uses sidechain signal to open/close the gate on the main audio.
-/// Useful for tightening drums, removing bleed, or creative effects.
-///
-/// ## Inputs
-/// - Port 0: Audio signal to gate
-/// - Port 1: Sidechain signal (for detection)
-///
-/// ## Outputs
-/// - Port 0: Gated audio
+/// Gate with external sidechain input (2-in: audio + sidechain, 1-out).
 pub struct SidechainGate {
     threshold_db: Arc<AtomicFloat>,
     attack: Arc<AtomicFloat>,
@@ -38,7 +26,6 @@ pub struct SidechainGate {
 }
 
 impl SidechainGate {
-    /// Create a new gate. Prefer [`SidechainGate::builder()`].
     pub(crate) fn new(threshold_db: f32, attack: f32, hold: f32, release: f32) -> Self {
         Self {
             threshold_db: Arc::new(AtomicFloat::new(threshold_db)),
@@ -61,7 +48,6 @@ impl SidechainGate {
         }
     }
 
-    /// Create a builder for configuring a gate
     pub fn builder() -> SidechainGateBuilder {
         SidechainGateBuilder::default()
     }
@@ -239,7 +225,6 @@ impl Clone for SidechainGate {
     }
 }
 
-/// Builder for configuring a SidechainGate with fluent API.
 #[derive(Clone, Debug)]
 pub struct SidechainGateBuilder {
     threshold_db: f32,
@@ -262,37 +247,36 @@ impl Default for SidechainGateBuilder {
 }
 
 impl SidechainGateBuilder {
-    /// Set the threshold in decibels (-60.0 to -10.0 typical)
+    /// In dB (-60.0 to -10.0 typical)
     pub fn threshold_db(mut self, db: f32) -> Self {
         self.threshold_db = db;
         self
     }
 
-    /// Set the attack time in seconds (0.0001 to 0.01 typical)
+    /// In seconds (0.0001 to 0.01 typical)
     pub fn attack_seconds(mut self, seconds: f32) -> Self {
         self.attack_seconds = seconds.max(0.0);
         self
     }
 
-    /// Set the hold time in seconds (0.001 to 0.1 typical)
+    /// In seconds (0.001 to 0.1 typical)
     pub fn hold_seconds(mut self, seconds: f32) -> Self {
         self.hold_seconds = seconds.max(0.0);
         self
     }
 
-    /// Set the release time in seconds (0.01 to 1.0 typical)
+    /// In seconds (0.01 to 1.0 typical)
     pub fn release_seconds(mut self, seconds: f32) -> Self {
         self.release_seconds = seconds.max(0.0);
         self
     }
 
-    /// Set the range (depth) in decibels (must be <= 0.0)
+    /// In dB (must be <= 0.0)
     pub fn range_db(mut self, db: f32) -> Self {
         self.range_db = db.min(0.0);
         self
     }
 
-    /// Build the configured SidechainGate
     pub fn build(self) -> SidechainGate {
         SidechainGate::new(
             self.threshold_db,

@@ -1,5 +1,3 @@
-//! WAV format encoder.
-
 use crate::dsp::{process_audio, stereo_to_mono};
 use crate::error::{ExportError, Result};
 use crate::export_builder::{ExportPhase, ExportProgress};

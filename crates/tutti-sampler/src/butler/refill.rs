@@ -146,19 +146,12 @@ pub(super) fn refill_all_streams(
     }
 }
 
-/// Work item for parallel refill - contains everything needed to refill one stream.
 struct RefillWorkItem {
-    /// Index into the producers Vec
     producer_idx: usize,
-    /// Number of samples to read
     chunk_size: usize,
-    /// Whether playing in reverse
     is_reverse: bool,
-    /// Path to audio file
     file_path: PathBuf,
-    /// Current buffer fill percentage (0.0-1.0)
     fill_pct: f32,
-    /// Shared state for reporting buffer fill
     shared: Arc<super::shared_state::SharedStreamState>,
 }
 
@@ -447,7 +440,6 @@ pub(super) fn refill_reverse(
     producer.set_file_position(file_position.saturating_sub(written) as u64);
 }
 
-/// Helper: Get wave from cache or load from disk.
 pub(super) fn get_wave_from_cache(
     sample_cache: &LruCache,
     metrics: &IOMetrics,
@@ -474,10 +466,6 @@ pub(super) fn get_wave_from_cache(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // =========================================================================
-    // calculate_varifill_chunk tests
-    // =========================================================================
 
     #[test]
     fn test_varifill_empty_buffer_increases_chunk() {
@@ -616,10 +604,6 @@ mod tests {
         assert_eq!(very_low, expected_low);
     }
 
-    // =========================================================================
-    // Edge case / robustness tests
-    // =========================================================================
-
     #[test]
     fn test_varifill_buffer_fill_over_one() {
         // Buffer fill > 1.0 (shouldn't happen, but test robustness)
@@ -665,10 +649,6 @@ mod tests {
         assert_eq!(chunk, normal);
     }
 
-    // =========================================================================
-    // fill_buffer_forward tests (for loop-aware refill logic verification)
-    // =========================================================================
-
     fn make_test_wave(samples: &[(f32, f32)]) -> Wave {
         let mut wave = Wave::new(2, 48000.0);
         for (l, r) in samples {
@@ -704,10 +684,6 @@ mod tests {
         assert_eq!(buffer[2], (0.0, 0.0));
         assert_eq!(buffer[3], (0.0, 0.0));
     }
-
-    // =========================================================================
-    // Loop-aware refill position calculation tests
-    // =========================================================================
 
     #[test]
     fn test_loop_wrap_position_calculation() {

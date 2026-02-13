@@ -1,7 +1,4 @@
-//! MIDI Output Manager
-//!
-//! Handles MIDI device enumeration, connection, and message sending.
-//! Uses dedicated thread for platform thread-safety.
+//! MIDI output: device enumeration, connection, and message sending via a dedicated thread.
 
 #![cfg_attr(not(feature = "midi-io"), allow(unused_imports, dead_code))]
 

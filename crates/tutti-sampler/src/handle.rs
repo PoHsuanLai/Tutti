@@ -7,28 +7,18 @@ use std::sync::Arc;
 ///
 /// Works whether or not the sampler is enabled. Methods are no-ops
 /// or return graceful errors when disabled.
-///
-/// # Example
-/// ```ignore
-/// let sampler = engine.sampler();
-/// sampler.stream("file.wav").start();  // No-op if disabled
-/// sampler.run();  // No-op if disabled
-/// ```
 pub struct SamplerHandle {
     sampler: Option<Arc<SamplerSystem>>,
 }
 
 impl SamplerHandle {
-    /// Create a new handle (internal - use via TuttiEngine)
     #[doc(hidden)]
     pub fn new(sampler: Option<Arc<SamplerSystem>>) -> Self {
         Self { sampler }
     }
 
-    /// Stream an audio file.
-    ///
-    /// Returns a builder for configuring the stream. When sampler is disabled,
-    /// returns a disabled builder that no-ops on start().
+    /// Returns a builder for configuring the stream.
+    /// Returns a disabled builder that no-ops on start() when sampler is disabled.
     pub fn stream(&self, file_path: impl Into<std::path::PathBuf>) -> crate::StreamBuilder<'_> {
         if let Some(ref sampler) = self.sampler {
             sampler.stream(file_path)
@@ -37,9 +27,6 @@ impl SamplerHandle {
         }
     }
 
-    /// Resume the butler thread for async I/O.
-    ///
-    /// No-op when sampler is disabled.
     pub fn run(&self) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.run();
@@ -47,9 +34,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Pause the butler thread.
-    ///
-    /// No-op when sampler is disabled.
     pub fn pause(&self) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.pause();
@@ -57,9 +41,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Wait for all butler operations to complete.
-    ///
-    /// No-op when sampler is disabled.
     pub fn wait_for_completion(&self) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.wait_for_completion();
@@ -67,9 +48,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Shutdown the butler thread.
-    ///
-    /// No-op when sampler is disabled.
     pub fn shutdown(&self) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.shutdown();
@@ -77,8 +55,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Get the sample rate.
-    ///
     /// Returns 0.0 when sampler is disabled.
     pub fn sample_rate(&self) -> f64 {
         self.sampler
@@ -87,32 +63,20 @@ impl SamplerHandle {
             .unwrap_or(0.0)
     }
 
-    /// Check if sampler subsystem is enabled.
     pub fn is_enabled(&self) -> bool {
         self.sampler.is_some()
     }
 
-    /// Create an auditioner for quick file preview.
-    ///
     /// Returns None when sampler is disabled.
     pub fn auditioner(&self) -> Option<crate::auditioner::Auditioner> {
         self.sampler.as_ref().map(|s| s.auditioner())
     }
 
-    /// Get reference to inner SamplerSystem (advanced use).
-    ///
     /// Returns None when sampler is disabled.
     pub fn inner(&self) -> Option<&Arc<SamplerSystem>> {
         self.sampler.as_ref()
     }
 
-    // =========================================================================
-    // Recording operations
-    // =========================================================================
-
-    /// Start recording on a channel.
-    ///
-    /// No-op (returns error) when sampler is disabled.
     pub fn start_recording(
         &self,
         channel_index: usize,
@@ -128,9 +92,6 @@ impl SamplerHandle {
             .start_recording(channel_index, source, mode, current_beat)
     }
 
-    /// Stop recording on a channel, returning the recorded data.
-    ///
-    /// Returns error when sampler is disabled.
     pub fn stop_recording(
         &self,
         channel_index: usize,
@@ -141,9 +102,6 @@ impl SamplerHandle {
         sampler.recording().stop_recording(channel_index)
     }
 
-    /// Check if a channel is actively recording.
-    ///
-    /// Returns false when sampler is disabled.
     pub fn is_channel_recording(&self, channel_index: usize) -> bool {
         self.sampler
             .as_ref()
@@ -151,9 +109,6 @@ impl SamplerHandle {
             .unwrap_or(false)
     }
 
-    /// Check if any channel has an active recording session.
-    ///
-    /// Returns false when sampler is disabled.
     pub fn has_active_recording(&self) -> bool {
         self.sampler
             .as_ref()
@@ -161,13 +116,6 @@ impl SamplerHandle {
             .unwrap_or(false)
     }
 
-    // =========================================================================
-    // Audio input operations
-    // =========================================================================
-
-    /// List available audio input devices.
-    ///
-    /// Returns empty vec when sampler is disabled.
     pub fn list_input_devices(&self) -> Vec<crate::audio_input::InputDeviceInfo> {
         self.sampler
             .as_ref()
@@ -175,9 +123,6 @@ impl SamplerHandle {
             .unwrap_or_default()
     }
 
-    /// Select an audio input device by index.
-    ///
-    /// Returns error when sampler is disabled.
     pub fn select_input_device(&self, device_index: usize) -> crate::error::Result<()> {
         let sampler = self.sampler.as_ref().ok_or_else(|| {
             crate::error::Error::Recording("Sampler subsystem is disabled".to_string())
@@ -185,9 +130,7 @@ impl SamplerHandle {
         sampler.audio_input().select_device(device_index)
     }
 
-    /// Set audio input gain (0.0 to 2.0).
-    ///
-    /// No-op when sampler is disabled.
+    /// Gain range: 0.0 to 2.0.
     pub fn set_input_gain(&self, gain: f32) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.audio_input().set_gain(gain);
@@ -195,9 +138,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Enable/disable input monitoring.
-    ///
-    /// No-op when sampler is disabled.
     pub fn set_input_monitoring(&self, enabled: bool) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.audio_input().set_monitoring(enabled);
@@ -205,9 +145,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Get audio input peak level (for metering).
-    ///
-    /// Returns 0.0 when sampler is disabled.
     pub fn input_peak_level(&self) -> f32 {
         self.sampler
             .as_ref()
@@ -215,13 +152,6 @@ impl SamplerHandle {
             .unwrap_or(0.0)
     }
 
-    // =========================================================================
-    // Convenience methods (delegate to SamplerSystem)
-    // =========================================================================
-
-    /// Get cache statistics.
-    ///
-    /// Returns default (zero) stats when sampler is disabled.
     pub fn cache_stats(&self) -> crate::butler::CacheStats {
         self.sampler
             .as_ref()
@@ -229,9 +159,6 @@ impl SamplerHandle {
             .unwrap_or_default()
     }
 
-    /// Get I/O metrics snapshot.
-    ///
-    /// Returns default (zero) metrics when sampler is disabled.
     pub fn io_metrics(&self) -> crate::butler::IOMetricsSnapshot {
         self.sampler
             .as_ref()
@@ -239,25 +166,18 @@ impl SamplerHandle {
             .unwrap_or_default()
     }
 
-    /// Reset I/O metrics counters.
-    ///
-    /// No-op when sampler is disabled.
     pub fn reset_io_metrics(&self) {
         if let Some(ref sampler) = self.sampler {
             sampler.reset_io_metrics();
         }
     }
 
-    /// Get buffer fill level for a channel (0.0 to 1.0).
-    ///
-    /// Returns None when sampler is disabled or channel is not streaming.
+    /// Returns fill level 0.0..1.0, or None if disabled/not streaming.
     pub fn buffer_fill(&self, channel_index: usize) -> Option<f32> {
         self.sampler.as_ref()?.buffer_fill(channel_index)
     }
 
-    /// Get underrun count for a channel (resets counter).
-    ///
-    /// Returns 0 when sampler is disabled.
+    /// Returns and resets underrun count for a channel.
     pub fn take_underruns(&self, channel_index: usize) -> u64 {
         self.sampler
             .as_ref()
@@ -265,9 +185,7 @@ impl SamplerHandle {
             .unwrap_or(0)
     }
 
-    /// Get total underrun count across all channels (resets counters).
-    ///
-    /// Returns 0 when sampler is disabled.
+    /// Returns and resets total underrun count across all channels.
     pub fn take_all_underruns(&self) -> u64 {
         self.sampler
             .as_ref()
@@ -276,9 +194,6 @@ impl SamplerHandle {
     }
 
     /// Stream a file to a specific channel.
-    ///
-    /// Convenience method that pre-sets the channel. Equivalent to:
-    /// `sampler.stream(path).channel(channel_index)`
     pub fn stream_file(
         &self,
         channel_index: usize,
@@ -291,9 +206,6 @@ impl SamplerHandle {
         }
     }
 
-    /// Stop streaming for a channel.
-    ///
-    /// No-op when sampler is disabled.
     pub fn stop_stream(&self, channel_index: usize) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.stop_stream(channel_index);
@@ -301,9 +213,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Seek within a stream to a new position.
-    ///
-    /// No-op when sampler is disabled.
     pub fn seek(&self, channel_index: usize, position_samples: u64) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.seek(channel_index, position_samples);
@@ -311,9 +220,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Set loop range for a stream (in samples).
-    ///
-    /// No-op when sampler is disabled.
     pub fn set_loop_range(
         &self,
         channel_index: usize,
@@ -326,9 +232,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Set loop range with crossfade for smooth transitions.
-    ///
-    /// No-op when sampler is disabled.
     pub fn set_loop_range_with_crossfade(
         &self,
         channel_index: usize,
@@ -347,9 +250,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Clear loop range for a stream.
-    ///
-    /// No-op when sampler is disabled.
     pub fn clear_loop_range(&self, channel_index: usize) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.clear_loop_range(channel_index);
@@ -357,9 +257,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Set playback direction for a stream.
-    ///
-    /// No-op when sampler is disabled.
     pub fn set_direction(&self, channel_index: usize, direction: crate::PlayDirection) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.set_direction(channel_index, direction);
@@ -367,9 +264,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Set playback speed for a stream.
-    ///
-    /// No-op when sampler is disabled.
     pub fn set_speed(&self, channel_index: usize, speed: f32) -> &Self {
         if let Some(ref sampler) = self.sampler {
             sampler.set_speed(channel_index, speed);
@@ -377,8 +271,6 @@ impl SamplerHandle {
         self
     }
 
-    /// Get a StreamingSamplerUnit for a channel.
-    ///
     /// Returns None when sampler is disabled or channel is not streaming.
     pub fn streaming_unit(&self, channel_index: usize) -> Option<crate::StreamingSamplerUnit> {
         self.sampler.as_ref()?.streaming_unit(channel_index)

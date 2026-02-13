@@ -110,7 +110,6 @@ impl Default for ExportOptions {
 }
 
 impl ExportOptions {
-    /// Effective output sample rate.
     pub fn output_sample_rate(&self) -> u32 {
         self.sample_rate.unwrap_or(self.source_sample_rate)
     }

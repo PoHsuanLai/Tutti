@@ -1,9 +1,6 @@
-//! Export errors.
-
 use std::io;
 use thiserror::Error;
 
-/// Export error.
 #[derive(Error, Debug)]
 pub enum ExportError {
     #[error("I/O error: {0}")]
@@ -28,7 +25,6 @@ pub enum ExportError {
     InvalidData(String),
 }
 
-/// Result alias.
 pub type Result<T> = core::result::Result<T, ExportError>;
 
 #[cfg(feature = "wav")]

@@ -3,7 +3,6 @@
 use crate::compat::{any, Arc, Vec};
 use fundsp::prelude::*;
 
-/// Automation envelope function type
 pub type AutomationEnvelopeFn = Arc<dyn Fn(f64) -> f32 + Send + Sync>;
 
 /// Automation reader that takes beat position as INPUT (sample-accurate).

@@ -8,8 +8,6 @@ use std::fs::OpenOptions;
 #[cfg(unix)]
 use std::path::PathBuf;
 
-/// Shared audio buffer in memory
-///
 /// Uses `UnsafeCell` for interior mutability since the underlying memory-mapped
 /// region is shared between processes and needs to be written to from an immutable
 /// reference. This is safe because:
@@ -20,9 +18,8 @@ pub struct SharedAudioBuffer {
     name: String,
     channels: usize,
     samples: usize,
-    /// Sample format (f32 or f64)
     sample_format: crate::protocol::SampleFormat,
-    /// Whether this instance owns the shared memory (should clean up on drop)
+    /// Creator owns the memory and cleans up on drop.
     owns_memory: bool,
 }
 
@@ -36,7 +33,6 @@ impl SharedAudioBuffer {
         )
     }
 
-    /// Create a new shared buffer with specified sample format
     pub fn create_with_format(
         name: String,
         channels: usize,
@@ -65,7 +61,7 @@ impl SharedAudioBuffer {
         })
     }
 
-    /// Assumes f32 format.
+    /// Defaults to f32 format.
     pub fn open(name: String, channels: usize, samples: usize) -> Result<Self> {
         Self::open_with_format(
             name,
@@ -75,7 +71,6 @@ impl SharedAudioBuffer {
         )
     }
 
-    /// Open an existing shared buffer with specified format
     pub fn open_with_format(
         name: String,
         channels: usize,
@@ -207,11 +202,7 @@ impl SharedAudioBuffer {
         Ok(mmap)
     }
 
-    /// Write channel data (RT-safe with interior mutability).
-    ///
-    /// # Safety
-    ///
-    /// The caller must ensure that only one thread writes to each channel at a time.
+    /// Caller must ensure single-writer-per-channel.
     pub fn write_channel(&self, channel: usize, data: &[f32]) -> Result<()> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(
@@ -240,7 +231,7 @@ impl SharedAudioBuffer {
         Ok(())
     }
 
-    /// Allocates a new Vec.
+    /// Returns a newly allocated Vec.
     pub fn read_channel(&self, channel: usize) -> Result<Vec<f32>> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(
@@ -267,7 +258,7 @@ impl SharedAudioBuffer {
         Ok(data)
     }
 
-    /// Read channel data directly into provided buffer (zero-copy, RT-safe)
+    /// Zero-copy into provided buffer. RT-safe.
     pub fn read_channel_into(&self, channel: usize, output: &mut [f32]) -> Result<usize> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(
@@ -308,7 +299,6 @@ impl SharedAudioBuffer {
         self.sample_format
     }
 
-    /// Write channel data as f64 (for 64-bit processing)
     pub fn write_channel_f64(&self, channel: usize, data: &[f64]) -> Result<()> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(
@@ -337,7 +327,6 @@ impl SharedAudioBuffer {
         Ok(())
     }
 
-    /// Read channel data as f64
     pub fn read_channel_f64(&self, channel: usize) -> Result<Vec<f64>> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(
@@ -364,7 +353,7 @@ impl SharedAudioBuffer {
         Ok(data)
     }
 
-    /// Read channel data as f64 into provided buffer (zero-copy, RT-safe)
+    /// Zero-copy into provided buffer. RT-safe.
     pub fn read_channel_into_f64(&self, channel: usize, output: &mut [f64]) -> Result<usize> {
         if channel >= self.channels {
             return Err(BridgeError::SharedMemoryError(

@@ -17,7 +17,6 @@ use tokio::{
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeServer, ServerOptions};
 
-/// Message transport for IPC
 pub enum MessageTransport {
     #[cfg(unix)]
     Unix(UnixStream),
@@ -204,7 +203,6 @@ pub struct TransportListener {
 impl TransportListener {
     #[cfg(unix)]
     pub async fn bind(socket_path: &std::path::Path) -> Result<Self> {
-        // Remove existing socket if it exists
         let _ = std::fs::remove_file(socket_path);
         let listener = UnixListener::bind(socket_path)?;
         Ok(Self { listener })

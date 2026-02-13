@@ -2,37 +2,7 @@
 //!
 //! Provides port management, hardware I/O, MPE, MIDI 2.0, CC mapping, and output collection.
 //!
-//! # Features
-//!
-//! - **Port management**: Virtual MIDI ports for routing
-//! - **Hardware I/O**: Device enumeration and real-time I/O (feature: `midi-io`)
-//! - **MPE**: MIDI Polyphonic Expression (feature: `mpe`)
-//! - **MIDI 2.0**: High-resolution messages (feature: `midi2`)
-//! - **CC mapping**: MIDI learn and parameter control
-//! - **Output collection**: Lock-free MIDI output from audio nodes
-//!
-//! # Example
-//!
-//! ```ignore
-//! use tutti_midi_io::MidiSystem;
-//!
-//! // Basic MIDI I/O
-//! let midi = MidiSystem::builder()
-//!     .io()
-//!     .build()?;
-//! midi.connect_device_by_name("Keyboard")?;
-//! midi.send_note_on(0, 60, 100)?;
-//!
-//! // With CC mapping
-//! let midi = MidiSystem::builder()
-//!     .io()
-//!     .cc_mapping()
-//!     .build()?;
-//!
-//! if let Some(cc_mgr) = midi.cc_manager() {
-//!     cc_mgr.add_mapping(Some(0), 74, CCTarget::MasterVolume, 0.0, 1.0);
-//! }
-//! ```
+//! Feature gates: `midi-io` (hardware I/O), `mpe` (polyphonic expression), `midi2` (high-res messages).
 
 pub mod error;
 pub use error::{Error, Result};

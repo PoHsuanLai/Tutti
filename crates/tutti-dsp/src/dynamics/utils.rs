@@ -1,6 +1,3 @@
-//! Shared utilities for dynamics processors
-
-/// Convert linear amplitude to decibels
 #[inline]
 pub(crate) fn amplitude_to_db(amp: f32) -> f32 {
     if amp <= 0.0 {
@@ -10,13 +7,12 @@ pub(crate) fn amplitude_to_db(amp: f32) -> f32 {
     }
 }
 
-/// Convert decibels to linear amplitude
 #[inline]
 pub(crate) fn db_to_amplitude(db: f32) -> f32 {
     10.0_f32.powf(db / 20.0)
 }
 
-/// Calculate smoothing coefficient from time constant
+/// One-pole smoothing coefficient from time constant in seconds.
 #[inline]
 pub(crate) fn time_to_coeff(time_seconds: f32, sample_rate: f64) -> f32 {
     if time_seconds <= 0.0 {

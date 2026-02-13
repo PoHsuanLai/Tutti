@@ -19,14 +19,10 @@ pub struct Params<'a> {
 }
 
 impl<'a> Params<'a> {
-    /// Create a new Params wrapper.
     pub fn new(params: &'a NodeParams) -> Self {
         Self { inner: params }
     }
 
-    /// Get a required parameter. Panics if missing or wrong type.
-    ///
-    /// # Panics
     /// Panics if parameter is missing or cannot be converted to type T.
     pub fn get<T: ParamConvert>(&self, name: &str) -> T {
         self.inner
@@ -35,7 +31,6 @@ impl<'a> Params<'a> {
             .unwrap_or_else(|| panic!("Missing or invalid parameter: {}", name))
     }
 
-    /// Get a parameter with a default value.
     pub fn get_or<T: ParamConvert>(&self, name: &str, default: T) -> T {
         self.inner
             .get(name)
@@ -43,12 +38,10 @@ impl<'a> Params<'a> {
             .unwrap_or(default)
     }
 
-    /// Try to get a parameter, returning None if missing.
     pub fn try_get<T: ParamConvert>(&self, name: &str) -> Option<T> {
         self.inner.get(name).and_then(|v| T::from_param(v))
     }
 
-    /// Check if a parameter exists.
     pub fn has(&self, name: &str) -> bool {
         self.inner.contains_key(name)
     }
@@ -74,17 +67,12 @@ macro_rules! params {
     }};
 }
 
-/// Function that constructs a node from parameters
 pub type NodeConstructor =
     Arc<dyn Fn(&NodeParams) -> Result<Box<dyn AudioUnit>, NodeRegistryError> + Send + Sync>;
 
-/// Node parameters (simple key-value map)
-///
-/// Uses `&'static str` for keys to avoid string allocations.
-/// Parameter names are known at compile time, so this is zero-cost.
+/// Uses `&'static str` keys to avoid string allocations.
 pub type NodeParams = HashMap<&'static str, NodeParamValue>;
 
-/// Parameter value types
 #[derive(Debug, Clone)]
 pub enum NodeParamValue {
     Float(f64),
@@ -94,7 +82,6 @@ pub enum NodeParamValue {
 }
 
 impl NodeParamValue {
-    /// Convert to f64 if possible
     pub fn as_f64(&self) -> Option<f64> {
         match self {
             Self::Float(f) => Some(*f),
@@ -103,12 +90,10 @@ impl NodeParamValue {
         }
     }
 
-    /// Convert to f32 if possible
     pub fn as_f32(&self) -> Option<f32> {
         self.as_f64().map(|f| f as f32)
     }
 
-    /// Convert to i64 if possible
     pub fn as_i64(&self) -> Option<i64> {
         match self {
             Self::Int(i) => Some(*i),
@@ -117,7 +102,6 @@ impl NodeParamValue {
         }
     }
 
-    /// Convert to bool if possible
     pub fn as_bool(&self) -> Option<bool> {
         match self {
             Self::Bool(b) => Some(*b),
@@ -125,7 +109,6 @@ impl NodeParamValue {
         }
     }
 
-    /// Convert to string slice if possible
     pub fn as_str(&self) -> Option<&str> {
         match self {
             Self::String(s) => Some(s.as_str()),
@@ -176,7 +159,6 @@ impl From<&str> for NodeParamValue {
     }
 }
 
-/// Trait for converting NodeParamValue to a specific type
 pub trait ParamConvert: Sized {
     fn from_param(value: &NodeParamValue) -> Option<Self>;
 }
@@ -217,22 +199,17 @@ impl ParamConvert for String {
     }
 }
 
-/// Global registry of node constructors
 pub struct NodeRegistry {
     constructors: Arc<RwLock<HashMap<String, NodeConstructor>>>,
 }
 
 impl NodeRegistry {
-    /// Create a new empty registry
     pub fn new() -> Self {
         Self {
             constructors: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    /// Register a node constructor (legacy verbose API).
-    ///
-    /// Prefer `register_simple` for cleaner syntax.
     pub fn register<F>(&self, name: impl Into<String>, constructor: F)
     where
         F: Fn(&NodeParams) -> Result<Box<dyn AudioUnit>, NodeRegistryError> + Send + Sync + 'static,
@@ -300,7 +277,6 @@ impl NodeRegistry {
             .insert(name, Arc::new(move |_params| Ok(Box::new(constructor()))));
     }
 
-    /// Create a node instance from registered type
     pub fn create(
         &self,
         node_type: &str,
@@ -316,22 +292,18 @@ impl NodeRegistry {
         constructor(params)
     }
 
-    /// List all registered node types
     pub fn list_types(&self) -> Vec<String> {
         self.constructors.read().keys().cloned().collect()
     }
 
-    /// Check if a type is registered
     pub fn has_type(&self, name: &str) -> bool {
         self.constructors.read().contains_key(name)
     }
 
-    /// Unregister a node type
     pub fn unregister(&self, name: &str) -> bool {
         self.constructors.write().remove(name).is_some()
     }
 
-    /// Clear all registrations
     pub fn clear(&self) {
         self.constructors.write().clear();
     }

@@ -19,18 +19,13 @@ use std::sync::Arc;
 ///
 /// All fields are lock-free for reads from any thread.
 pub struct LiveAnalysisState {
-    /// Latest pitch detection result.
     pub pitch: ArcSwap<PitchResult>,
-    /// Recent transient detections.
     pub transients: ArcSwap<Vec<Transient>>,
-    /// Rolling waveform summary (last ~1 second).
     pub waveform: ArcSwap<WaveformSummary>,
-    /// Set to false to signal the analysis thread to stop.
     running: AtomicBool,
 }
 
 impl LiveAnalysisState {
-    /// Create new state with default (empty) values.
     pub fn new(samples_per_block: usize) -> Self {
         Self {
             pitch: ArcSwap::from_pointee(PitchResult::default()),
@@ -40,35 +35,24 @@ impl LiveAnalysisState {
         }
     }
 
-    /// Signal the analysis thread to stop.
     pub fn stop(&self) {
         self.running.store(false, Ordering::Release);
     }
 
-    /// Check if the analysis thread should keep running.
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Acquire)
     }
 }
 
-/// Waveform block size for live visualization (samples per block).
 const LIVE_WAVEFORM_BLOCK_SIZE: usize = 512;
-
-/// Analysis window size (must be large enough for pitch detection).
+/// Must be large enough for pitch detection.
 const WINDOW_SIZE: usize = 4096;
-
-/// Hop size between analysis frames.
 const HOP_SIZE: usize = 512;
-
-/// Maximum number of recent transients to keep.
 const MAX_RECENT_TRANSIENTS: usize = 64;
 
-/// Run the live analysis loop.
-///
 /// Drains stereo pairs from `consumer`, downmixes to mono, and runs
 /// pitch/transient/waveform analysis on a sliding window.
-///
-/// This function blocks until `state.stop()` is called.
+/// Blocks until `state.stop()` is called.
 pub fn run_analysis_thread(
     mut consumer: HeapCons<(f32, f32)>,
     state: Arc<LiveAnalysisState>,
@@ -77,23 +61,19 @@ pub fn run_analysis_thread(
     let mut pitch_detector = PitchDetector::new(sample_rate);
     let mut transient_detector = TransientDetector::new(sample_rate);
 
-    // Sliding window of mono samples
     let mut window = vec![0.0f32; WINDOW_SIZE];
     let mut window_pos = 0usize;
     let mut hop_counter = 0usize;
 
-    // Rolling waveform blocks
     let mut waveform_blocks: Vec<WaveformBlock> = Vec::new();
     let mut block_min = f32::MAX;
     let mut block_max = f32::MIN;
     let mut block_sum_sq = 0.0f32;
     let mut block_count = 0usize;
 
-    // Recent transients (ring buffer of last N)
     let mut recent_transients: Vec<Transient> = Vec::new();
     let mut total_samples_processed = 0usize;
 
-    // Drain buffer
     let mut drain_buf = [(0.0f32, 0.0f32); 1024];
 
     while state.is_running() {
@@ -104,20 +84,17 @@ pub fn run_analysis_thread(
             continue;
         }
 
-        // Read in chunks
         let to_read = available.min(drain_buf.len());
         let read = consumer.pop_slice(&mut drain_buf[..to_read]);
 
         for &(l, r) in &drain_buf[..read] {
             let mono = (l + r) * 0.5;
 
-            // Append to sliding window
             window[window_pos % WINDOW_SIZE] = mono;
             window_pos += 1;
             hop_counter += 1;
             total_samples_processed += 1;
 
-            // Accumulate waveform block
             block_min = block_min.min(mono);
             block_max = block_max.max(mono);
             block_sum_sq += mono * mono;
@@ -131,13 +108,11 @@ pub fn run_analysis_thread(
                     rms,
                 });
 
-                // Keep ~2 seconds of blocks
-                let max_blocks = (sample_rate as usize / LIVE_WAVEFORM_BLOCK_SIZE) * 2;
+                let max_blocks = (sample_rate as usize / LIVE_WAVEFORM_BLOCK_SIZE) * 2; // ~2s
                 if waveform_blocks.len() > max_blocks {
                     waveform_blocks.drain(0..waveform_blocks.len() - max_blocks);
                 }
 
-                // Publish waveform
                 let summary = WaveformSummary {
                     blocks: waveform_blocks.clone(),
                     samples_per_block: LIVE_WAVEFORM_BLOCK_SIZE,
@@ -151,24 +126,19 @@ pub fn run_analysis_thread(
                 block_count = 0;
             }
 
-            // Run analysis every HOP_SIZE samples once we have a full window
             if hop_counter >= HOP_SIZE && window_pos >= WINDOW_SIZE {
                 hop_counter = 0;
 
-                // Reconstruct contiguous window from circular buffer
                 let start = window_pos % WINDOW_SIZE;
                 let mut contiguous = Vec::with_capacity(WINDOW_SIZE);
                 contiguous.extend_from_slice(&window[start..]);
                 contiguous.extend_from_slice(&window[..start]);
 
-                // Pitch detection
                 let pitch = pitch_detector.detect(&contiguous);
                 state.pitch.store(Arc::new(pitch));
 
-                // Transient detection
                 let transients = transient_detector.detect(&contiguous);
                 if !transients.is_empty() {
-                    // Adjust transient times to absolute position
                     let base_time = (total_samples_processed - WINDOW_SIZE) as f64 / sample_rate;
                     for t in &transients {
                         recent_transients.push(Transient {
@@ -179,7 +149,6 @@ pub fn run_analysis_thread(
                         });
                     }
 
-                    // Trim old transients
                     if recent_transients.len() > MAX_RECENT_TRANSIENTS {
                         let drain_count = recent_transients.len() - MAX_RECENT_TRANSIENTS;
                         recent_transients.drain(0..drain_count);

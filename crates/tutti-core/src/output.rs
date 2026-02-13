@@ -160,7 +160,6 @@ where
     Ok(stream)
 }
 
-/// Process DSP graph into stereo f32 buffer.
 #[inline]
 fn process_dsp(
     state: &AudioCallbackState,
@@ -175,7 +174,6 @@ fn process_dsp(
     crate::callback::process_audio(state, &mut output[..needed], buffer_start);
 }
 
-/// Convert stereo f32 to output format and write to device buffer.
 #[inline]
 fn write_output<T: cpal::SizedSample + cpal::FromSample<f32>>(
     data: &mut [T],
@@ -190,7 +188,6 @@ fn write_output<T: cpal::SizedSample + cpal::FromSample<f32>>(
     }
 }
 
-/// Output silence (panic recovery).
 #[inline]
 fn output_silence<T: cpal::SizedSample + cpal::FromSample<f32>>(data: &mut [T]) {
     for sample in data.iter_mut() {

@@ -32,30 +32,25 @@ impl SamplerSystem {
         }
     }
 
-    /// Get the sample rate.
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
 
-    /// Resume butler processing.
     pub fn run(&self) -> &Self {
         let _ = self.butler_tx.try_send(ButlerCommand::Run);
         self
     }
 
-    /// Pause butler processing.
     pub fn pause(&self) -> &Self {
         let _ = self.butler_tx.try_send(ButlerCommand::Pause);
         self
     }
 
-    /// Wait for butler to complete current work.
     pub fn wait_for_completion(&self) -> &Self {
         let _ = self.butler_tx.send(ButlerCommand::WaitForCompletion);
         self
     }
 
-    /// Shutdown the butler thread.
     pub fn shutdown(&self) -> &Self {
         let _ = self.butler_tx.send(ButlerCommand::Shutdown);
         self
@@ -150,7 +145,6 @@ impl SamplerSystem {
         });
     }
 
-    /// Stop streaming for a channel.
     pub fn stop_stream(&self, channel_index: usize) -> &Self {
         let _ = self
             .butler_tx
@@ -158,7 +152,6 @@ impl SamplerSystem {
         self
     }
 
-    /// Seek within a stream to a new position.
     pub fn seek(&self, channel_index: usize, position_samples: u64) -> &Self {
         let _ = self.butler_tx.send(ButlerCommand::SeekStream {
             channel_index,
@@ -167,7 +160,6 @@ impl SamplerSystem {
         self
     }
 
-    /// Set loop range for a stream (in samples).
     pub fn set_loop_range(
         &self,
         channel_index: usize,
@@ -194,7 +186,6 @@ impl SamplerSystem {
         self
     }
 
-    /// Clear loop range for a stream.
     pub fn clear_loop_range(&self, channel_index: usize) -> &Self {
         let _ = self
             .butler_tx
@@ -202,7 +193,6 @@ impl SamplerSystem {
         self
     }
 
-    /// Set playback direction for a stream.
     pub fn set_direction(&self, channel_index: usize, direction: PlayDirection) -> &Self {
         let _ = self.butler_tx.send(ButlerCommand::SetVarispeed {
             channel_index,
@@ -212,7 +202,6 @@ impl SamplerSystem {
         self
     }
 
-    /// Set playback speed for a stream.
     pub fn set_speed(&self, channel_index: usize, speed: f32) -> &Self {
         let direction = if speed < 0.0 {
             PlayDirection::Reverse
@@ -227,7 +216,6 @@ impl SamplerSystem {
         self
     }
 
-    /// Set varispeed (direction + speed) for a stream.
     pub fn set_varispeed(&self, channel_index: usize, varispeed: Varispeed) -> &Self {
         let _ = self.butler_tx.send(ButlerCommand::SetVarispeed {
             channel_index,
@@ -245,7 +233,6 @@ impl SamplerSystem {
         self.butler.as_ref().map(|b| b.cache())
     }
 
-    /// Get cache statistics.
     pub fn cache_stats(&self) -> CacheStats {
         self.butler
             .as_ref()
@@ -272,7 +259,6 @@ impl SamplerSystem {
             .unwrap_or_default()
     }
 
-    /// Reset I/O metrics counters.
     pub fn reset_io_metrics(&self) {
         if let Some(butler) = self.butler.as_ref() {
             butler.metrics().reset();
@@ -332,12 +318,10 @@ impl SamplerSystem {
         self.transport_bridge = Some(bridge);
     }
 
-    /// Unbind from transport manager.
     pub fn unbind_transport(&mut self) {
         self.transport_bridge = None;
     }
 
-    /// Check if transport is bound.
     pub fn has_transport(&self) -> bool {
         self.transport_bridge.is_some()
     }
@@ -376,7 +360,6 @@ impl SamplerSystem {
         Some(crate::StreamingSamplerUnit::new(consumer, shared_state))
     }
 
-    /// Check if a channel is currently streaming.
     pub fn is_streaming(&self, channel_index: usize) -> bool {
         let Some(butler) = self.butler.as_ref() else {
             return false;
@@ -440,7 +423,6 @@ impl SamplerSystem {
         self
     }
 
-    /// Check if PDC is enabled.
     pub fn is_pdc_enabled(&self) -> bool {
         self.pdc_manager
             .as_ref()
@@ -448,7 +430,6 @@ impl SamplerSystem {
             .unwrap_or(false)
     }
 
-    /// Get the PDC manager (if set).
     pub fn pdc_manager(&self) -> Option<&Arc<PdcManager>> {
         self.pdc_manager.as_ref()
     }
@@ -594,32 +575,26 @@ pub struct CaptureSession {
 }
 
 impl CaptureSession {
-    /// Get file path.
     pub fn file_path(&self) -> &PathBuf {
         &self.file_path
     }
 
-    /// Get sample rate.
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
 
-    /// Get channel count.
     pub fn channels(&self) -> usize {
         self.channels
     }
 
-    /// Check if started.
     pub fn is_started(&self) -> bool {
         self.consumer.is_none()
     }
 
-    /// Get mutable producer.
     pub fn producer_mut(&mut self) -> &mut CaptureBufferProducer {
         &mut self.producer
     }
 
-    /// Get producer.
     pub fn producer(&self) -> &CaptureBufferProducer {
         &self.producer
     }

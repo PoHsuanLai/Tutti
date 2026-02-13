@@ -1,5 +1,3 @@
-//! Sidechain compressor (mono)
-
 use tutti_core::Arc;
 use tutti_core::AtomicFloat;
 use tutti_core::{dsp::DEFAULT_SR, AudioUnit, BufferMut, BufferRef, SignalFrame};
@@ -25,7 +23,6 @@ pub struct SidechainCompressor {
 }
 
 impl SidechainCompressor {
-    /// Create a new compressor. Prefer [`SidechainCompressor::builder()`].
     pub(crate) fn new(threshold_db: f32, ratio: f32, attack: f32, release: f32) -> Self {
         Self {
             threshold_db: Arc::new(AtomicFloat::new(threshold_db)),
@@ -45,7 +42,6 @@ impl SidechainCompressor {
         }
     }
 
-    /// Create a builder for configuring a compressor
     pub fn builder() -> SidechainCompressorBuilder {
         SidechainCompressorBuilder::default()
     }
@@ -263,7 +259,6 @@ impl Clone for SidechainCompressor {
     }
 }
 
-/// Builder for configuring a SidechainCompressor with fluent API.
 #[derive(Clone, Debug)]
 pub struct SidechainCompressorBuilder {
     threshold_db: f32,
@@ -288,43 +283,41 @@ impl Default for SidechainCompressorBuilder {
 }
 
 impl SidechainCompressorBuilder {
-    /// Set the threshold in decibels (-60.0 to 0.0 dB typical)
+    /// In dB (-60.0 to 0.0 typical)
     pub fn threshold_db(mut self, db: f32) -> Self {
         self.threshold_db = db;
         self
     }
 
-    /// Set the compression ratio (must be >= 1.0)
+    /// Must be >= 1.0
     pub fn ratio(mut self, ratio: f32) -> Self {
         self.ratio = ratio.max(1.0);
         self
     }
 
-    /// Set the attack time in seconds (0.0001 to 0.1 typical)
+    /// In seconds (0.0001 to 0.1 typical)
     pub fn attack_seconds(mut self, seconds: f32) -> Self {
         self.attack_seconds = seconds.max(0.0);
         self
     }
 
-    /// Set the release time in seconds (0.01 to 1.0 typical)
+    /// In seconds (0.01 to 1.0 typical)
     pub fn release_seconds(mut self, seconds: f32) -> Self {
         self.release_seconds = seconds.max(0.0);
         self
     }
 
-    /// Set soft knee width in decibels (0.0 = hard knee)
+    /// In dB (0.0 = hard knee)
     pub fn soft_knee_db(mut self, db: f32) -> Self {
         self.knee_db = db.max(0.0);
         self
     }
 
-    /// Set makeup gain in decibels
     pub fn makeup_gain_db(mut self, db: f32) -> Self {
         self.makeup_db = db;
         self
     }
 
-    /// Build the configured SidechainCompressor
     pub fn build(self) -> SidechainCompressor {
         SidechainCompressor::new(
             self.threshold_db,

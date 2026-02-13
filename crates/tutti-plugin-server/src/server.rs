@@ -1,6 +1,4 @@
-//! Bridge server - runs in isolated process
-//!
-//! The server loads and runs plugins in a sandboxed environment.
+//! Bridge server - runs in isolated process.
 
 use crate::instance::{PluginInstance, ProcessContext};
 use crate::transport::{MessageTransport, TransportListener};
@@ -19,7 +17,6 @@ use crate::vst3_loader::Vst3Instance;
 #[cfg(feature = "clap")]
 use crate::clap_loader::ClapInstance;
 
-/// VST bridge server (runs in isolated process)
 pub struct PluginServer {
     config: BridgeConfig,
     transport: Option<MessageTransport>,
@@ -318,7 +315,6 @@ impl PluginServer {
 
             HostMessage::OpenEditor { parent_handle } => {
                 if let Some(ref mut plugin) = self.plugin {
-                    // Convert parent_handle u64 to raw pointer
                     let parent_ptr = parent_handle as *mut std::ffi::c_void;
                     // Safety: parent_handle was provided by the host and is expected to be a valid window handle
                     let result = unsafe { plugin.as_instance_mut().open_editor(parent_ptr) };
@@ -656,7 +652,6 @@ impl PluginServer {
             };
         self.negotiated_format = negotiated_format;
 
-        // Use the shared memory name provided by the client
         let buffer_name = if shm_name.is_empty() {
             format!("dawai_plugin_{}", std::process::id())
         } else {

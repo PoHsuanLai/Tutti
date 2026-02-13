@@ -6,8 +6,6 @@ use tutti_core::ArcNeuralEffectBuilder;
 #[cfg(feature = "midi")]
 use tutti_core::ArcNeuralSynthBuilder;
 
-/// Fluent handle for neural audio operations.
-///
 /// Works whether or not neural is enabled. Methods return errors when disabled.
 #[derive(Clone)]
 pub struct NeuralHandle {

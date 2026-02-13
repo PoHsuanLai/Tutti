@@ -1,10 +1,4 @@
-//! Common types for spatial audio
-
-/// Channel indices for common speaker layouts
-///
-/// Defines the mapping between logical speaker positions and channel indices
-/// in the output buffer. Used by spatial panners to know which channels
-/// correspond to which physical speakers.
+/// Maps logical speaker positions to output buffer channel indices.
 #[derive(Debug, Clone, Copy)]
 pub struct ChannelLayout {
     pub left: usize,
@@ -22,7 +16,6 @@ pub struct ChannelLayout {
 }
 
 impl ChannelLayout {
-    /// Stereo (2.0) layout
     pub fn stereo() -> Self {
         Self {
             left: 0,
@@ -40,7 +33,6 @@ impl ChannelLayout {
         }
     }
 
-    /// 5.1 Surround layout (L, R, C, LFE, SL, SR)
     pub fn surround_5_1() -> Self {
         Self {
             left: 0,
@@ -58,7 +50,6 @@ impl ChannelLayout {
         }
     }
 
-    /// 7.1 Surround layout (L, R, C, LFE, SL, SR, RL, RR)
     pub fn surround_7_1() -> Self {
         Self {
             left: 0,
@@ -76,7 +67,6 @@ impl ChannelLayout {
         }
     }
 
-    /// Dolby Atmos 7.1.4 layout (7.1 + 4 height channels)
     pub fn atmos_7_1_4() -> Self {
         Self {
             left: 0,
@@ -94,7 +84,6 @@ impl ChannelLayout {
         }
     }
 
-    /// Get total number of channels in this layout
     pub fn num_channels(&self) -> usize {
         let mut max = core::cmp::max(self.right, self.left);
         if let Some(c) = self.center {

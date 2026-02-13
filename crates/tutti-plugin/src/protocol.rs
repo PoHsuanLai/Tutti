@@ -9,11 +9,8 @@ use std::path::PathBuf;
 
 const MIDI_STACK_CAPACITY: usize = 256;
 
-/// Stack capacity for parameter queues (covers typical automation scenarios)
 const PARAM_QUEUE_STACK_CAPACITY: usize = 8;
-/// Stack capacity for automation points per parameter
 const PARAM_POINT_STACK_CAPACITY: usize = 4;
-/// Stack capacity for note expression changes
 const NOTE_EXPR_STACK_CAPACITY: usize = 8;
 
 fn default_block_size() -> usize {
@@ -23,7 +20,6 @@ fn default_block_size() -> usize {
 pub use crate::metadata::PluginMetadata;
 pub use tutti_midi_io::MidiEvent;
 
-/// Raw bytes MIDI event for IPC.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IpcMidiEvent {
     pub frame_offset: usize,
@@ -117,7 +113,6 @@ impl ParameterQueue {
 
 pub type ParameterQueueVec = SmallVec<[ParameterQueue; PARAM_QUEUE_STACK_CAPACITY]>;
 
-/// Collection of parameter automation changes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ParameterChanges {
     pub queues: ParameterQueueVec,
@@ -173,13 +168,7 @@ impl ParameterInfo {
         }
     }
 
-    /// Convert to ParameterRange for automation integration.
-    ///
-    /// Infers the scaling type from step_count and unit string:
-    /// - `step_count == 1`: Toggle (on/off)
-    /// - `step_count > 1`: Integer steps
-    /// - Unit contains "dB" or "Hz": Logarithmic
-    /// - Otherwise: Linear
+    /// Infers scaling from `step_count` and `unit` (toggle, integer, log for dB/Hz, else linear).
     pub fn to_range(&self) -> tutti_core::ParameterRange {
         use tutti_core::{ParameterRange, ParameterScale};
 
@@ -232,7 +221,6 @@ pub struct NoteExpressionValue {
 
 pub type NoteExpressionVec = SmallVec<[NoteExpressionValue; NOTE_EXPR_STACK_CAPACITY]>;
 
-/// Collection of note expression changes.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct NoteExpressionChanges {
     pub changes: NoteExpressionVec,
@@ -295,7 +283,6 @@ pub struct AudioBuffer<'a, T = f32> {
 pub type AudioBuffer32<'a> = AudioBuffer<'a, f32>;
 pub type AudioBuffer64<'a> = AudioBuffer<'a, f64>;
 
-/// Data for `HostMessage::ProcessAudioMidi`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessAudioMidiData {
     pub buffer_id: u32,
@@ -303,7 +290,6 @@ pub struct ProcessAudioMidiData {
     pub midi_events: IpcMidiEventVec,
 }
 
-/// Data for `HostMessage::ProcessAudioFull`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessAudioFullData {
     pub buffer_id: u32,
@@ -314,7 +300,6 @@ pub struct ProcessAudioFullData {
     pub transport: TransportInfo,
 }
 
-/// Host to bridge message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum HostMessage {
     LoadPlugin {
@@ -324,7 +309,6 @@ pub enum HostMessage {
         block_size: usize,
         #[serde(default)]
         preferred_format: SampleFormat,
-        /// Shared memory name created by the client for audio I/O.
         #[serde(default)]
         shm_name: String,
     },
@@ -362,14 +346,12 @@ pub enum HostMessage {
     Shutdown,
 }
 
-/// Data for `BridgeMessage::AudioProcessedMidi`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioProcessedMidiData {
     pub latency_us: u64,
     pub midi_output: IpcMidiEventVec,
 }
 
-/// Data for `BridgeMessage::AudioProcessedFull`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AudioProcessedFullData {
     pub latency_us: u64,
@@ -378,7 +360,6 @@ pub struct AudioProcessedFullData {
     pub note_expression_output: NoteExpressionChanges,
 }
 
-/// Bridge to host message.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BridgeMessage {
     PluginLoaded { metadata: Box<PluginMetadata> },

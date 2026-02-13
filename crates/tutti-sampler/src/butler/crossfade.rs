@@ -3,24 +3,17 @@
 //! Used by `SamplerUnit` for in-memory sample playback.
 //! Note: `StreamingSamplerUnit` uses `SharedStreamState` for lock-free crossfade instead.
 
-/// Crossfade state for smooth loop transitions in `SamplerUnit`.
-///
-/// This is used for in-memory sample playback where the crossfade
-/// can be computed synchronously in the same thread.
+/// Crossfade state for smooth loop transitions in `SamplerUnit` (in-memory playback).
+/// `StreamingSamplerUnit` uses `SharedStreamState` for lock-free crossfade instead.
 #[derive(Debug, Clone)]
 pub(crate) struct LoopCrossfade {
-    /// Samples from loop start (for crossfading at loop end)
     pre_loop_buffer: Vec<(f32, f32)>,
-    /// Crossfade length in samples
     crossfade_samples: usize,
-    /// Current position within crossfade (0 = not in crossfade)
     position: usize,
-    /// Whether crossfade is currently active
     active: bool,
 }
 
 impl LoopCrossfade {
-    /// Create a new crossfade with the specified length.
     pub fn new(crossfade_samples: usize) -> Self {
         Self {
             pre_loop_buffer: Vec::with_capacity(crossfade_samples),
@@ -30,37 +23,31 @@ impl LoopCrossfade {
         }
     }
 
-    /// Get crossfade length in samples.
     pub fn len(&self) -> usize {
         self.crossfade_samples
     }
 
-    /// Fill the pre-loop buffer with samples from loop start.
     pub fn fill_preloop(&mut self, samples: &[(f32, f32)]) {
         self.pre_loop_buffer.clear();
         let to_copy = samples.len().min(self.crossfade_samples);
         self.pre_loop_buffer.extend_from_slice(&samples[..to_copy]);
     }
 
-    /// Start the crossfade (called when approaching loop end).
     pub fn start(&mut self) {
         self.position = 0;
         self.active = true;
     }
 
-    /// Reset the crossfade state.
     pub fn reset(&mut self) {
         self.position = 0;
         self.active = false;
     }
 
-    /// Check if crossfade is currently active.
     pub fn is_active(&self) -> bool {
         self.active
     }
 
-    /// Process a sample through the crossfade.
-    /// Returns the crossfaded sample if active, otherwise returns input unchanged.
+    /// Returns crossfaded sample if active, otherwise input unchanged.
     pub fn process(&mut self, current: (f32, f32)) -> (f32, f32) {
         if !self.active || self.position >= self.crossfade_samples {
             self.active = false;

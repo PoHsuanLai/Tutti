@@ -33,7 +33,6 @@ pub struct AutomationLane<T, R: TransportReader = TransportHandle> {
 pub type LiveAutomationLane<T> = AutomationLane<T, TransportHandle>;
 
 impl<T, R: TransportReader> AutomationLane<T, R> {
-    /// Create a new automation lane with the given transport reader.
     pub fn new(envelope: AutomationEnvelope<T>, transport: R) -> Self {
         Self {
             envelope,
@@ -43,29 +42,22 @@ impl<T, R: TransportReader> AutomationLane<T, R> {
         }
     }
 
-    /// Replace the envelope.
     pub fn set_envelope(&mut self, envelope: AutomationEnvelope<T>) {
         self.envelope = envelope;
     }
 
-    /// Get the envelope.
     pub fn envelope(&self) -> &AutomationEnvelope<T> {
         &self.envelope
     }
 
-    /// Get mutable access to the envelope.
     pub fn envelope_mut(&mut self) -> &mut AutomationEnvelope<T> {
         &mut self.envelope
     }
 
-    /// Get the last evaluated value.
     pub fn last_value(&self) -> f32 {
         self.last_value
     }
 
-    /// Get value at a specific beat position.
-    ///
-    /// This is useful for querying automation values without using the transport.
     pub fn get_value_at(&self, beat: f64) -> f32 {
         self.envelope.get_value_at(beat).unwrap_or(0.0)
     }

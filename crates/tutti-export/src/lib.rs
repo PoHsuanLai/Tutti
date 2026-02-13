@@ -52,7 +52,6 @@ pub use handle::{ExportHandle, ExportStatus};
 mod export_builder;
 pub use export_builder::{ExportBuilder, ExportPhase, ExportProgress};
 
-// Re-export ExportContext and ExportConfig from tutti-core
 pub use tutti_core::{ExportConfig, ExportContext};
 
 mod options;
@@ -93,7 +92,6 @@ pub fn export_to_file(
     }
 }
 
-/// Export audio to a file with progress callback.
 #[allow(unused_variables)]
 pub fn export_to_file_with_progress(
     path: &str,

@@ -8,10 +8,8 @@ use crate::compat::{HashMap, Vec};
 use crate::{AtomicUsize, Ordering};
 use tutti_midi::MidiEvent;
 
-/// A MIDI event with its scheduled beat position.
 #[derive(Debug, Clone)]
 pub struct TimedMidiEvent {
-    /// The MIDI event.
     pub event: MidiEvent,
     /// Beat position when this event should trigger.
     pub beat: f64,
@@ -63,12 +61,10 @@ impl Clone for MidiSnapshot {
 }
 
 impl MidiSnapshot {
-    /// Create an empty snapshot.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Add a MIDI event at the given beat position.
     pub fn add_event(&mut self, unit_id: u64, beat: f64, event: MidiEvent) {
         let events = self.events.entry(unit_id).or_default();
         events.push(TimedMidiEvent { event, beat });
@@ -115,12 +111,10 @@ impl MidiSnapshot {
         result
     }
 
-    /// Check if there are events for a unit.
     pub fn has_events(&self, unit_id: u64) -> bool {
         self.events.get(&unit_id).is_some_and(|e| !e.is_empty())
     }
 
-    /// Get all unit IDs that have events.
     pub fn unit_ids(&self) -> impl Iterator<Item = u64> + '_ {
         self.events.keys().copied()
     }
@@ -134,19 +128,16 @@ impl MidiSnapshot {
         }
     }
 
-    /// Reset cursor for a specific unit.
     pub fn reset_unit(&self, unit_id: u64) {
         if let Some(cursor) = self.cursors.get(&unit_id) {
             cursor.store(0, Ordering::Relaxed);
         }
     }
 
-    /// Get total event count across all units.
     pub fn total_events(&self) -> usize {
         self.events.values().map(|v| v.len()).sum()
     }
 
-    /// Clear all events and cursors.
     pub fn clear(&mut self) {
         self.events.clear();
         self.cursors.clear();

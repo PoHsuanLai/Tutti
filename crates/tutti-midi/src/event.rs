@@ -7,16 +7,13 @@ use crate::compat::Vec;
 /// RT-safe MIDI event with sample-accurate frame offset.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct MidiEvent {
-    /// Sample offset within the current buffer (0 = first sample)
+    /// Offset within the current buffer (0 = first sample).
     pub frame_offset: usize,
-    /// MIDI channel (0-15)
     pub channel: Channel,
-    /// The channel voice message
     pub msg: ChannelVoiceMsg,
 }
 
 impl MidiEvent {
-    /// Create a new MIDI event
     #[inline]
     pub fn new(frame_offset: usize, channel: Channel, msg: ChannelVoiceMsg) -> Self {
         Self {
@@ -26,7 +23,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a builder for note-on events
     #[inline]
     pub fn note_on_builder(note: u8, velocity: u8) -> MidiEventBuilder {
         MidiEventBuilder {
@@ -36,7 +32,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a builder for note-off events
     #[inline]
     pub fn note_off_builder(note: u8) -> MidiEventBuilder {
         MidiEventBuilder {
@@ -46,7 +41,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a builder for control change events
     #[inline]
     pub fn cc_builder(control: u8, value: u8) -> MidiEventBuilder {
         MidiEventBuilder {
@@ -58,7 +52,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a builder for pitch bend events
     #[inline]
     pub fn bend_builder(bend: u16) -> MidiEventBuilder {
         MidiEventBuilder {
@@ -68,7 +61,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a builder for program change events
     #[inline]
     pub fn program_builder(program: u8) -> MidiEventBuilder {
         MidiEventBuilder {
@@ -78,7 +70,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a builder for aftertouch events
     #[inline]
     pub fn aftertouch_builder(pressure: u8) -> MidiEventBuilder {
         MidiEventBuilder {
@@ -88,7 +79,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a note on event (internal helper)
     #[inline]
     pub fn note_on(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
         Self {
@@ -98,7 +88,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a note off event (internal helper)
     #[inline]
     pub fn note_off(frame_offset: usize, channel: u8, note: u8, velocity: u8) -> Self {
         Self {
@@ -108,7 +97,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a control change event (internal helper)
     #[inline]
     pub fn control_change(frame_offset: usize, channel: u8, cc: u8, value: u8) -> Self {
         Self {
@@ -120,7 +108,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a pitch bend event (internal helper)
     #[inline]
     pub fn pitch_bend(frame_offset: usize, channel: u8, bend: u16) -> Self {
         Self {
@@ -130,7 +117,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a channel aftertouch event (internal helper)
     #[inline]
     pub fn aftertouch(frame_offset: usize, channel: u8, pressure: u8) -> Self {
         Self {
@@ -140,7 +126,6 @@ impl MidiEvent {
         }
     }
 
-    /// Create a poly aftertouch event (internal helper)
     #[inline]
     pub fn poly_aftertouch(frame_offset: usize, channel: u8, note: u8, pressure: u8) -> Self {
         Self {
@@ -150,19 +135,16 @@ impl MidiEvent {
         }
     }
 
-    /// Get MIDI channel (0-15)
     #[inline]
     pub fn channel_num(&self) -> u8 {
         self.channel as u8
     }
 
-    /// Check if this is a note on event
     #[inline]
     pub fn is_note_on(&self) -> bool {
         matches!(self.msg, ChannelVoiceMsg::NoteOn { velocity, .. } if velocity > 0)
     }
 
-    /// Check if this is a note off event
     #[inline]
     pub fn is_note_off(&self) -> bool {
         matches!(
@@ -171,7 +153,6 @@ impl MidiEvent {
         )
     }
 
-    /// Get note number (for note on/off events)
     #[inline]
     pub fn note(&self) -> Option<u8> {
         match self.msg {
@@ -184,7 +165,6 @@ impl MidiEvent {
         }
     }
 
-    /// Get velocity (for note on/off events)
     #[inline]
     pub fn velocity(&self) -> Option<u8> {
         match self.msg {
@@ -199,7 +179,6 @@ impl MidiEvent {
         }
     }
 
-    /// Convert to a full MidiMsg for serialization
     #[inline]
     pub fn to_midi_msg(&self) -> MidiMsg {
         MidiMsg::ChannelVoice {
@@ -208,18 +187,15 @@ impl MidiEvent {
         }
     }
 
-    /// Serialize to MIDI bytes
     #[inline]
     pub fn to_bytes(&self) -> Vec<u8> {
         self.to_midi_msg().to_midi()
     }
 
-    /// Parse from MIDI bytes
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, midi_msg::ParseError> {
         Self::from_bytes_with_offset(bytes, 0)
     }
 
-    /// Parse from MIDI bytes with a frame offset
     pub fn from_bytes_with_offset(
         bytes: &[u8],
         frame_offset: usize,
@@ -241,16 +217,13 @@ impl MidiEvent {
 /// Raw 3-byte MIDI event for unparsed storage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RawMidiEvent {
-    /// Sample offset within the current buffer
     pub frame_offset: usize,
-    /// Raw MIDI data (up to 3 bytes for channel messages)
     pub data: [u8; 3],
-    /// Number of valid bytes in data (1-3)
+    /// Valid bytes in `data` (1-3).
     pub len: u8,
 }
 
 impl RawMidiEvent {
-    /// Create a new raw MIDI event
     #[inline]
     pub fn new(frame_offset: usize, data: [u8; 3], len: u8) -> Self {
         Self {
@@ -260,19 +233,16 @@ impl RawMidiEvent {
         }
     }
 
-    /// Get MIDI status byte
     #[inline]
     pub fn status(&self) -> u8 {
         self.data[0] & 0xF0
     }
 
-    /// Get MIDI channel (0-15)
     #[inline]
     pub fn channel(&self) -> u8 {
         self.data[0] & 0x0F
     }
 
-    /// Try to parse into a MidiEvent
     pub fn to_midi_event(&self) -> Result<MidiEvent, midi_msg::ParseError> {
         MidiEvent::from_bytes_with_offset(&self.data[..self.len as usize], self.frame_offset)
     }
@@ -292,7 +262,6 @@ impl From<MidiEvent> for RawMidiEvent {
     }
 }
 
-/// Builder for MIDI events with fluent API.
 #[derive(Clone, Copy, Debug)]
 pub struct MidiEventBuilder {
     frame_offset: usize,
@@ -301,21 +270,18 @@ pub struct MidiEventBuilder {
 }
 
 impl MidiEventBuilder {
-    /// Set the MIDI channel (0-15)
     #[inline]
     pub fn channel(mut self, channel: u8) -> Self {
         self.channel = channel;
         self
     }
 
-    /// Set the frame offset (sample-accurate timing)
     #[inline]
     pub fn offset(mut self, frame_offset: usize) -> Self {
         self.frame_offset = frame_offset;
         self
     }
 
-    /// Build the final MidiEvent
     #[inline]
     pub fn build(self) -> MidiEvent {
         MidiEvent {

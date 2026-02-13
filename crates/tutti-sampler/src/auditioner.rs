@@ -19,30 +19,14 @@ const AUDITIONER_CHANNEL: usize = usize::MAX - 1;
 /// ~10 seconds at 48kHz.
 const IN_MEMORY_THRESHOLD: usize = 480_000;
 
-/// Playback mode for the current preview.
 enum PreviewMode {
-    /// In-memory playback (short files or cached files).
     InMemory(SamplerUnit),
-    /// Disk streaming via butler (long uncached files).
     Streaming,
 }
 
-/// Auditioner for quick file preview from a browser panel.
-///
-/// Only one file can be previewed at a time. Starting a new preview
-/// automatically stops the current one. Uses in-memory playback for
-/// short/cached files (instant start) and disk streaming for longer files.
-///
-/// SRC is applied automatically when the file's sample rate differs
-/// from the session sample rate.
-///
-/// # Example
-/// ```ignore
-/// let auditioner = sampler.auditioner();
-/// auditioner.preview(Path::new("drums.wav"))?;
-/// // ... later
-/// auditioner.stop();
-/// ```
+/// Quick file preview player. Only one file at a time; starting a new
+/// preview stops the current one. Uses in-memory playback for short/cached
+/// files and disk streaming for longer files. SRC applied automatically.
 pub struct Auditioner {
     sampler: Arc<SamplerSystem>,
     mode: parking_lot::Mutex<Option<PreviewMode>>,
@@ -54,7 +38,6 @@ pub struct Auditioner {
 }
 
 impl Auditioner {
-    /// Create a new Auditioner backed by the given SamplerSystem.
     pub(crate) fn new(sampler: Arc<SamplerSystem>) -> Self {
         let sr = sampler.sample_rate();
         Self {
@@ -69,10 +52,7 @@ impl Auditioner {
     }
 
     /// Preview a file. Stops any current preview first.
-    ///
-    /// For short files (< ~10s) or files already in the LRU cache,
-    /// playback starts instantly using in-memory mode. For longer
-    /// uncached files, disk streaming is used.
+    /// Short/cached files play immediately in-memory; longer files use disk streaming.
     pub fn preview(&self, file_path: &Path) -> crate::Result<()> {
         self.stop();
 
@@ -125,7 +105,6 @@ impl Auditioner {
         self.playing.store(true, Ordering::Release);
     }
 
-    /// Stop current preview.
     pub fn stop(&self) {
         let mode = self.mode.lock().take();
         if let Some(mode) = mode {
@@ -142,22 +121,19 @@ impl Auditioner {
         self.playing.store(false, Ordering::Release);
     }
 
-    /// Check if currently playing.
     pub fn is_playing(&self) -> bool {
         self.playing.load(Ordering::Acquire)
     }
 
-    /// Set preview gain (0.0+).
     pub fn set_gain(&self, gain: f32) {
         self.gain.set(gain.max(0.0));
     }
 
-    /// Get current gain.
     pub fn gain(&self) -> f32 {
         self.gain.get()
     }
 
-    /// Set preview speed (clamped to 0.25 - 4.0).
+    /// Clamped to 0.25..4.0.
     pub fn set_speed(&self, speed: f32) {
         let clamped = speed.clamp(0.25, 4.0);
         self.speed.set(clamped);
@@ -167,17 +143,15 @@ impl Auditioner {
         }
     }
 
-    /// Get current speed.
     pub fn speed(&self) -> f32 {
         self.speed.get()
     }
 
-    /// Get the current file path being previewed.
     pub fn current_path(&self) -> Option<PathBuf> {
         self.current_path.lock().clone()
     }
 
-    /// Get the duration of the current preview file in seconds.
+    /// Duration of the current preview file in seconds.
     pub fn duration(&self) -> Option<f64> {
         let mode = self.mode.lock();
         match mode.as_ref()? {
@@ -192,9 +166,7 @@ impl Auditioner {
         }
     }
 
-    /// Get a clone of the in-memory SamplerUnit for audio graph integration.
-    ///
-    /// Returns None if not in in-memory mode or not playing.
+    /// Returns None if not in in-memory mode.
     pub fn in_memory_unit(&self) -> Option<SamplerUnit> {
         let mode = self.mode.lock();
         match mode.as_ref()? {
@@ -203,9 +175,7 @@ impl Auditioner {
         }
     }
 
-    /// Get the StreamingSamplerUnit for audio graph integration.
-    ///
-    /// Returns None if not in streaming mode or not playing.
+    /// Returns None if not in streaming mode.
     pub fn streaming_unit(&self) -> Option<StreamingSamplerUnit> {
         let mode = self.mode.lock();
         match mode.as_ref()? {

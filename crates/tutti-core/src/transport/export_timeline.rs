@@ -67,7 +67,6 @@ pub struct ExportTimeline {
 }
 
 impl ExportTimeline {
-    /// Create a new export timeline with the given configuration.
     pub fn new(config: &ExportConfig) -> Self {
         let beats_per_second = config.tempo as f64 / 60.0;
         let beats_per_sample = beats_per_second / config.sample_rate;
@@ -112,30 +111,25 @@ impl ExportTimeline {
         self.current_beat.set(beat);
     }
 
-    /// Get the current beat position.
     #[inline]
     pub fn current_beat(&self) -> f64 {
         self.current_beat.get()
     }
 
-    /// Get the tempo in BPM.
     #[inline]
     pub fn tempo(&self) -> f32 {
         self.tempo.get()
     }
 
-    /// Get the sample rate.
     #[inline]
     pub fn sample_rate(&self) -> f64 {
         self.sample_rate
     }
 
-    /// Reset the timeline to the start beat.
     pub fn reset(&self, start_beat: f64) {
         self.current_beat.set(start_beat);
     }
 
-    /// Get beats per sample (for calculating beat increment per tick).
     #[inline]
     pub fn beats_per_sample(&self) -> f64 {
         self.beats_per_sample

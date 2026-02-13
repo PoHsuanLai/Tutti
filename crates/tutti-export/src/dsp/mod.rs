@@ -1,5 +1,3 @@
-//! DSP utilities for audio export.
-
 #[cfg(any(feature = "wav", feature = "flac"))]
 mod dither;
 #[cfg(any(feature = "wav", feature = "flac"))]
@@ -22,7 +20,7 @@ use crate::options::{ExportOptions, NormalizationMode};
 #[cfg(any(feature = "wav", feature = "flac"))]
 use crate::Result;
 
-/// Apply DSP processing pipeline: resample, normalize, dither.
+/// Pipeline order: resample -> normalize -> dither.
 #[cfg(any(feature = "wav", feature = "flac"))]
 pub(crate) fn process_audio(
     left: &[f32],
@@ -33,7 +31,6 @@ pub(crate) fn process_audio(
     let mut left_proc = left.to_vec();
     let mut right_proc = right.to_vec();
 
-    // Resample if needed
     if let Some(target_rate) = options.sample_rate {
         if target_rate != options.source_sample_rate {
             let (l, r) = resample_stereo(
@@ -48,7 +45,6 @@ pub(crate) fn process_audio(
         }
     }
 
-    // Normalize
     match options.normalization {
         NormalizationMode::None => {}
         NormalizationMode::Peak(target_db) => {
@@ -69,7 +65,6 @@ pub(crate) fn process_audio(
         }
     }
 
-    // Dither
     if options.dither != crate::options::DitherType::None {
         let mut state = DitherState::new(options.dither);
         apply_dither(

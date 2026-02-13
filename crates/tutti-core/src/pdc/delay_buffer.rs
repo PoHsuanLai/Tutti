@@ -71,22 +71,18 @@ impl DelayBuffer {
             return (left, right);
         }
 
-        // Calculate read position (circular buffer)
         let read_pos = if self.write_pos >= self.delay_samples {
             self.write_pos - self.delay_samples
         } else {
             self.left_buffer.len() + self.write_pos - self.delay_samples
         };
 
-        // Read delayed samples
         let delayed_left = self.left_buffer[read_pos];
         let delayed_right = self.right_buffer[read_pos];
 
-        // Write new samples
         self.left_buffer[self.write_pos] = left;
         self.right_buffer[self.write_pos] = right;
 
-        // Advance write position
         self.write_pos = (self.write_pos + 1) % self.left_buffer.len();
 
         (delayed_left, delayed_right)

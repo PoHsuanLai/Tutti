@@ -10,18 +10,12 @@ use core::any::Any;
 use core::fmt;
 use serde::{Deserialize, Serialize};
 
-/// Configuration for neural inference.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InferenceConfig {
-    /// Batch size for processing multiple requests.
     pub batch_size: usize,
-
-    /// Enable INT8 quantization.
     pub quantize: bool,
-
     /// Enable kernel fusion (CubeCL).
     pub enable_fusion: bool,
-
     /// Use graph-aware batching instead of timing-based.
     pub use_graph_aware_batching: bool,
 }
@@ -37,16 +31,10 @@ impl Default for InferenceConfig {
     }
 }
 
-/// Error type for inference operations.
 #[derive(Debug)]
 pub enum InferenceError {
-    /// Model not found in the backend registry.
     ModelNotFound(NeuralModelId),
-
-    /// Forward pass failed.
     ForwardFailed(String),
-
-    /// Backend initialization failed.
     BackendInit(String),
 }
 
@@ -60,20 +48,14 @@ impl fmt::Display for InferenceError {
     }
 }
 
-/// Describes what an inference backend supports.
 #[derive(Debug, Clone)]
 pub struct BackendCapabilities {
-    /// Human-readable backend name (e.g. "Burn/NdArray", "ONNX Runtime").
+    /// e.g. "Burn/NdArray", "ONNX Runtime"
     pub name: String,
-
-    /// Whether the backend can batch multiple requests into one forward pass.
     pub supports_batching: bool,
-
-    /// Whether a GPU device is available.
     pub has_gpu: bool,
 }
 
-/// A boxed forward function that maps flat input data + shape to flat output.
 pub type ForwardFn = Box<dyn Fn(&[f32], [usize; 2]) -> Vec<f32> + Send>;
 
 /// Abstraction over ML inference backends (Burn, ONNX Runtime, candle, etc.)
@@ -114,10 +96,8 @@ pub trait InferenceBackend {
         requests: &[(NeuralModelId, Vec<f32>, usize)],
     ) -> core::result::Result<Vec<Vec<f32>>, InferenceError>;
 
-    /// Get backend capabilities.
     fn capabilities(&self) -> BackendCapabilities;
 
-    /// Get the inference configuration.
     fn config(&self) -> &InferenceConfig;
 
     /// Downcast to concrete type for native model registration.

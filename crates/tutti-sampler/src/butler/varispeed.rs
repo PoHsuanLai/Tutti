@@ -1,6 +1,5 @@
 //! Varispeed and playback direction control.
 
-/// Playback direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PlayDirection {
     #[default]
@@ -9,12 +8,10 @@ pub enum PlayDirection {
 }
 
 impl PlayDirection {
-    /// Check if playing forward.
     pub fn is_forward(&self) -> bool {
         matches!(self, Self::Forward)
     }
 
-    /// Check if playing in reverse.
     pub fn is_reverse(&self) -> bool {
         matches!(self, Self::Reverse)
     }
@@ -23,9 +20,8 @@ impl PlayDirection {
 /// Varispeed configuration for a stream.
 #[derive(Debug, Clone, Copy)]
 pub struct Varispeed {
-    /// Playback direction
     pub direction: PlayDirection,
-    /// Playback speed multiplier (1.0 = normal, 0.5 = half, 2.0 = double)
+    /// 1.0 = normal, 0.5 = half, 2.0 = double
     pub speed: f32,
 }
 
@@ -39,7 +35,6 @@ impl Default for Varispeed {
 }
 
 impl Varispeed {
-    /// Create reverse playback at normal speed.
     pub fn reverse() -> Self {
         Self {
             direction: PlayDirection::Reverse,
@@ -55,12 +50,12 @@ impl Varispeed {
         self.direction.is_reverse()
     }
 
-    /// Get effective speed (always positive).
+    /// Always positive, minimum 0.01.
     pub fn effective_speed(&self) -> f32 {
         self.speed.abs().max(0.01)
     }
 
-    /// Get signed speed (negative for reverse).
+    /// Negative for reverse.
     pub fn signed_speed(&self) -> f32 {
         if self.is_reverse() {
             -self.speed.abs()

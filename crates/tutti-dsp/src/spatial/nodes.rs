@@ -1,28 +1,4 @@
-//! Spatial AudioUnit nodes for FunDSP Net integration
-//!
-//! Provides AudioUnit wrappers for spatial panners:
-//! - `SpatialPannerNode`: VBAP-based multichannel panner (5.1, 7.1, Atmos)
-//! - `BinauralPannerNode`: ITD/ILD headphone 3D audio
-//!
-//! ## Example
-//!
-//! ```rust,ignore
-//! use tutti::net::TuttiNet;
-//! use tutti::spatial::{SpatialPannerNode, BinauralPannerNode};
-//!
-//! // Create a 5.1 surround panner node
-//! let panner = SpatialPannerNode::surround_5_1()?;
-//! panner.set_position(45.0, 0.0); // Front-left
-//!
-//! // Add to Net (mono input → 6 channel output)
-//! let node_id = net.add(Box::new(panner));
-//! net.connect(synth_id, 0, node_id, 0);
-//! net.commit();
-//!
-//! // Or use binaural for headphones (mono → stereo)
-//! let binaural = BinauralPannerNode::new(48000.0);
-//! binaural.set_position(90.0, 0.0); // Hard left
-//! ```
+//! AudioUnit wrappers for VBAP and binaural spatial panners.
 
 use crate::Result;
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -33,32 +9,8 @@ use tutti_core::{BufferMut, BufferRef, SignalFrame};
 use super::binaural_panner::BinauralPanner;
 use super::vbap_panner::SpatialPanner;
 
-/// VBAP-based spatial panner as an AudioUnit node
-///
-/// Takes mono input and outputs to multiple speakers using Vector Base
-/// Amplitude Panning (VBAP). Supports various speaker configurations:
-/// - Stereo (2 channels)
-/// - Quad (4 channels)
-/// - 5.1 Surround (6 channels)
-/// - 7.1 Surround (8 channels)
-/// - Dolby Atmos 7.1.4 (12 channels)
-///
-/// ## Position Control
-///
-/// Position is controlled via atomic floats for real-time automation:
-/// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left)
-/// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
-///
-/// ## Example
-///
-/// ```rust,ignore
-/// let panner = SpatialPannerNode::surround_5_1()?;
-/// panner.set_position(45.0, 0.0); // Front-left at ear level
-///
-/// let node_id = net.add(Box::new(panner));
-/// net.connect(synth_id, 0, node_id, 0); // Connect mono synth
-/// net.pipe_output(node_id); // Route to 5.1 output
-/// ```
+/// VBAP multichannel panner (stereo/quad/5.1/7.1/Atmos).
+/// Position controlled via lock-free atomics for RT-safe automation.
 pub struct SpatialPannerNode {
     panner: SpatialPanner,
     num_outputs: usize,
@@ -72,8 +24,7 @@ pub struct SpatialPannerNode {
 
 impl Clone for SpatialPannerNode {
     fn clone(&self) -> Self {
-        // Re-create the panner with current position so the backend
-        // starts from the correct state.
+        // Re-create panner with current position so backend starts from correct state.
         let mut new_panner = match self.num_outputs {
             2 => SpatialPanner::stereo().expect("stereo preset"),
             4 => SpatialPanner::quad().expect("quad preset"),
@@ -92,7 +43,6 @@ impl Clone for SpatialPannerNode {
         Self {
             panner: new_panner,
             num_outputs: self.num_outputs,
-            // Share the same Arc so frontend and backend see the same atomics
             azimuth_atomic: Arc::clone(&self.azimuth_atomic),
             elevation_atomic: Arc::clone(&self.elevation_atomic),
             spread_atomic: Arc::clone(&self.spread_atomic),
@@ -104,37 +54,31 @@ impl Clone for SpatialPannerNode {
 }
 
 impl SpatialPannerNode {
-    /// Create a stereo spatial panner (2 channels)
     pub fn stereo() -> Result<Self> {
         let panner = SpatialPanner::stereo()?;
         Ok(Self::from_panner(panner, 2))
     }
 
-    /// Create a quad spatial panner (4 channels)
     pub fn quad() -> Result<Self> {
         let panner = SpatialPanner::quad()?;
         Ok(Self::from_panner(panner, 4))
     }
 
-    /// Create a 5.1 surround panner (6 channels)
     pub fn surround_5_1() -> Result<Self> {
         let panner = SpatialPanner::surround_5_1()?;
         Ok(Self::from_panner(panner, 6))
     }
 
-    /// Create a 7.1 surround panner (8 channels)
     pub fn surround_7_1() -> Result<Self> {
         let panner = SpatialPanner::surround_7_1()?;
         Ok(Self::from_panner(panner, 8))
     }
 
-    /// Create a Dolby Atmos 7.1.4 panner (12 channels)
     pub fn atmos_7_1_4() -> Result<Self> {
         let panner = SpatialPanner::atmos_7_1_4()?;
         Ok(Self::from_panner(panner, 12))
     }
 
-    /// Create from an existing SpatialPanner
     fn from_panner(panner: SpatialPanner, num_outputs: usize) -> Self {
         Self {
             panner,
@@ -159,12 +103,10 @@ impl SpatialPannerNode {
             .store(elevation.to_bits(), Ordering::Relaxed);
     }
 
-    /// Get current azimuth
     pub fn azimuth(&self) -> f32 {
         f32::from_bits(self.azimuth_atomic.load(Ordering::Relaxed))
     }
 
-    /// Get current elevation
     pub fn elevation(&self) -> f32 {
         f32::from_bits(self.elevation_atomic.load(Ordering::Relaxed))
     }
@@ -175,7 +117,6 @@ impl SpatialPannerNode {
             .store(spread.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 
-    /// Get current spread
     pub fn spread(&self) -> f32 {
         f32::from_bits(self.spread_atomic.load(Ordering::Relaxed))
     }
@@ -186,17 +127,14 @@ impl SpatialPannerNode {
             .store(width.max(0.0).to_bits(), Ordering::Relaxed);
     }
 
-    /// Get current stereo width
     pub fn width(&self) -> f32 {
         f32::from_bits(self.width_atomic.load(Ordering::Relaxed))
     }
 
-    /// Get the number of output channels
     pub fn num_channels(&self) -> usize {
         self.num_outputs
     }
 
-    /// Update internal panner state from atomics
     #[inline]
     fn sync_position(&mut self) {
         let azimuth = f32::from_bits(self.azimuth_atomic.load(Ordering::Relaxed));
@@ -297,28 +235,8 @@ impl AudioUnit for SpatialPannerNode {
     }
 }
 
-/// Binaural panner as an AudioUnit node
-///
-/// Takes mono input and outputs binaural stereo for headphone listening.
-/// Uses simple ITD (Interaural Time Difference) and ILD (Interaural Level
-/// Difference) model for 3D audio spatialization.
-///
-/// ## Position Control
-///
-/// Position is controlled via atomic floats for real-time automation:
-/// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left)
-/// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
-///
-/// ## Example
-///
-/// ```rust,ignore
-/// let panner = BinauralPannerNode::new(48000.0);
-/// panner.set_position(90.0, 0.0); // Hard left
-///
-/// let node_id = net.add(Box::new(panner));
-/// net.connect(synth_id, 0, node_id, 0); // Connect mono synth
-/// net.pipe_output(node_id); // Route to stereo output
-/// ```
+/// ITD/ILD binaural panner for headphone 3D audio.
+/// Position controlled via lock-free atomics for RT-safe automation.
 pub struct BinauralPannerNode {
     panner: BinauralPanner,
     azimuth_atomic: Arc<AtomicU32>,
@@ -345,7 +263,6 @@ impl Clone for BinauralPannerNode {
 }
 
 impl BinauralPannerNode {
-    /// Create a new binaural panner node
     pub fn new(sample_rate: f32) -> Self {
         Self {
             panner: BinauralPanner::new(sample_rate),
@@ -356,10 +273,8 @@ impl BinauralPannerNode {
         }
     }
 
-    /// Set position in degrees (thread-safe, lock-free)
-    ///
-    /// - `azimuth`: Horizontal angle (-180 to 180, 0 = front, 90 = left, -90 = right)
-    /// - `elevation`: Vertical angle (-90 to 90, 0 = ear level, positive = up)
+    /// Azimuth in degrees (-180..180, 0=front, 90=left), elevation (-90..90, 0=ear level).
+    /// Lock-free.
     pub fn set_position(&self, azimuth: f32, elevation: f32) {
         self.azimuth_atomic
             .store(azimuth.to_bits(), Ordering::Relaxed);
@@ -367,28 +282,24 @@ impl BinauralPannerNode {
             .store(elevation.to_bits(), Ordering::Relaxed);
     }
 
-    /// Get current azimuth
     pub fn azimuth(&self) -> f32 {
         f32::from_bits(self.azimuth_atomic.load(Ordering::Relaxed))
     }
 
-    /// Get current elevation
     pub fn elevation(&self) -> f32 {
         f32::from_bits(self.elevation_atomic.load(Ordering::Relaxed))
     }
 
-    /// Set stereo width for stereo input mode (0.0 = mono, 1.0 = full stereo)
+    /// 0.0 = mono, 1.0 = full stereo
     pub fn set_width(&self, width: f32) {
         self.width_atomic
             .store(width.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
     }
 
-    /// Get current stereo width
     pub fn width(&self) -> f32 {
         f32::from_bits(self.width_atomic.load(Ordering::Relaxed))
     }
 
-    /// Update internal panner state from atomics
     #[inline]
     fn sync_position(&mut self) {
         let azimuth = f32::from_bits(self.azimuth_atomic.load(Ordering::Relaxed));

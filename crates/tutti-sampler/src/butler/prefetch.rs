@@ -10,7 +10,6 @@ use tutti_core::{AtomicU64, Ordering};
 
 use super::request::{CaptureId, RegionId};
 
-/// Shared metadata for a region buffer.
 #[derive(Debug)]
 pub(crate) struct RegionBufferMeta {
     file_path: PathBuf,
@@ -27,7 +26,6 @@ impl RegionBufferMeta {
     }
 }
 
-/// Producer side of a region buffer owned by Butler thread.
 pub(crate) struct RegionBufferProducer {
     prod: HeapProd<(f32, f32)>,
     meta: Arc<RegionBufferMeta>,
@@ -83,7 +81,6 @@ impl RegionBufferProducer {
 
 unsafe impl Send for RegionBufferProducer {}
 
-/// Consumer side of a region buffer for audio callback.
 pub struct RegionBufferConsumer {
     cons: HeapCons<(f32, f32)>,
     read_position: Arc<AtomicU64>,
@@ -115,7 +112,6 @@ impl RegionBufferConsumer {
             .fetch_add(count as u64, Ordering::Relaxed);
     }
 
-    /// Get the number of samples available for reading.
     pub fn available(&self) -> usize {
         self.cons.occupied_len()
     }
@@ -129,7 +125,6 @@ impl RegionBufferConsumer {
 unsafe impl Send for RegionBufferConsumer {}
 unsafe impl Sync for RegionBufferConsumer {}
 
-/// A region buffer for streaming audio.
 pub(crate) struct RegionBuffer;
 
 impl RegionBuffer {
@@ -163,7 +158,6 @@ impl RegionBuffer {
     }
 }
 
-/// Metadata for a capture buffer.
 #[derive(Debug)]
 pub(crate) struct CaptureBufferMeta {
     file_path: PathBuf,
@@ -181,7 +175,6 @@ impl CaptureBufferMeta {
     }
 }
 
-/// Producer side of capture buffer for audio callback writes.
 pub struct CaptureBufferProducer {
     prod: HeapProd<(f32, f32)>,
     meta: Arc<CaptureBufferMeta>,
@@ -231,7 +224,6 @@ impl CaptureBufferProducer {
     }
 }
 
-/// Consumer side of capture buffer owned by Butler thread.
 pub(crate) struct CaptureBufferConsumer {
     cons: HeapCons<(f32, f32)>,
     meta: Arc<CaptureBufferMeta>,
@@ -262,7 +254,6 @@ impl CaptureBufferConsumer {
     }
 }
 
-/// Capture buffer factory.
 pub(crate) struct CaptureBuffer;
 
 impl CaptureBuffer {

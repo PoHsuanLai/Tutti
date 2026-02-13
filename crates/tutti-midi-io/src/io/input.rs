@@ -1,7 +1,4 @@
-//! MIDI Input Manager
-//!
-//! Handles MIDI device enumeration, connection, and event routing.
-//! Uses dedicated thread for platform thread-safety.
+//! MIDI input: device enumeration, connection, and event routing via a dedicated thread.
 
 #![cfg_attr(not(feature = "midi-io"), allow(unused_imports, dead_code))]
 

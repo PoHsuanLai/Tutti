@@ -18,7 +18,7 @@ pub struct SamplerUnit {
     wave: Arc<Wave>,
     position: AtomicU64,
 
-    /// Play/stop control. Defaults to true (auto-play).
+    /// Defaults to true (auto-play).
     playing: AtomicBool,
 
     looping: AtomicBool,
@@ -71,7 +71,6 @@ impl Clone for SamplerUnit {
 }
 
 impl SamplerUnit {
-    /// Create new sampler. Plays immediately by default.
     pub fn new(wave: Arc<Wave>) -> Self {
         let sample_rate = wave.sample_rate() as f32;
         Self {
@@ -91,7 +90,6 @@ impl SamplerUnit {
         }
     }
 
-    /// Create with custom settings. Plays immediately by default.
     pub fn with_settings(wave: Arc<Wave>, gain: f32, speed: f32, looping: bool) -> Self {
         let sample_rate = wave.sample_rate() as f32;
         Self {
@@ -111,7 +109,6 @@ impl SamplerUnit {
         }
     }
 
-    /// Create a transport-aware sampler.
     pub fn with_transport(
         wave: Arc<Wave>,
         transport: Arc<dyn TransportReader>,
@@ -136,7 +133,6 @@ impl SamplerUnit {
         }
     }
 
-    /// Set transport for beat-synced playback.
     pub fn set_transport(
         &mut self,
         transport: Arc<dyn TransportReader>,
@@ -148,85 +144,71 @@ impl SamplerUnit {
         self.duration_beats = duration_beats;
     }
 
-    /// Replace transport (used by export to swap live transport for export timeline).
-    /// Replace the transport reader (used by export to inject export timeline).
+    /// Used by export to inject export timeline.
     pub fn replace_transport(&mut self, transport: Arc<dyn TransportReader>) {
         self.transport = Some(transport);
     }
 
-    /// Check if this sampler has a transport (i.e., is timeline-aware).
     pub fn has_transport(&self) -> bool {
         self.transport.is_some()
     }
 
-    /// Trigger playback from start.
     pub fn trigger(&self) {
         self.position.store(0, Ordering::Relaxed);
         self.playing.store(true, Ordering::Relaxed);
     }
 
-    /// Trigger playback from position.
     pub fn trigger_at(&self, position: u64) {
         self.position.store(position, Ordering::Relaxed);
         self.playing.store(true, Ordering::Relaxed);
     }
 
-    /// Stop playback.
     pub fn stop(&self) {
         self.playing.store(false, Ordering::Relaxed);
     }
 
-    /// Check if playing.
     pub fn is_playing(&self) -> bool {
         self.playing.load(Ordering::Relaxed)
     }
 
-    /// Set loop mode.
     pub fn set_looping(&self, looping: bool) {
         self.looping.store(looping, Ordering::Relaxed);
     }
 
-    /// Check if looping.
     pub fn is_looping(&self) -> bool {
         self.looping.load(Ordering::Relaxed)
     }
 
-    /// Get current position.
     pub fn position(&self) -> u64 {
         self.position.load(Ordering::Relaxed)
     }
 
-    /// Get the timeline start position in beats.
     pub fn start_beat(&self) -> f64 {
         self.start_beat
     }
 
-    /// Get the clip duration in beats (0.0 means play entire sample).
+    /// 0.0 means play entire sample.
     pub fn duration_beats(&self) -> f64 {
         self.duration_beats
     }
 
-    /// Get duration in samples.
     pub fn duration_samples(&self) -> usize {
         self.wave.len()
     }
 
-    /// Get duration in seconds.
     pub fn duration_seconds(&self) -> f64 {
         self.wave.duration()
     }
 
-    /// Set gain.
     pub fn set_gain(&mut self, gain: f32) {
         self.gain = gain;
     }
 
-    /// Get current gain.
     pub fn gain(&self) -> f32 {
         self.gain
     }
 
-    /// Set session sample rate for automatic SRC.
+    /// Computes SRC ratio from file vs session sample rate.
     pub fn set_session_sample_rate(&mut self, session_rate: f64) {
         let file_rate = self.wave.sample_rate();
         self.src_ratio = if (file_rate - session_rate).abs() < 0.01 {
@@ -236,7 +218,6 @@ impl SamplerUnit {
         };
     }
 
-    /// Set loop range in samples with optional crossfade.
     pub fn set_loop_range(&mut self, loop_start: u64, loop_end: u64, crossfade_samples: usize) {
         self.loop_range = Some((loop_start, loop_end));
         self.looping.store(true, Ordering::Relaxed);
@@ -255,13 +236,11 @@ impl SamplerUnit {
         }
     }
 
-    /// Clear loop range.
     pub fn clear_loop_range(&mut self) {
         self.loop_range = None;
         self.crossfade = None;
     }
 
-    /// Get loop range.
     pub fn loop_range(&self) -> Option<(u64, u64)> {
         self.loop_range
     }
@@ -548,19 +527,15 @@ mod streaming {
         ((c3 * t + c2) * t + c1) * t + c0
     }
 
-    /// Maximum samples to pre-allocate for varispeed fetching.
-    /// Covers 8192 frames at 4x speed with interpolation padding.
+    /// 8192 frames at 4x speed with interpolation padding.
     const MAX_FETCH_SAMPLES: usize = 8192 * 4 + 8;
 
-    /// Disk streaming sampler with varispeed and seeking support.
+    /// Disk streaming sampler with varispeed, seeking, and crossfade support.
     pub struct StreamingSamplerUnit {
         consumer: Arc<Mutex<RegionBufferConsumer>>,
         playing: AtomicBool,
 
-        /// Gain (0.0 - 1.0+)
         gain: f32,
-
-        /// Sample rate
         sample_rate: f32,
 
         /// Shared state for cross-thread communication (speed, direction, seeking).
@@ -592,18 +567,13 @@ mod streaming {
     }
 
     impl StreamingSamplerUnit {
-        /// Create a new streaming sampler with shared state for varispeed/seeking.
-        /// Plays immediately by default (matches SamplerUnit behavior).
-        ///
-        /// Use `SamplerSystem::streaming_unit()` to get a fully configured unit,
-        /// or create manually from `ChannelStreamState::consumer()` and `shared_state()`.
         pub fn new(
             consumer: Arc<Mutex<RegionBufferConsumer>>,
             shared_state: Arc<SharedStreamState>,
         ) -> Self {
             Self {
                 consumer,
-                playing: AtomicBool::new(true), // Auto-play by default (matches SamplerUnit)
+                playing: AtomicBool::new(true),
                 gain: 1.0,
                 sample_rate: 44100.0,
                 shared_state: Some(shared_state),
@@ -613,27 +583,22 @@ mod streaming {
             }
         }
 
-        /// Start playback
         pub fn play(&self) {
             self.playing.store(true, Ordering::Relaxed);
         }
 
-        /// Stop playback
         pub fn stop(&self) {
             self.playing.store(false, Ordering::Relaxed);
         }
 
-        /// Check if currently playing
         pub fn is_playing(&self) -> bool {
             self.playing.load(Ordering::Relaxed)
         }
 
-        /// Set gain
         pub fn set_gain(&mut self, gain: f32) {
             self.gain = gain;
         }
 
-        /// Shift history buffer for new sample.
         #[inline]
         fn shift_history(&mut self) {
             self.history[0] = self.history[1];
@@ -641,16 +606,12 @@ mod streaming {
             self.history[2] = self.history[3];
         }
 
-        /// Reset interpolation state (call after seek).
+        /// Call after seek to reset interpolation state.
         pub fn reset_interpolation(&mut self) {
             self.fractional_pos = 0.0;
             self.history = [(0.0, 0.0); 4];
         }
 
-        /// Process normal playback samples (internal helper).
-        ///
-        /// `size` is the number of samples to process.
-        /// `offset` is the starting index in the output buffer.
         fn process_normal_samples(&mut self, size: usize, offset: usize, output: &mut BufferMut) {
             if size == 0 {
                 return;

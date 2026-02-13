@@ -24,24 +24,11 @@ pub use tempo_map::{TempoMap, TimeSignature, BBT};
 /// export timeline (`ExportTimeline`) to be used interchangeably by
 /// nodes like `AutomationLane` that need beat position information.
 pub trait TransportReader: Send + Sync {
-    /// Get current beat position.
     fn current_beat(&self) -> f64;
-
-    /// Check if loop is enabled.
     fn is_loop_enabled(&self) -> bool;
-
-    /// Get loop range (start, end) in beats, if enabled.
     fn get_loop_range(&self) -> Option<(f64, f64)>;
-
-    /// Check if transport is playing.
     fn is_playing(&self) -> bool;
-
-    /// Check if recording is active.
     fn is_recording(&self) -> bool;
-
-    /// Check if in preroll count-in.
     fn is_in_preroll(&self) -> bool;
-
-    /// Get current tempo in BPM.
     fn tempo(&self) -> f32;
 }

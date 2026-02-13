@@ -1,5 +1,3 @@
-//! Plugin registration for NodeRegistry.
-
 use crate::client::PluginClient;
 use crate::error::{BridgeError, LoadStage};
 use crate::protocol::BridgeConfig;
@@ -12,9 +10,7 @@ impl From<BridgeError> for NodeRegistryError {
     }
 }
 
-/// Register a plugin by path.
-///
-/// Parameters: `sample_rate` (default 44100.0), `param_<id>` for plugin params.
+/// Params: `sample_rate` (default 44100.0), `param_<id>` for plugin params.
 pub fn register_plugin<P: AsRef<Path>>(
     registry: &NodeRegistry,
     runtime: &tokio::runtime::Handle,
@@ -51,7 +47,7 @@ pub fn register_plugin<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Register all plugins in a directory (.vst, .vst3, .clap).
+/// Scans for .vst, .vst3, .clap, .component files.
 pub fn register_plugin_directory<P: AsRef<Path>>(
     registry: &NodeRegistry,
     runtime: &tokio::runtime::Handle,
@@ -92,7 +88,7 @@ pub fn register_plugin_directory<P: AsRef<Path>>(
     Ok(registered)
 }
 
-/// Register all system plugins from standard directories.
+/// Scans platform-standard plugin directories.
 pub fn register_all_system_plugins(
     registry: &NodeRegistry,
     runtime: &tokio::runtime::Handle,

@@ -21,15 +21,6 @@
 //! let lane_id = engine.add_node(lane);
 //! ```
 //!
-//! # Re-exports
-//!
-//! This crate re-exports the core types from `audio-automation`:
-//! - [`AutomationEnvelope`] - Envelope with points and curves
-//! - [`AutomationPoint`] - A single automation point
-//! - [`CurveType`] - Interpolation curve types
-//! - [`AutomationState`] - DAW-style automation states
-//! - [`AutomationClip`] - Clip-based automation
-
 mod lane;
 
 pub use lane::{AutomationLane, LiveAutomationLane};
