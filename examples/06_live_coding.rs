@@ -10,11 +10,12 @@
 
 use std::io::{self, Write};
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -29,19 +30,19 @@ fn main() -> tutti::Result<()> {
         io::stdin().read_line(&mut input)?;
 
         match input.trim() {
-            "1" => engine.graph(|net| {
+            "1" => engine.graph_mut(|net: &mut TuttiNet| {
                 net.add(sine_hz::<f64>(440.0) * 0.5).master();
             }),
-            "2" => engine.graph(|net| {
+            "2" => engine.graph_mut(|net: &mut TuttiNet| {
                 net.add(saw_hz(220.0) * 0.3).master();
             }),
-            "3" => engine.graph(|net| {
+            "3" => engine.graph_mut(|net: &mut TuttiNet| {
                 net.add(square_hz(330.0) * 0.3).master();
             }),
-            "4" => engine.graph(|net| {
+            "4" => engine.graph_mut(|net: &mut TuttiNet| {
                 net.add(pink::<f64>() * 0.2).master();
             }),
-            "5" => engine.graph(|net| {
+            "5" => engine.graph_mut(|net: &mut TuttiNet| {
                 let c = sine_hz::<f64>(261.63) * 0.2;
                 let e = sine_hz::<f64>(329.63) * 0.2;
                 let g = sine_hz::<f64>(392.00) * 0.2;

@@ -1,4 +1,4 @@
-//! # 22 - Plugin Editor GUI
+//! # 23 - Plugin Editor GUI
 //!
 //! Open a plugin's native editor GUI via the engine's fluent API.
 //!
@@ -9,16 +9,16 @@
 //!
 //! ```bash
 //! # CLAP
-//! cargo run --example 22_plugin_editor --features "clap,midi"
+//! cargo run --example 23_plugin_editor --features "clap,midi"
 //!
 //! # VST3
-//! cargo run --example 22_plugin_editor --features "vst3,midi"
+//! cargo run --example 23_plugin_editor --features "vst3,midi"
 //!
 //! # VST2
-//! cargo run --example 22_plugin_editor --features "vst2,midi"
+//! cargo run --example 23_plugin_editor --features "vst2,midi"
 //!
 //! # All formats (tries CLAP first, then VST3, then VST2)
-//! cargo run --example 22_plugin_editor --features "clap,vst3,vst2,midi"
+//! cargo run --example 23_plugin_editor --features "clap,vst3,vst2,midi"
 //! ```
 //!
 //! ## Setup
@@ -66,6 +66,10 @@ fn try_load_plugin(
     #[cfg(feature = "vst3")]
     {
         let vst3_paths = [
+            // Local fixture plugins (Voxengo — free, support f64)
+            "tests/fixtures/plugins/Boogex.vst3",
+            "tests/fixtures/plugins/SPAN.vst3",
+            // System-installed plugins
             "/Library/Audio/Plug-Ins/VST3/TAL-NoiseMaker.vst3",
             "/Library/Audio/Plug-Ins/VST3/Surge XT.vst3",
         ];
@@ -83,9 +87,7 @@ fn try_load_plugin(
     // VST2 plugins
     #[cfg(feature = "vst2")]
     {
-        let vst2_paths = [
-            "/Library/Audio/Plug-Ins/VST/TAL-NoiseMaker.vst",
-        ];
+        let vst2_paths = ["/Library/Audio/Plug-Ins/VST/TAL-NoiseMaker.vst"];
         for path in &vst2_paths {
             if Path::new(path).exists() {
                 println!("  Trying VST2: {}", path);
@@ -107,6 +109,7 @@ struct App {
     window: Option<Window>,
     editor_open: bool,
     notes_sent: bool,
+    is_effect: bool,
     param_snapshot: Vec<(u32, String, f32)>,
     last_poll: Instant,
 }
@@ -122,6 +125,7 @@ impl App {
             window: None,
             editor_open: false,
             notes_sent: false,
+            is_effect: false,
             param_snapshot: Vec::new(),
             last_poll: Instant::now(),
         }
@@ -177,11 +181,16 @@ impl ApplicationHandler for App {
             }
         };
 
-        let plugin_name = handle.metadata().name.clone();
+        let meta = handle.metadata();
+        let plugin_name = meta.name.clone();
         println!(
-            "Loaded: {} (has_editor: {})",
+            "Loaded: {} (has_editor: {}, supports_f64: {}, audio_io: {}in/{}out, midi: {})",
             plugin_name,
-            handle.has_editor()
+            meta.has_editor,
+            meta.supports_f64,
+            meta.audio_io.inputs,
+            meta.audio_io.outputs,
+            meta.receives_midi,
         );
 
         if !handle.has_editor() {
@@ -190,11 +199,28 @@ impl ApplicationHandler for App {
             return;
         }
 
-        // Add plugin to the audio graph and start transport
-        let node_id = self
-            .engine
-            .graph(|net: &mut TuttiNet| net.add_boxed(unit).master());
+        // Add plugin to the audio graph.
+        // Effects (audio_io.inputs > 0) need a source signal piped in.
+        // Synths (audio_io.inputs == 0) generate their own sound from MIDI.
+        let is_effect = meta.audio_io.inputs > 0;
+        let node_id = if is_effect {
+            println!("Plugin is an effect — feeding stereo saw wave as input.");
+            self.engine.graph_mut(|net: &mut TuttiNet| {
+                // A saw wave is harmonically rich (like a guitar DI signal),
+                // making amp sim effects like Boogex clearly audible.
+                let src = net.add(saw_hz(220.0) * 0.3 >> split::<U2>()).id();
+                let fx = net.add_boxed(unit).id();
+                net.pipe_all(src, fx);
+                net.pipe_output(fx);
+                fx
+            })
+        } else {
+            println!("Plugin is a synth — will send MIDI notes.");
+            self.engine
+                .graph_mut(|net: &mut TuttiNet| net.add_boxed(unit).master())
+        };
         self.node_id = Some(node_id);
+        self.is_effect = is_effect;
         self.engine.transport().play();
 
         let window_attrs = Window::default_attributes()
@@ -272,13 +298,16 @@ impl ApplicationHandler for App {
                                 self.param_snapshot.len()
                             );
 
-                            // Send a held chord so the plugin produces sound
-                            if let Some(nid) = self.node_id {
-                                println!("Sending MIDI chord (C4 E4 G4)...");
-                                self.engine.note_on(nid, Note::C4, 100);
-                                self.engine.note_on(nid, Note::E4, 100);
-                                self.engine.note_on(nid, Note::G4, 100);
-                                self.notes_sent = true;
+                            // Send a held chord so synth plugins produce sound.
+                            // Effect plugins already have a sine wave source piped in.
+                            if !self.is_effect {
+                                if let Some(nid) = self.node_id {
+                                    println!("Sending MIDI chord (C4 E4 G4)...");
+                                    self.engine.note_on(nid, Note::C4, 100);
+                                    self.engine.note_on(nid, Note::E4, 100);
+                                    self.engine.note_on(nid, Note::G4, 100);
+                                    self.notes_sent = true;
+                                }
                             }
 
                             // Start polling via ControlFlow::WaitUntil

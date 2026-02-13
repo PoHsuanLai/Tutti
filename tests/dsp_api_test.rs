@@ -1,7 +1,7 @@
 //! Integration tests for DSP nodes
 //!
 //! The DSP API provides factory methods for creating DSP nodes directly.
-//! Use `engine.graph()` to add nodes to the audio graph.
+//! Use `engine.graph_mut()` to add nodes to the audio graph.
 
 use tutti::dsp_nodes::{LfoNode, LfoShape};
 use tutti::prelude::*;
@@ -17,15 +17,15 @@ fn test_dsp_lfo_creation() {
     lfo2.set_depth(0.8);
 
     // Add to graph
-    let lfo1_id = engine.graph(|net| net.add(lfo1).id());
-    let lfo2_id = engine.graph(|net| net.add(lfo2).id());
+    let lfo1_id = engine.graph_mut(|net| net.add(lfo1).id());
+    let lfo2_id = engine.graph_mut(|net| net.add(lfo2).id());
 
     // Verify nodes were created (different IDs)
     assert_ne!(lfo1_id, lfo2_id);
 }
 
 #[test]
-#[cfg(feature = "dsp-dynamics")]
+#[cfg(feature = "dsp")]
 fn test_dsp_sidechain_dynamics_creation() {
     let engine = TuttiEngine::builder().build().unwrap();
 
@@ -52,10 +52,10 @@ fn test_dsp_sidechain_dynamics_creation() {
     let stereo_gate = StereoSidechainGate::new(-40.0, 0.001, 0.01, 0.1);
 
     // Add to graph
-    let comp_id = engine.graph(|net| net.add(comp).id());
-    let gate_id = engine.graph(|net| net.add(gate).id());
-    let stereo_comp_id = engine.graph(|net| net.add(stereo_comp).id());
-    let stereo_gate_id = engine.graph(|net| net.add(stereo_gate).id());
+    let comp_id = engine.graph_mut(|net| net.add(comp).id());
+    let gate_id = engine.graph_mut(|net| net.add(gate).id());
+    let stereo_comp_id = engine.graph_mut(|net| net.add(stereo_comp).id());
+    let stereo_gate_id = engine.graph_mut(|net| net.add(stereo_gate).id());
 
     // Verify all are different
     assert_ne!(comp_id, gate_id);
@@ -63,7 +63,7 @@ fn test_dsp_sidechain_dynamics_creation() {
 }
 
 #[test]
-#[cfg(feature = "dsp-spatial")]
+#[cfg(feature = "dsp")]
 fn test_dsp_spatial_panners_creation() {
     let engine = TuttiEngine::builder().build().unwrap();
 
@@ -76,14 +76,14 @@ fn test_dsp_spatial_panners_creation() {
     let binaural = BinauralPannerNode::new(48000.0);
 
     // Add to graph
-    let vbap_id = engine.graph(|net| net.add(vbap).id());
-    let binaural_id = engine.graph(|net| net.add(binaural).id());
+    let vbap_id = engine.graph_mut(|net| net.add(vbap).id());
+    let binaural_id = engine.graph_mut(|net| net.add(binaural).id());
 
     assert_ne!(vbap_id, binaural_id);
 }
 
 #[test]
-#[cfg(feature = "dsp-dynamics")]
+#[cfg(feature = "dsp")]
 fn test_dsp_nodes_in_graph() {
     let engine = TuttiEngine::builder().build().unwrap();
 
@@ -101,7 +101,7 @@ fn test_dsp_nodes_in_graph() {
         .build();
 
     // Use in audio graph
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         let lfo_id = net.add(lfo).id();
         let comp_id = net.add(comp).id();
 
@@ -125,9 +125,9 @@ fn test_multiple_lfo_instances() {
     lfo3.set_depth(1.0);
 
     // Add to graph
-    let lfo1_id = engine.graph(|net| net.add(lfo1).id());
-    let lfo2_id = engine.graph(|net| net.add(lfo2).id());
-    let lfo3_id = engine.graph(|net| net.add(lfo3).id());
+    let lfo1_id = engine.graph_mut(|net| net.add(lfo1).id());
+    let lfo2_id = engine.graph_mut(|net| net.add(lfo2).id());
+    let lfo3_id = engine.graph_mut(|net| net.add(lfo3).id());
 
     // All should be different node IDs
     assert_ne!(lfo1_id, lfo2_id);

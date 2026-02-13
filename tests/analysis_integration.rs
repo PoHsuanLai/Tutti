@@ -70,7 +70,10 @@ fn test_waveform_summary() {
     let summary = analysis.waveform_summary(&samples, 256);
 
     // Should have some data points
-    assert!(!summary.blocks.is_empty(), "Waveform summary should not be empty");
+    assert!(
+        !summary.blocks.is_empty(),
+        "Waveform summary should not be empty"
+    );
 
     // Each point should be in valid range
     for block in &summary.blocks {
@@ -143,7 +146,10 @@ fn test_transient_detection() {
     if !transients.is_empty() {
         // First transient should be near the click
         let first = &transients[0];
-        assert!(first.strength > 0.0, "Transient should have positive strength");
+        assert!(
+            first.strength > 0.0,
+            "Transient should have positive strength"
+        );
     }
 }
 
@@ -271,7 +277,7 @@ fn test_live_analysis_toggle() {
     engine.enable_live_analysis();
 
     // Add some audio
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 

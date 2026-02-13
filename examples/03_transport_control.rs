@@ -2,6 +2,10 @@
 //!
 //! Interactive transport control: play, stop, tempo, looping, metronome.
 //!
+//! A sequence plays different synth tones per beat. The loop range is beats 4-8,
+//! so with loop ON you hear only the high section repeating. Toggle loop OFF
+//! to hear the full 16-beat sequence.
+//!
 //! **Concepts:** Transport state, tempo, loop range, metronome, seeking
 //!
 //! ```bash
@@ -9,69 +13,83 @@
 //! ```
 
 use std::io::{self, Write};
+use std::sync::Arc;
 use tutti::prelude::*;
-use tutti::Shared;
+use tutti::{AtomicBool, Ordering, Shared, TuttiNet};
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
-    // Shared frequency that we'll update based on beat position
-    // This creates an ascending arpeggio that resets on loop
     let freq = Shared::new(220.0);
     let freq_var = freq.clone();
 
-    // Sine wave with variable frequency
-    engine.graph(|net| {
-        net.add(var(&freq_var) >> sine::<f32>() * 0.15).master();
+    engine.graph_mut(|net: &mut TuttiNet| {
+        // Square wave is more obviously pitched than sine
+        net.add(var(&freq_var) >> square() * 0.1).master();
     });
 
-    // Configure transport - 4 beat loop
+    // Loop range is beats 4-8 (the "high" section)
     engine
         .transport()
-        .tempo(120.0)
-        .loop_range(0.0, 4.0)
+        .tempo(140.0)
+        .loop_range(4.0, 8.0)
         .enable_loop();
 
-    // Enable metronome
-    engine
-        .transport()
-        .metronome()
-        .volume(0.8)
-        .accent_every(4)
-        .always();
+    engine.transport().play();
 
     println!("Transport Control:");
     println!("  p=play  s=stop  l=toggle loop  m=toggle metronome");
     println!("  +=tempo up  -=tempo down  0=seek to start  q=quit");
     println!();
-    println!("Listen: pitch rises with beat (C3→E3→G3→B3), resets on loop!");
+    println!("16-beat sequence:  LOW(0-3)  HIGH(4-7)  MID(8-11)  DESCEND(12-15)");
+    println!("Loop range = beats 4-8, so loop ON repeats only the HIGH section.");
     println!();
 
-    // Note frequencies for C major arpeggio (C3, E3, G3, B3)
-    let notes = [130.81, 164.81, 196.00, 246.94];
+    // 16 beats with very distinct pitch regions
+    let notes: [f32; 16] = [
+        // Beats 0-3: LOW rumble
+        65.41, 73.42, 82.41, 98.00, // Beats 4-7: HIGH melody (this is the loop range)
+        523.25, 587.33, 659.25, 783.99, // Beats 8-11: MID range
+        220.00, 246.94, 261.63, 293.66, // Beats 12-15: DESCENDING
+        440.00, 349.23, 261.63, 196.00,
+    ];
+
+    let running = Arc::new(AtomicBool::new(true));
+    let running_bg = running.clone();
+    let freq_bg = freq.clone();
+    let transport_bg = engine.transport();
+    std::thread::spawn(move || {
+        while running_bg.load(Ordering::Relaxed) {
+            let beat = transport_bg.current_beat();
+            let beat_index = (beat.floor() as usize) % notes.len();
+            freq_bg.set(notes[beat_index]);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    });
 
     loop {
         let t = engine.transport();
-
-        // Update frequency based on current beat (creates arpeggio)
         let beat = t.current_beat();
-        let beat_index = (beat.floor() as usize) % 4;
-        freq.set(notes[beat_index]);
-
+        let section = match (beat.floor() as usize) % 16 {
+            0..=3 => "LOW",
+            4..=7 => "HIGH",
+            8..=11 => "MID",
+            _ => "DESC",
+        };
         print!(
-            "\r[beat:{:5.2} | {} BPM | loop:{} | metro:{}] > ",
+            "\r[beat:{:5.1} {} | {} BPM | loop:{} | metro:{}] > ",
             beat,
+            section,
             t.get_tempo(),
-            if t.is_loop_enabled() { "on" } else { "off" },
+            if t.is_loop_enabled() { "ON " } else { "off" },
             if t.metronome().get_mode() != tutti::MetronomeMode::Off {
-                "on"
+                "ON"
             } else {
                 "off"
             }
         );
         io::stdout().flush()?;
 
-        // Non-blocking input check with timeout
         let mut input = String::new();
         io::stdin().read_line(&mut input)?;
 
@@ -83,12 +101,7 @@ fn main() -> tutti::Result<()> {
                 engine.transport().stop();
             }
             "l" => {
-                let t = engine.transport();
-                if t.is_loop_enabled() {
-                    t.disable_loop();
-                } else {
-                    t.enable_loop();
-                }
+                engine.transport().toggle_loop();
             }
             "m" => {
                 let m = engine.transport().metronome();
@@ -114,5 +127,6 @@ fn main() -> tutti::Result<()> {
         }
     }
 
+    running.store(false, Ordering::Relaxed);
     Ok(())
 }

@@ -1,11 +1,11 @@
-//! # 17 - Plugin Loading
+//! # 22 - Plugin Loading
 //!
 //! Load and use VST3/CLAP plugins in the audio graph.
 //!
 //! **Concepts:** `vst3()`, in-process plugin hosting
 //!
 //! ```bash
-//! cargo run --example 17_plugin_loading --features plugin
+//! cargo run --example 22_plugin_loading --features plugin
 //! ```
 //!
 //! ## Setup
@@ -47,10 +47,10 @@ fn main() -> tutti::Result<()> {
         }
     };
 
-    let sine_id = engine.graph(|net: &mut TuttiNet| net.add(sine_hz::<f32>(440.0) * 0.3).id());
-    let reverb = engine.graph(|net: &mut TuttiNet| net.add_boxed(reverb_unit).id());
+    let sine_id = engine.graph_mut(|net: &mut TuttiNet| net.add(sine_hz::<f32>(440.0) * 0.3).id());
+    let reverb = engine.graph_mut(|net: &mut TuttiNet| net.add_boxed(reverb_unit).id());
 
-    engine.graph(|net: &mut TuttiNet| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         net.pipe(sine_id, reverb);
         net.pipe_output(reverb);
     });

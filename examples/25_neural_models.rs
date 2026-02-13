@@ -1,11 +1,11 @@
-//! # 19 - Neural Models
+//! # 25 - Neural Models
 //!
 //! Load and play pre-trained neural audio models (.mpk format).
 //!
 //! **Concepts:** `neural_synth`, Burn model format, GPU inference
 //!
 //! ```bash
-//! cargo run --example 19_neural_models --features neural,burn,midi
+//! cargo run --example 25_neural_models --features neural,burn,midi
 //! ```
 //!
 //! ## Setup
@@ -19,6 +19,7 @@
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
     let model_path = "assets/models/simple_synth.mpk";
@@ -29,12 +30,12 @@ fn main() -> tutti::Result<()> {
         return Ok(());
     }
 
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
     // New fluent API: engine.neural_synth(path).build() returns (Box<dyn AudioUnit>, NeuralModelId)
     let (synth_unit, _model_id) = engine.neural_synth(model_path).build()?;
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         net.add_boxed(synth_unit).master();
     });
 

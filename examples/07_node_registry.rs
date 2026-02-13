@@ -10,19 +10,19 @@
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder()
-        .sample_rate(44100.0)
-        .outputs(2)
-        .build()?;
+    let engine = TuttiEngine::builder().outputs(2).build()?;
 
     // Create nodes directly in the graph
-    let sine_id = engine.graph(|net| net.add(sine_hz::<f32>(440.0)).id());
-    let filter_id = engine.graph(|net| net.add(lowpass_hz::<f32>(2000.0, 1.0)).id());
-    let reverb_id = engine.graph(|net| net.add(reverb_stereo(0.7, 2.0, 0.5)).id());
+    let sine_id = engine.graph_mut(|net: &mut TuttiNet| net.add(sine_hz::<f32>(440.0)).id());
+    let filter_id =
+        engine.graph_mut(|net: &mut TuttiNet| net.add(lowpass_hz::<f32>(2000.0, 1.0)).id());
+    let reverb_id =
+        engine.graph_mut(|net: &mut TuttiNet| net.add(reverb_stereo(0.7, 2.0, 0.5)).id());
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         chain!(net, sine_id, filter_id, reverb_id => output);
     });
 

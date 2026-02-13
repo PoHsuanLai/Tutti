@@ -54,7 +54,7 @@ fn zero_crossings(samples: &[f32]) -> usize {
 fn test_triangle_oscillator() {
     let engine = test_engine();
     let synth = engine.synth().triangle().poly(1).build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -79,7 +79,7 @@ fn test_triangle_oscillator() {
 fn test_noise_oscillator() {
     let engine = test_engine();
     let synth = engine.synth().noise().poly(1).build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -117,7 +117,7 @@ fn test_oscillator_crest_factors() {
     // Sine wave
     let engine_sine = test_engine();
     let synth = engine_sine.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_sine.graph(|net| net.add(synth).master());
+    let synth_id = engine_sine.graph_mut(|net| net.add(synth).master());
     engine_sine.note_on(synth_id, Note::A4, 100);
 
     let (sine_out, _, _) = engine_sine
@@ -133,7 +133,7 @@ fn test_oscillator_crest_factors() {
     // Square wave (0.5 pulse width = standard square)
     let engine_square = test_engine();
     let synth = engine_square.synth().square(0.5).poly(1).build().unwrap();
-    let synth_id = engine_square.graph(|net| net.add(synth).master());
+    let synth_id = engine_square.graph_mut(|net| net.add(synth).master());
     engine_square.note_on(synth_id, Note::A4, 100);
 
     let (square_out, _, _) = engine_square
@@ -165,7 +165,7 @@ fn test_oscillator_crest_factors() {
 fn test_mono_mode() {
     let engine = test_engine();
     let synth = engine.synth().saw().mono().build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     // Play two notes - mono should only produce one voice
     engine.note_on(synth_id, Note::C4, 100);
@@ -185,7 +185,7 @@ fn test_mono_mode() {
     // Compare with poly mode playing same notes
     let engine_poly = test_engine();
     let synth = engine_poly.synth().saw().poly(4).build().unwrap();
-    let synth_id = engine_poly.graph(|net| net.add(synth).master());
+    let synth_id = engine_poly.graph_mut(|net| net.add(synth).master());
 
     engine_poly.note_on(synth_id, Note::C4, 100);
     engine_poly.note_on(synth_id, Note::E4, 100);
@@ -202,8 +202,16 @@ fn test_mono_mode() {
     let poly_rms = rms(&left_poly);
 
     // Both should produce audio
-    assert!(mono_rms > 0.01, "Mono synth should produce audio, RMS={}", mono_rms);
-    assert!(poly_rms > 0.01, "Poly synth should produce audio, RMS={}", poly_rms);
+    assert!(
+        mono_rms > 0.01,
+        "Mono synth should produce audio, RMS={}",
+        mono_rms
+    );
+    assert!(
+        poly_rms > 0.01,
+        "Poly synth should produce audio, RMS={}",
+        poly_rms
+    );
 
     // Poly with 2 notes should have higher RMS than mono with 1 voice
     assert!(
@@ -219,7 +227,7 @@ fn test_mono_mode() {
 fn test_legato_mode() {
     let engine = test_engine();
     let synth = engine.synth().saw().legato().build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -255,7 +263,7 @@ fn test_filter_moog() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -295,7 +303,7 @@ fn test_filter_lowpass() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -319,8 +327,14 @@ fn test_filter_lowpass() {
 fn test_filter_highpass() {
     // Low note without filter
     let engine_no_filter = test_engine();
-    let synth = engine_no_filter.synth().sine().no_filter().poly(1).build().unwrap();
-    let synth_id = engine_no_filter.graph(|net| net.add(synth).master());
+    let synth = engine_no_filter
+        .synth()
+        .sine()
+        .no_filter()
+        .poly(1)
+        .build()
+        .unwrap();
+    let synth_id = engine_no_filter.graph_mut(|net| net.add(synth).master());
 
     engine_no_filter.note_on(synth_id, Note::A2, 100); // ~110 Hz
 
@@ -341,7 +355,7 @@ fn test_filter_highpass() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine_filtered.graph(|net| net.add(synth).master());
+    let synth_id = engine_filtered.graph_mut(|net| net.add(synth).master());
 
     engine_filtered.note_on(synth_id, Note::A2, 100);
 
@@ -383,7 +397,7 @@ fn test_filter_bandpass() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -417,7 +431,7 @@ fn test_adsr_envelope() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -430,11 +444,15 @@ fn test_adsr_envelope() {
     engine.note_off(synth_id, Note::A4);
 
     // Check early vs late amplitude (after decay, should be at sustain level)
-    let early_rms = rms(&left[0..4800]); // First 0.1s at 48kHz
-    let late_rms = rms(&left[9600..14400]); // 0.2-0.3s (sustain phase)
+    let sr = engine.sample_rate();
+    let early_rms = rms(&left[0..(0.1 * sr) as usize]); // First 0.1s
+    let late_rms = rms(&left[(0.2 * sr) as usize..(0.3 * sr) as usize]); // 0.2-0.3s (sustain phase)
 
     assert!(early_rms > 0.01, "Synth should produce audio early");
-    assert!(late_rms > 0.01, "Synth should produce audio in sustain phase");
+    assert!(
+        late_rms > 0.01,
+        "Synth should produce audio in sustain phase"
+    );
 
     // With 0.5 sustain, late_rms should be roughly half of peak (after decay)
     // Allow tolerance for envelope shape variations
@@ -457,7 +475,7 @@ fn test_envelope_organ() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -470,8 +488,9 @@ fn test_envelope_organ() {
     engine.note_off(synth_id, Note::A4);
 
     // Organ envelope should have consistent amplitude throughout (full sustain)
-    let early_rms = rms(&left[0..4800]); // First 0.1s
-    let late_rms = rms(&left[4800..9600]); // Second 0.1s
+    let sr = engine.sample_rate();
+    let early_rms = rms(&left[0..(0.1 * sr) as usize]); // First 0.1s
+    let late_rms = rms(&left[(0.1 * sr) as usize..(0.2 * sr) as usize]); // Second 0.1s
 
     assert!(early_rms > 0.01, "Organ synth should produce audio");
 
@@ -501,7 +520,7 @@ fn test_envelope_pluck() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -514,8 +533,9 @@ fn test_envelope_pluck() {
     engine.note_off(synth_id, Note::A4);
 
     // Pluck should decay quickly - compare early vs late amplitude
-    let early_rms = rms(&left[0..2400]); // First 0.05s
-    let late_rms = rms(&left[9600..14400]); // 0.2-0.3s
+    let sr = engine.sample_rate();
+    let early_rms = rms(&left[0..(0.05 * sr) as usize]); // First 0.05s
+    let late_rms = rms(&left[(0.2 * sr) as usize..(0.3 * sr) as usize]); // 0.2-0.3s
 
     assert!(early_rms > 0.01, "Pluck synth should produce initial audio");
 
@@ -539,7 +559,7 @@ fn test_envelope_pad() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -556,7 +576,10 @@ fn test_envelope_pad() {
     let mid_rms = rms(&left[12000..19200]); // 0.25-0.4s (after attack)
 
     // Both should have audio
-    assert!(mid_rms > 0.01, "Pad synth should produce audio after attack phase");
+    assert!(
+        mid_rms > 0.01,
+        "Pad synth should produce audio after attack phase"
+    );
 
     // Pad has slow attack, so very early should be quieter than mid
     // (unless attack is very fast, in which case they'd be similar)
@@ -583,7 +606,7 @@ fn test_full_synth_chain() {
         .poly(4)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     // Play a chord
     engine.note_on(synth_id, Note::C4, 100);
@@ -615,7 +638,12 @@ fn test_synth_build_succeeds() {
     let _ = engine.synth().saw().poly(8).build().unwrap();
     let _ = engine.synth().square(0.25).mono().build().unwrap();
     let _ = engine.synth().triangle().legato().build().unwrap();
-    let _ = engine.synth().noise().filter_lowpass(2000.0, 0.7).build().unwrap();
+    let _ = engine
+        .synth()
+        .noise()
+        .filter_lowpass(2000.0, 0.7)
+        .build()
+        .unwrap();
 }
 
 // =============================================================================
@@ -628,7 +656,7 @@ fn test_unison_thicker_sound() {
     // Without unison
     let engine_no_unison = test_engine();
     let synth = engine_no_unison.synth().saw().poly(1).build().unwrap();
-    let synth_id = engine_no_unison.graph(|net| net.add(synth).master());
+    let synth_id = engine_no_unison.graph_mut(|net| net.add(synth).master());
 
     engine_no_unison.note_on(synth_id, Note::A4, 100);
 
@@ -651,7 +679,7 @@ fn test_unison_thicker_sound() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine_unison.graph(|net| net.add(synth).master());
+    let synth_id = engine_unison.graph_mut(|net| net.add(synth).master());
 
     engine_unison.note_on(synth_id, Note::A4, 100);
 
@@ -681,7 +709,7 @@ fn test_unison_stereo_spread() {
         .poly(1)
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A4, 100);
 
@@ -728,7 +756,7 @@ fn test_portamento_produces_audio() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -758,7 +786,7 @@ fn test_portamento_legato() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -787,7 +815,7 @@ fn test_portamento_exponential() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::C4, 100);
 
@@ -823,7 +851,7 @@ fn test_combined_unison_portamento_filter() {
         .mono()
         .build()
         .unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     engine.note_on(synth_id, Note::A3, 100);
 
@@ -835,6 +863,12 @@ fn test_combined_unison_portamento_filter() {
 
     engine.note_off(synth_id, Note::A3);
 
-    assert!(rms(&left) > 0.01, "Combined synth should produce left audio");
-    assert!(rms(&right) > 0.01, "Combined synth should produce right audio");
+    assert!(
+        rms(&left) > 0.01,
+        "Combined synth should produce left audio"
+    );
+    assert!(
+        rms(&right) > 0.01,
+        "Combined synth should produce right audio"
+    );
 }

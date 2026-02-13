@@ -1,20 +1,21 @@
-//! # 13 - Export
+//! # 10 - Export
 //!
 //! Render audio to file: WAV, FLAC, MP3 with normalization options.
 //!
 //! **Concepts:** `export()`, `AudioFormat`, `NormalizationMode`, progress callback
 //!
 //! ```bash
-//! cargo run --example 13_export --features export
+//! cargo run --example 10_export --features export
 //! ```
 
 use tutti::export::ExportPhase;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         let c = sine_hz::<f64>(261.63) * 0.2;
         let e = sine_hz::<f64>(329.63) * 0.2;
         let g = sine_hz::<f64>(392.00) * 0.2;

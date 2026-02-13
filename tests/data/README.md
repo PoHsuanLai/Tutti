@@ -26,7 +26,7 @@ use helpers::{save_reference_wav, generate_sine};
 
 // In a test or script:
 let engine = test_engine();
-engine.graph(|net| {
+engine.graph_mut(|net| {
     // Your DSP chain here
 });
 

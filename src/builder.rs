@@ -53,6 +53,9 @@ pub struct TuttiEngineBuilder {
     #[cfg(feature = "midi")]
     enable_midi: bool,
 
+    #[cfg(feature = "mpe")]
+    mpe_mode: Option<tutti_midi_io::MpeMode>,
+
     #[cfg(feature = "neural")]
     neural_backend_factory: Option<tutti_core::BackendFactory>,
 }
@@ -66,6 +69,9 @@ impl Default for TuttiEngineBuilder {
 
             #[cfg(feature = "midi")]
             enable_midi: false,
+
+            #[cfg(feature = "mpe")]
+            mpe_mode: None,
 
             #[cfg(feature = "neural")]
             neural_backend_factory: None,
@@ -99,6 +105,15 @@ impl TuttiEngineBuilder {
         self
     }
 
+    /// Enable MPE (MIDI Polyphonic Expression) with the given zone configuration.
+    /// Automatically enables the MIDI subsystem.
+    #[cfg(feature = "mpe")]
+    pub fn mpe(mut self, mode: tutti_midi_io::MpeMode) -> Self {
+        self.mpe_mode = Some(mode);
+        self.enable_midi = true;
+        self
+    }
+
     /// Set a custom neural inference backend factory.
     ///
     /// Use this to provide your own inference backend (e.g. ONNX Runtime, candle)
@@ -126,15 +141,15 @@ impl TuttiEngineBuilder {
         let midi = if self.enable_midi {
             #[allow(unused_mut)]
             let mut builder = MidiSystem::builder();
-            #[cfg(feature = "midi-io")]
+            #[cfg(feature = "midi-hardware")]
             {
                 builder = builder.io();
             }
-            Some(Arc::new(
-                builder
-                    .build()
-                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
-            ))
+            #[cfg(feature = "mpe")]
+            if let Some(mode) = self.mpe_mode {
+                builder = builder.mpe(mode);
+            }
+            Some(Arc::new(builder.build()?))
         } else {
             None
         };
@@ -160,21 +175,21 @@ impl TuttiEngineBuilder {
 
         let core = core_builder.build()?;
 
-        #[cfg(any(feature = "sampler", feature = "soundfont"))]
+        #[cfg(any(feature = "sampler", feature = "soundfont", feature = "neural"))]
         let sample_rate = core.sample_rate();
 
         // Build sampler subsystem (always enabled when feature is compiled)
         #[cfg(feature = "sampler")]
         let sampler = Arc::new(
             SamplerSystem::builder(sample_rate)
-                .build()
-                .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
+                .pdc_manager(core.pdc().clone())
+                .build()?,
         );
 
         // Build neural subsystem (always enabled when feature is compiled)
         #[cfg(feature = "neural")]
         let neural = {
-            let mut builder = NeuralSystem::builder();
+            let mut builder = NeuralSystem::builder().sample_rate(sample_rate as f32);
 
             // Use custom backend if provided, otherwise use Burn if available
             if let Some(factory) = self.neural_backend_factory {
@@ -186,11 +201,7 @@ impl TuttiEngineBuilder {
                 }
             }
 
-            Arc::new(
-                builder
-                    .build()
-                    .map_err(|e| crate::Error::InvalidConfig(e.to_string()))?,
-            )
+            Arc::new(builder.build()?)
         };
 
         // Build SoundFont manager (always enabled when feature is compiled)

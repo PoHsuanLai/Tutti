@@ -39,7 +39,7 @@ fn test_export_builder() {
     let engine = test_engine();
 
     // Add a simple signal
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -53,7 +53,7 @@ fn test_export_builder() {
 fn test_export_duration_seconds() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -69,7 +69,7 @@ fn test_export_duration_seconds() {
 fn test_export_duration_beats() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -86,15 +86,12 @@ fn test_export_to_wav() {
     let dir = setup_temp_dir("to_wav");
     let output_path = dir.join("test_output.wav");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     // Export 0.5 seconds to WAV
-    let result = engine
-        .export()
-        .duration_seconds(0.5)
-        .to_file(&output_path);
+    let result = engine.export().duration_seconds(0.5).to_file(&output_path);
 
     // Check result
     match result {
@@ -103,7 +100,10 @@ fn test_export_to_wav() {
             assert!(output_path.exists(), "WAV file should exist");
             // Verify file has content
             let metadata = std::fs::metadata(&output_path).unwrap();
-            assert!(metadata.len() > 44, "WAV file should have data beyond header");
+            assert!(
+                metadata.len() > 44,
+                "WAV file should have data beyond header"
+            );
         }
         Err(e) => {
             // Export might fail if format not supported - that's acceptable
@@ -123,10 +123,7 @@ fn test_export_empty_graph() {
 
     // No nodes added - should export silence
 
-    let result = engine
-        .export()
-        .duration_seconds(0.25)
-        .to_file(&output_path);
+    let result = engine.export().duration_seconds(0.25).to_file(&output_path);
 
     // Should succeed (exports silence)
     if result.is_ok() {
@@ -143,22 +140,22 @@ fn test_export_complex_graph() {
     let dir = setup_temp_dir("complex_graph");
     let output_path = dir.join("test_complex.wav");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         // Multiple sources mixed
         net.add(sine_hz::<f64>(220.0) * 0.2).master();
         net.add(sine_hz::<f64>(440.0) * 0.15).master();
         net.add(sine_hz::<f64>(880.0) * 0.1).master();
     });
 
-    let result = engine
-        .export()
-        .duration_seconds(0.5)
-        .to_file(&output_path);
+    let result = engine.export().duration_seconds(0.5).to_file(&output_path);
 
     if result.is_ok() {
         assert!(output_path.exists());
         let metadata = std::fs::metadata(&output_path).unwrap();
-        assert!(metadata.len() > 1000, "Complex export should have significant data");
+        assert!(
+            metadata.len() > 1000,
+            "Complex export should have significant data"
+        );
     }
 
     cleanup_temp_dir("complex_graph");
@@ -169,15 +166,12 @@ fn test_export_complex_graph() {
 fn test_export_render() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
     // Render to buffer
-    let result = engine
-        .export()
-        .duration_seconds(0.25)
-        .render();
+    let result = engine.export().duration_seconds(0.25).render();
 
     match result {
         Ok((left, right, sample_rate)) => {
@@ -185,7 +179,10 @@ fn test_export_render() {
             assert!(!left.is_empty(), "Left channel should have samples");
             assert!(!right.is_empty(), "Right channel should have samples");
             // At 48kHz, 0.25s = 12000 samples per channel
-            assert!(left.len() >= 10000, "Should have at least ~10k samples per channel");
+            assert!(
+                left.len() >= 10000,
+                "Should have at least ~10k samples per channel"
+            );
             assert!(sample_rate > 0.0, "Sample rate should be valid");
         }
         Err(e) => {
@@ -200,17 +197,14 @@ fn test_export_sequential() {
     let engine = test_engine();
     let dir = setup_temp_dir("sequential");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
     // Export multiple files
     for i in 0..3 {
         let output_path = dir.join(format!("test_seq_{}.wav", i));
-        let _ = engine
-            .export()
-            .duration_seconds(0.1)
-            .to_file(&output_path);
+        let _ = engine.export().duration_seconds(0.1).to_file(&output_path);
     }
 
     cleanup_temp_dir("sequential");
@@ -223,7 +217,7 @@ fn test_export_during_playback() {
     let dir = setup_temp_dir("during_playback");
     let output_path = dir.join("test_during_play.wav");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
@@ -232,10 +226,7 @@ fn test_export_during_playback() {
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Export while playing
-    let _ = engine
-        .export()
-        .duration_seconds(0.25)
-        .to_file(&output_path);
+    let _ = engine.export().duration_seconds(0.25).to_file(&output_path);
 
     // Playback should still work
     assert!(engine.is_running());
@@ -251,7 +242,7 @@ fn test_export_format() {
     let dir = setup_temp_dir("format");
     let output_path = dir.join("test_format.wav");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
@@ -277,7 +268,7 @@ fn test_export_latency_compensation() {
     let dir = setup_temp_dir("latency_comp");
     let output_path = dir.join("test_latency.wav");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
@@ -290,7 +281,10 @@ fn test_export_latency_compensation() {
     // Check if export succeeded - latency compensation may not be supported
     match result {
         Ok(_) => assert!(output_path.exists()),
-        Err(e) => println!("Export with latency compensation failed (may be expected): {:?}", e),
+        Err(e) => println!(
+            "Export with latency compensation failed (may be expected): {:?}",
+            e
+        ),
     }
 
     cleanup_temp_dir("latency_comp");
@@ -303,7 +297,7 @@ fn test_export_to_flac() {
     let dir = setup_temp_dir("to_flac");
     let output_path = dir.join("test_output.flac");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 
@@ -334,7 +328,7 @@ fn test_export_with_normalization() {
     let dir = setup_temp_dir("normalization");
     let output_path = dir.join("test_normalized.wav");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         // Quiet signal that should be normalized up
         net.add(sine_hz::<f64>(440.0) * 0.1).master();
     });
@@ -364,7 +358,7 @@ fn test_export_bit_depth() {
     let dir = setup_temp_dir("bit_depth");
     let output_path = dir.join("test_16bit.wav");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.3).master();
     });
 

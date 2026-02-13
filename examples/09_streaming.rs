@@ -1,15 +1,16 @@
-//! # 14 - Streaming
+//! # 09 - Streaming
 //!
 //! Stream large audio files from disk using the Butler thread.
 //!
 //! **Concepts:** `sampler()`, `stream()`, Butler thread, disk I/O
 //!
 //! ```bash
-//! cargo run --example 14_streaming --features sampler
+//! cargo run --example 09_streaming --features sampler
 //! ```
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let audio_path =
@@ -21,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return run_synth_demo();
     }
 
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
     let sampler = engine.sampler();
     if !sampler.is_enabled() {
@@ -42,9 +43,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn run_synth_demo() -> Result<(), Box<dyn std::error::Error>> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         let pad = sine_hz::<f64>(220.0) * 0.2 + sine_hz::<f64>(330.0) * 0.15;
         net.add(pad >> split::<U2>()).master();
     });

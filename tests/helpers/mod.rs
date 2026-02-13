@@ -30,7 +30,6 @@ pub fn test_engine() -> TuttiEngine {
         .expect("Failed to create test engine")
 }
 
-
 /// Generate a test signal: sine wave at given frequency for specified samples.
 pub fn generate_sine(frequency: f64, sample_rate: f64, num_samples: usize) -> Vec<f32> {
     (0..num_samples)
@@ -80,7 +79,9 @@ pub fn signals_approx_equal(a: &[f32], b: &[f32], tolerance: f32) -> bool {
     if a.len() != b.len() {
         return false;
     }
-    a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() <= tolerance)
+    a.iter()
+        .zip(b.iter())
+        .all(|(x, y)| (x - y).abs() <= tolerance)
 }
 
 /// Assert that a signal is approximately silent (all values near zero).
@@ -119,11 +120,7 @@ pub fn wait_for_beat(engine: &TuttiEngine, target_beat: f64, max_wait_ms: u64) -
 }
 
 /// Transport test helper - wait for transport state.
-pub fn wait_for_state(
-    engine: &TuttiEngine,
-    expected_playing: bool,
-    max_wait_ms: u64,
-) -> bool {
+pub fn wait_for_state(engine: &TuttiEngine, expected_playing: bool, max_wait_ms: u64) -> bool {
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_millis(max_wait_ms);
 
@@ -200,9 +197,7 @@ pub fn generate_ramp(start: f32, end: f32, num_samples: usize) -> Vec<f32> {
         return vec![start; num_samples];
     }
     let step = (end - start) / (num_samples - 1) as f32;
-    (0..num_samples)
-        .map(|i| start + step * i as f32)
-        .collect()
+    (0..num_samples).map(|i| start + step * i as f32).collect()
 }
 
 // =============================================================================
@@ -396,7 +391,8 @@ pub fn load_reference_wav(name: &str) -> Result<(Vec<f32>, Vec<f32>, u32), Strin
 pub fn load_wav_file(path: &Path) -> Result<(Vec<f32>, Vec<f32>, u32), String> {
     use hound::WavReader;
 
-    let reader = WavReader::open(path).map_err(|e| format!("Failed to open WAV '{}': {}", path.display(), e))?;
+    let reader = WavReader::open(path)
+        .map_err(|e| format!("Failed to open WAV '{}': {}", path.display(), e))?;
 
     let spec = reader.spec();
     let sample_rate = spec.sample_rate;

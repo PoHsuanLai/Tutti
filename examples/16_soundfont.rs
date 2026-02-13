@@ -1,15 +1,16 @@
-//! # 11 - SoundFont
+//! # 16 - SoundFont
 //!
 //! Load and play SoundFont (.sf2) instruments with MIDI.
 //!
 //! **Concepts:** `engine.sf2()`, `note_on`, `note_off`, SoundFont presets
 //!
 //! ```bash
-//! cargo run --example 11_soundfont --features soundfont
+//! cargo run --example 16_soundfont --features soundfont
 //! ```
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
     let soundfont_path = std::env::var("SOUNDFONT_PATH")
@@ -21,14 +22,11 @@ fn main() -> tutti::Result<()> {
         return Ok(());
     }
 
-    let engine = TuttiEngine::builder()
-        .sample_rate(44100.0)
-        .outputs(2)
-        .build()?;
+    let engine = TuttiEngine::builder().outputs(2).build()?;
 
     // New fluent API: engine.sf2(path).preset(n).build() returns SoundFontUnit
     let piano = engine.sf2(&soundfont_path).preset(0).build()?;
-    let synth = engine.graph(|net| net.add(piano).master());
+    let synth = engine.graph_mut(|net: &mut TuttiNet| net.add(piano).master());
 
     engine.transport().play();
     println!("Playing melody...");

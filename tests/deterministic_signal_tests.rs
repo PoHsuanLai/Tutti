@@ -46,7 +46,7 @@ fn test_staircase_render() {
 fn test_render_sample_count() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0)).master();
     });
 
@@ -178,7 +178,7 @@ fn test_ramp_descending() {
 fn test_unity_gain_amplitude() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 1.0).master();
     });
 
@@ -201,7 +201,7 @@ fn test_unity_gain_amplitude() {
 fn test_half_gain_amplitude() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -224,7 +224,7 @@ fn test_half_gain_amplitude() {
 fn test_zero_gain_silence() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.0).master();
     });
 
@@ -242,7 +242,7 @@ fn test_zero_gain_silence() {
 fn test_double_gain() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 2.0).master();
     });
 
@@ -254,11 +254,7 @@ fn test_double_gain() {
 
     // Peak should be ~2.0 (no built-in limiter)
     let p = peak(&left);
-    assert!(
-        p > 1.5,
-        "Double gain should produce peak > 1.5, got {}",
-        p
-    );
+    assert!(p > 1.5, "Double gain should produce peak > 1.5, got {}", p);
 }
 
 // =============================================================================

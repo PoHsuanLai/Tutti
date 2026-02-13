@@ -14,3 +14,6 @@ Cargo.lock
 # OS
 .DS_Store
 Thumbs.db
+
+# Test fixtures (large binaries)
+tests/fixtures/plugins/

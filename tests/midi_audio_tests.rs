@@ -54,7 +54,7 @@ fn test_midi_note_frequency() {
     let engine = test_engine();
 
     let synth = engine.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net| net.add(synth).master());
 
     // Send note BEFORE export (don't call transport.play() - it would consume events)
     engine.note_on(synth_id, Note::A4, 100);
@@ -86,7 +86,7 @@ fn test_midi_octave_relationship() {
     // C4 = 261.63 Hz
     let engine_c4 = test_engine();
     let synth_c4 = engine_c4.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_c4.graph(|net| net.add(synth_c4).master());
+    let synth_id = engine_c4.graph_mut(|net| net.add(synth_c4).master());
 
     engine_c4.note_on(synth_id, Note::C4, 100);
 
@@ -103,7 +103,7 @@ fn test_midi_octave_relationship() {
     // C5 = 523.25 Hz (should be 2x C4)
     let engine_c5 = test_engine();
     let synth_c5 = engine_c5.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_c5.graph(|net| net.add(synth_c5).master());
+    let synth_id = engine_c5.graph_mut(|net| net.add(synth_c5).master());
 
     engine_c5.note_on(synth_id, Note::C5, 100);
 
@@ -137,7 +137,7 @@ fn test_midi_velocity_amplitude() {
     // Low velocity (40)
     let engine_low = test_engine();
     let synth_low = engine_low.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_low.graph(|net| net.add(synth_low).master());
+    let synth_id = engine_low.graph_mut(|net| net.add(synth_low).master());
 
     engine_low.note_on(synth_id, Note::C4, 40); // Low velocity
 
@@ -154,7 +154,7 @@ fn test_midi_velocity_amplitude() {
     // High velocity (127)
     let engine_high = test_engine();
     let synth_high = engine_high.synth().sine().poly(1).build().unwrap();
-    let synth_id = engine_high.graph(|net| net.add(synth_high).master());
+    let synth_id = engine_high.graph_mut(|net| net.add(synth_high).master());
 
     engine_high.note_on(synth_id, Note::C4, 127); // Max velocity
 
@@ -169,8 +169,16 @@ fn test_midi_velocity_amplitude() {
     let rms_high = rms(&left_high);
 
     // Both should produce audio
-    assert!(rms_low > 0.001, "Low velocity should produce audio, RMS={}", rms_low);
-    assert!(rms_high > 0.001, "High velocity should produce audio, RMS={}", rms_high);
+    assert!(
+        rms_low > 0.001,
+        "Low velocity should produce audio, RMS={}",
+        rms_low
+    );
+    assert!(
+        rms_high > 0.001,
+        "High velocity should produce audio, RMS={}",
+        rms_high
+    );
 
     // High velocity should be louder than or equal to low velocity
     // (current PolySynth implementation may not have velocity sensitivity)
@@ -188,7 +196,7 @@ fn test_midi_chord_amplitude() {
     // Single note
     let engine_single = test_engine();
     let synth_single = engine_single.synth().sine().poly(4).build().unwrap();
-    let synth_id = engine_single.graph(|net| net.add(synth_single).master());
+    let synth_id = engine_single.graph_mut(|net| net.add(synth_single).master());
 
     engine_single.note_on(synth_id, Note::C4, 100);
 
@@ -205,7 +213,7 @@ fn test_midi_chord_amplitude() {
     // C major chord (C4, E4, G4)
     let engine_chord = test_engine();
     let synth_chord = engine_chord.synth().sine().poly(4).build().unwrap();
-    let synth_id = engine_chord.graph(|net| net.add(synth_chord).master());
+    let synth_id = engine_chord.graph_mut(|net| net.add(synth_chord).master());
 
     engine_chord.note_on(synth_id, Note::C4, 100);
     engine_chord.note_on(synth_id, Note::E4, 100);
@@ -224,8 +232,16 @@ fn test_midi_chord_amplitude() {
     let rms_chord = rms(&left_chord);
 
     // Both should produce audio
-    assert!(rms_single > 0.001, "Single note should produce audio, RMS={}", rms_single);
-    assert!(rms_chord > 0.001, "Chord should produce audio, RMS={}", rms_chord);
+    assert!(
+        rms_single > 0.001,
+        "Single note should produce audio, RMS={}",
+        rms_single
+    );
+    assert!(
+        rms_chord > 0.001,
+        "Chord should produce audio, RMS={}",
+        rms_chord
+    );
 
     // Chord (3 notes) should have higher RMS than single note
     // Due to phase relationships, it won't be exactly 3x, but should be more

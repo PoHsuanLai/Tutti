@@ -28,7 +28,7 @@ fn test_meter_amplitude_accuracy() {
     engine.metering().amp();
 
     // 0.5 amplitude sine wave
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -78,7 +78,7 @@ fn test_meter_correlation_mono() {
     engine.metering().correlation();
 
     // Mono source (identical L/R)
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -105,7 +105,7 @@ fn test_meter_silence() {
     engine.metering().amp();
 
     // No audio source - should be silent
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(zero()).master();
     });
 

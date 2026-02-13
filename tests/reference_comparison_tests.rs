@@ -30,7 +30,7 @@ use tutti::prelude::*;
 fn test_sine_vs_programmatic_reference() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0)).master();
     });
 
@@ -67,7 +67,7 @@ fn test_sine_vs_programmatic_reference() {
 fn test_scaled_sine_vs_reference() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(1000.0) * 0.5).master();
     });
 
@@ -99,7 +99,7 @@ fn test_scaled_sine_vs_reference() {
 #[test]
 fn test_render_determinism() {
     let engine1 = test_engine();
-    engine1.graph(|net| {
+    engine1.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -110,7 +110,7 @@ fn test_render_determinism() {
         .expect("Render 1 failed");
 
     let engine2 = test_engine();
-    engine2.graph(|net| {
+    engine2.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -148,7 +148,11 @@ fn test_load_reference_file() {
 
     assert!(ref_sr > 0, "Reference should have valid sample rate");
     assert!(!ref_left.is_empty(), "Reference should have samples");
-    assert_eq!(ref_left.len(), ref_right.len(), "Stereo channels should match");
+    assert_eq!(
+        ref_left.len(),
+        ref_right.len(),
+        "Stereo channels should match"
+    );
 }
 
 /// Regression test for filter chain.
@@ -158,7 +162,7 @@ fn test_load_reference_file() {
 fn test_filter_chain_regression() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         // Deterministic DSP chain
         let chain = sine_hz::<f64>(440.0) >> lowpole_hz(1000.0) >> highpole_hz(100.0) * 0.5;
         net.add(chain).master();
@@ -180,14 +184,12 @@ fn test_filter_chain_regression() {
     assert!(
         left_result.equal,
         "Left channel differs from reference: max_diff={}, at sample {:?}",
-        left_result.max_diff,
-        left_result.first_diff_sample
+        left_result.max_diff, left_result.first_diff_sample
     );
     assert!(
         right_result.equal,
         "Right channel differs from reference: max_diff={}, at sample {:?}",
-        right_result.max_diff,
-        right_result.first_diff_sample
+        right_result.max_diff, right_result.first_diff_sample
     );
 }
 
@@ -209,7 +211,7 @@ fn generate_reference_files() {
     // Generate sine reference
     {
         let engine = test_engine();
-        engine.graph(|net| {
+        engine.graph_mut(|net| {
             net.add(sine_hz::<f64>(440.0) * 0.5).master();
         });
 
@@ -227,7 +229,7 @@ fn generate_reference_files() {
     // Generate filter chain reference
     {
         let engine = test_engine();
-        engine.graph(|net| {
+        engine.graph_mut(|net| {
             let chain = sine_hz::<f64>(440.0) >> lowpole_hz(1000.0) >> highpole_hz(100.0) * 0.5;
             net.add(chain).master();
         });
@@ -238,8 +240,13 @@ fn generate_reference_files() {
             .render()
             .expect("Render failed");
 
-        save_reference_wav("regression/filter_chain_v0_1_0.wav", &left, &right, sr as u32)
-            .expect("Failed to save reference");
+        save_reference_wav(
+            "regression/filter_chain_v0_1_0.wav",
+            &left,
+            &right,
+            sr as u32,
+        )
+        .expect("Failed to save reference");
         println!("Generated: regression/filter_chain_v0_1_0.wav");
     }
 
@@ -255,7 +262,7 @@ fn generate_reference_files() {
 fn test_mono_to_stereo() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -274,7 +281,7 @@ fn test_mono_to_stereo() {
 fn test_stereo_difference() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         // Different frequencies for L and R
         let stereo = sine_hz::<f64>(440.0) | sine_hz::<f64>(880.0);
         net.add(stereo * 0.5).master();
@@ -389,7 +396,7 @@ fn test_engine_render_wav_file_round_trip() {
 
     // Render from engine
     let engine = test_engine();
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -449,7 +456,7 @@ fn test_full_engine_round_trip() {
 
     // Step 1: Render original audio from engine
     let engine1 = test_engine();
-    engine1.graph(|net| {
+    engine1.graph_mut(|net| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 
@@ -479,7 +486,7 @@ fn test_full_engine_round_trip() {
         .build()
         .expect("Failed to load WAV into engine");
 
-    engine2.graph(|net| {
+    engine2.graph_mut(|net| {
         net.add(sampler).master();
     });
 
@@ -501,14 +508,26 @@ fn test_full_engine_round_trip() {
     // Note: Sample lengths might differ slightly due to buffer alignment
     let compare_len = std::cmp::min(original_left.len(), loaded_left.len());
 
-    let left_result = compare_audio(&original_left[..compare_len], &loaded_left[..compare_len], DSP_EPSILON);
-    let right_result = compare_audio(&original_right[..compare_len], &loaded_right[..compare_len], DSP_EPSILON);
+    let left_result = compare_audio(
+        &original_left[..compare_len],
+        &loaded_left[..compare_len],
+        DSP_EPSILON,
+    );
+    let right_result = compare_audio(
+        &original_right[..compare_len],
+        &loaded_right[..compare_len],
+        DSP_EPSILON,
+    );
 
     println!("\nComparison ({} samples):", compare_len);
-    println!("Left - max_diff: {:.2e}, mean_diff: {:.2e}, diffs: {}",
-             left_result.max_diff, left_result.mean_diff, left_result.num_diffs);
-    println!("Right - max_diff: {:.2e}, mean_diff: {:.2e}, diffs: {}",
-             right_result.max_diff, right_result.mean_diff, right_result.num_diffs);
+    println!(
+        "Left - max_diff: {:.2e}, mean_diff: {:.2e}, diffs: {}",
+        left_result.max_diff, left_result.mean_diff, left_result.num_diffs
+    );
+    println!(
+        "Right - max_diff: {:.2e}, mean_diff: {:.2e}, diffs: {}",
+        right_result.max_diff, right_result.mean_diff, right_result.num_diffs
+    );
 
     // Allow DSP_EPSILON tolerance for the full round-trip
     // (WAV loading may involve resampling, format conversion, etc.)

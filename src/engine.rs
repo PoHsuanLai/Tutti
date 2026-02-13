@@ -11,7 +11,12 @@ use tutti_core::Arc;
 #[cfg(all(feature = "synth", feature = "midi"))]
 use tutti_synth::SynthHandle;
 
-#[cfg(any(feature = "sampler", feature = "plugin", feature = "soundfont"))]
+#[cfg(any(
+    feature = "sampler",
+    feature = "plugin",
+    feature = "soundfont",
+    feature = "neural"
+))]
 use std::path::{Path, PathBuf};
 
 use tutti_core::compat::Mutex;
@@ -19,10 +24,10 @@ use tutti_core::compat::Mutex;
 #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
 use tutti_core::compat::HashMap;
 
-#[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
-use tutti_core::Wave;
 #[cfg(feature = "analysis")]
 use std::thread::JoinHandle;
+#[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
+use tutti_core::Wave;
 
 #[cfg(feature = "midi")]
 use crate::core::MidiRoutingTable;
@@ -63,7 +68,7 @@ use crate::neural::{NeuralHandle, NeuralSystem};
 /// let sampler = engine.sampler();
 /// let neural = engine.neural();
 ///
-/// engine.graph(|net| {
+/// engine.graph_mut(|net| {
 ///     let osc = net.add(Box::new(sine_hz(440.0)));
 ///     net.pipe_output(osc);
 /// });
@@ -130,13 +135,13 @@ impl TuttiEngine {
     /// List available output devices
     #[cfg(feature = "std")]
     pub fn list_output_devices() -> Result<Vec<String>> {
-        TuttiSystem::list_output_devices()
+        Ok(TuttiSystem::list_output_devices()?)
     }
 
     /// Get current output device name
     #[cfg(feature = "std")]
     pub fn current_output_device_name(&self) -> Result<String> {
-        self.core.current_output_device_name()
+        Ok(self.core.current_output_device_name()?)
     }
 
     /// Set output device
@@ -151,20 +156,37 @@ impl TuttiEngine {
         self.core.channels()
     }
 
-    /// Modify the DSP graph
+    /// Access the DSP graph for reading, querying, or side-effects.
     ///
-    /// # Example
-    /// ```ignore
-    /// engine.graph(|net| {
-    ///     let node = net.add(Box::new(sine_hz(440.0)));
-    ///     net.pipe_output(node);
-    /// });
-    /// ```
+    /// Does **not** commit changes to the audio thread. Use for
+    /// operations that don't change graph structure (querying nodes,
+    /// queueing MIDI events, cloning data for export).
+    ///
+    /// For structural changes, use [`graph_mut`].
     pub fn graph<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut TuttiNet) -> R,
     {
         self.core.graph(f)
+    }
+
+    /// Modify the DSP graph and auto-commit to the audio thread.
+    ///
+    /// Use for structural changes: adding/removing nodes,
+    /// connecting/disconnecting, resetting the graph.
+    ///
+    /// # Example
+    /// ```ignore
+    /// engine.graph_mut(|net| {
+    ///     let node = net.add(Box::new(sine_hz(440.0)));
+    ///     net.pipe_output(node);
+    /// });
+    /// ```
+    pub fn graph_mut<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut TuttiNet) -> R,
+    {
+        self.core.graph_mut(f)
     }
 
     /// Get fluent transport API handle.
@@ -243,7 +265,7 @@ impl TuttiEngine {
     /// let comp = engine.create("comp", &params! {})?;
     ///
     /// // Use in audio graph
-    /// engine.graph(|net| {
+    /// engine.graph_mut(|net| {
     ///     chain!(net, lfo, env, comp => output);
     /// });
     /// ```
@@ -268,7 +290,7 @@ impl TuttiEngine {
     ///     .adsr(0.01, 0.2, 0.6, 0.3)     // envelope
     ///     .build()?;
     ///
-    /// let synth_id = engine.graph(|net| net.add(synth).master());
+    /// let synth_id = engine.graph_mut(|net| net.add(synth).master());
     ///
     /// engine.note_on(synth_id, 0, 60, 100);  // Play middle C
     /// ```
@@ -292,7 +314,7 @@ impl TuttiEngine {
     ///
     /// ```ignore
     /// let piano = engine.sf2("piano.sf2").preset(0).build()?;
-    /// engine.graph(|net| net.add(piano).master());
+    /// engine.graph_mut(|net| net.add(piano).master());
     /// ```
     #[cfg(feature = "soundfont")]
     pub fn sf2(&self, path: impl AsRef<Path>) -> crate::builders::Sf2Builder<'_> {
@@ -308,11 +330,11 @@ impl TuttiEngine {
     ///
     /// ```ignore
     /// let kick = engine.wav("kick.wav").gain(0.8).build()?;
-    /// engine.graph(|net| net.add(kick).master());
+    /// engine.graph_mut(|net| net.add(kick).master());
     /// ```
     #[cfg(all(feature = "sampler", feature = "wav"))]
-    pub fn wav(&self, path: impl AsRef<Path>) -> crate::builders::WavBuilder<'_> {
-        crate::builders::WavBuilder::new(self, path.as_ref().to_path_buf())
+    pub fn wav(&self, path: impl AsRef<Path>) -> crate::builders::SampleBuilder<'_> {
+        crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
     }
 
     /// Load a FLAC audio sample.
@@ -320,8 +342,8 @@ impl TuttiEngine {
     /// Returns a fluent builder for configuring gain, speed, and looping.
     /// Call `.build()` to get a `SamplerUnit`. The audio file is loaded and cached.
     #[cfg(all(feature = "sampler", feature = "flac"))]
-    pub fn flac(&self, path: impl AsRef<Path>) -> crate::builders::FlacBuilder<'_> {
-        crate::builders::FlacBuilder::new(self, path.as_ref().to_path_buf())
+    pub fn flac(&self, path: impl AsRef<Path>) -> crate::builders::SampleBuilder<'_> {
+        crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
     }
 
     /// Load an MP3 audio sample.
@@ -329,8 +351,8 @@ impl TuttiEngine {
     /// Returns a fluent builder for configuring gain, speed, and looping.
     /// Call `.build()` to get a `SamplerUnit`. The audio file is loaded and cached.
     #[cfg(all(feature = "sampler", feature = "mp3"))]
-    pub fn mp3(&self, path: impl AsRef<Path>) -> crate::builders::Mp3Builder<'_> {
-        crate::builders::Mp3Builder::new(self, path.as_ref().to_path_buf())
+    pub fn mp3(&self, path: impl AsRef<Path>) -> crate::builders::SampleBuilder<'_> {
+        crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
     }
 
     /// Load an OGG Vorbis audio sample.
@@ -338,8 +360,8 @@ impl TuttiEngine {
     /// Returns a fluent builder for configuring gain, speed, and looping.
     /// Call `.build()` to get a `SamplerUnit`. The audio file is loaded and cached.
     #[cfg(all(feature = "sampler", feature = "ogg"))]
-    pub fn ogg(&self, path: impl AsRef<Path>) -> crate::builders::OggBuilder<'_> {
-        crate::builders::OggBuilder::new(self, path.as_ref().to_path_buf())
+    pub fn ogg(&self, path: impl AsRef<Path>) -> crate::builders::SampleBuilder<'_> {
+        crate::builders::SampleBuilder::new(self, path.as_ref().to_path_buf())
     }
 
     /// Load a VST3 plugin.
@@ -353,23 +375,23 @@ impl TuttiEngine {
     /// let (reverb, _handle) = engine.vst3("Reverb.vst3")
     ///     .param("room_size", 0.8)
     ///     .build()?;
-    /// engine.graph(|net| net.add_boxed(reverb).master());
+    /// engine.graph_mut(|net| net.add_boxed(reverb).master());
     /// ```
     #[cfg(all(feature = "plugin", feature = "vst3"))]
-    pub fn vst3(&self, path: impl AsRef<Path>) -> crate::builders::Vst3Builder<'_> {
-        crate::builders::Vst3Builder::new(self, path.as_ref().to_path_buf())
+    pub fn vst3(&self, path: impl AsRef<Path>) -> crate::builders::PluginBuilder<'_> {
+        crate::builders::PluginBuilder::new(self, path.as_ref().to_path_buf())
     }
 
     /// Load a VST2 plugin.
     #[cfg(all(feature = "plugin", feature = "vst2"))]
-    pub fn vst2(&self, path: impl AsRef<Path>) -> crate::builders::Vst2Builder<'_> {
-        crate::builders::Vst2Builder::new(self, path.as_ref().to_path_buf())
+    pub fn vst2(&self, path: impl AsRef<Path>) -> crate::builders::PluginBuilder<'_> {
+        crate::builders::PluginBuilder::new(self, path.as_ref().to_path_buf())
     }
 
     /// Load a CLAP plugin.
     #[cfg(all(feature = "plugin", feature = "clap"))]
-    pub fn clap(&self, path: impl AsRef<Path>) -> crate::builders::ClapBuilder<'_> {
-        crate::builders::ClapBuilder::new(self, path.as_ref().to_path_buf())
+    pub fn clap(&self, path: impl AsRef<Path>) -> crate::builders::PluginBuilder<'_> {
+        crate::builders::PluginBuilder::new(self, path.as_ref().to_path_buf())
     }
 
     /// Load a neural synth model (.mpk).
@@ -381,7 +403,7 @@ impl TuttiEngine {
     ///
     /// ```ignore
     /// let (violin, model_id) = engine.neural_synth("violin.mpk").build()?;
-    /// engine.graph(|net| net.add_neural(violin, model_id).master());
+    /// engine.graph_mut(|net| net.add_neural(violin, model_id).master());
     /// ```
     #[cfg(all(feature = "neural", feature = "midi"))]
     pub fn neural_synth(&self, path: impl AsRef<Path>) -> crate::builders::NeuralSynthBuilder<'_> {
@@ -392,7 +414,10 @@ impl TuttiEngine {
     ///
     /// Returns a fluent builder. Call `.build()` to get the effect unit and model ID.
     #[cfg(feature = "neural")]
-    pub fn neural_effect(&self, path: impl AsRef<Path>) -> crate::builders::NeuralEffectBuilder<'_> {
+    pub fn neural_effect(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> crate::builders::NeuralEffectBuilder<'_> {
         crate::builders::NeuralEffectBuilder::new(self, path.as_ref().to_path_buf())
     }
 
@@ -406,7 +431,7 @@ impl TuttiEngine {
     /// let (synth, model_id) = engine.neural_synth_fn(|features| {
     ///     my_model.infer(features)
     /// }).build()?;
-    /// engine.graph(|net| net.add_neural(synth, model_id).master());
+    /// engine.graph_mut(|net| net.add_neural(synth, model_id).master());
     /// ```
     #[cfg(all(feature = "neural", feature = "midi"))]
     pub fn neural_synth_fn<F>(&self, infer_fn: F) -> crate::builders::NeuralSynthFnBuilder<'_, F>
@@ -572,7 +597,7 @@ impl TuttiEngine {
     /// # Example
     /// ```ignore
     /// let synth = engine.create("piano", &params! {})?;
-    /// engine.graph(|net| {
+    /// engine.graph_mut(|net| {
     ///     net.pipe_output(synth);
     /// });
     ///
@@ -632,6 +657,15 @@ impl TuttiEngine {
         NeuralHandle::new(Some(self.neural.clone()))
     }
 
+    /// Create an automation lane wired to this engine's transport.
+    #[cfg(feature = "automation")]
+    pub fn automation_lane<T: Clone + Send + 'static>(
+        &self,
+        envelope: crate::AutomationEnvelope<T>,
+    ) -> crate::LiveAutomationLane<T> {
+        crate::AutomationLane::new(envelope, self.transport())
+    }
+
     // =========================================================================
     // Internal helpers for fluent builders
     // =========================================================================
@@ -667,31 +701,134 @@ impl TuttiEngine {
         self.plugin_control_handles.lock().len()
     }
 
-    /// Load a Wave from file, using cache for repeated loads.
+    /// Load a Wave from file and return the decoded audio data.
+    ///
+    /// Uses an internal cache — repeated loads of the same path return the
+    /// cached `Arc<Wave>` without re-decoding. This is the same cache used
+    /// by `engine.wav()`, `engine.mp3()`, etc. for playback.
+    ///
+    /// Useful for waveform analysis / peak computation without creating
+    /// a SamplerUnit.
     #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
-    pub(crate) fn load_wave_cached(&self, path: &Path) -> Result<Arc<Wave>> {
-        let path_buf = path.to_path_buf();
+    pub fn load_wave(&self, path: impl AsRef<Path>) -> Result<Arc<Wave>> {
+        self.get_wave_cached(path.as_ref())
+    }
 
-        // Check cache first
+    /// Start a non-blocking background wave import, returning a handle to poll progress.
+    ///
+    /// The import runs on a dedicated thread. Poll [`ImportHandle::progress()`]
+    /// each frame to get status updates, or call [`ImportHandle::wait()`] to block.
+    ///
+    /// The loaded wave is automatically cached on completion.
+    ///
+    /// ```ignore
+    /// let mut import = engine.start_load_wave("song.mp3");
+    ///
+    /// loop {
+    ///     match import.progress() {
+    ///         ImportStatus::Running(p) => println!("Loading: {:.0}%", p * 100.0),
+    ///         ImportStatus::Complete(wave) => break,
+    ///         ImportStatus::Failed(e) => { eprintln!("{}", e); break; }
+    ///         ImportStatus::Pending => {}
+    ///     }
+    /// }
+    /// ```
+    #[cfg(all(
+        feature = "sampler",
+        any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg")
+    ))]
+    pub fn start_load_wave(&self, path: impl AsRef<Path>) -> crate::ImportHandle {
+        let path_buf = path.as_ref().to_path_buf();
+
+        // Return immediately if cached.
         {
             let cache = self.sample_cache.lock();
             if let Some(wave) = cache.get(&path_buf) {
-                return Ok(wave.clone());
+                return crate::ImportHandle::from_cached(wave.clone());
             }
         }
 
-        // Load from disk
-        let wave = Arc::new(Wave::load(path).map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to load audio file: {:?}", e))
-        })?);
+        crate::ImportHandle::start(path_buf)
+    }
 
-        // Store in cache
-        {
-            let mut cache = self.sample_cache.lock();
-            cache.insert(path_buf, wave.clone());
+    /// Internal: Return a cached Wave or error if not yet loaded.
+    ///
+    /// Used by `SampleBuilder::build()` so it never blocks on disk I/O.
+    /// The caller should use `start_load_wave()` to kick off background loading.
+    #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
+    pub(crate) fn get_wave_cached(&self, path: &Path) -> Result<Arc<Wave>> {
+        let cache = self.sample_cache.lock();
+        cache.get(path).cloned().ok_or_else(|| {
+            crate::Error::Core(tutti_core::Error::InvalidConfig(format!(
+                "Wave not loaded yet: {}",
+                path.display()
+            )))
+        })
+    }
+
+    /// Store a wave in the cache for future lookups.
+    ///
+    /// Called after a background import completes so subsequent
+    /// `load_wave()` calls return the cached copy.
+    #[cfg(any(feature = "wav", feature = "flac", feature = "mp3", feature = "ogg"))]
+    pub fn cache_wave(&self, path: impl AsRef<Path>, wave: Arc<Wave>) {
+        let mut cache = self.sample_cache.lock();
+        cache.insert(path.as_ref().to_path_buf(), wave);
+    }
+
+    /// Compute the end beat of all scheduled content in the graph.
+    ///
+    /// Iterates all nodes and finds the latest `start_beat + duration_beats`
+    /// across all sampler clips. Returns 0.0 if no timed content exists.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let end = engine.content_end_beat();
+    /// println!("Song ends at beat {}", end);
+    /// ```
+    #[cfg(feature = "sampler")]
+    pub fn content_end_beat(&self) -> f64 {
+        self.graph(|net| {
+            let all_ids: Vec<_> = net.inner_ref().ids().copied().collect();
+            all_ids
+                .into_iter()
+                .filter_map(|node_id| {
+                    net.node_ref_typed::<crate::sampler::SamplerUnit>(node_id)
+                        .map(|sampler| {
+                            if sampler.duration_beats() > 0.0 {
+                                sampler.start_beat() + sampler.duration_beats()
+                            } else {
+                                let tempo = self.transport().get_tempo() as f64;
+                                let beats = sampler.duration_seconds() * tempo / 60.0;
+                                sampler.start_beat() + beats
+                            }
+                        })
+                })
+                .fold(0.0f64, f64::max)
+        })
+    }
+
+    /// Compute the total duration of all content in seconds.
+    ///
+    /// Finds the latest end beat across all clips and converts to seconds
+    /// using the current tempo. Returns 0.0 if no content exists.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let secs = engine.content_duration();
+    /// engine.export()
+    ///     .duration_seconds(secs + 2.0)  // +2s for reverb tails
+    ///     .to_file("output.wav")?;
+    /// ```
+    #[cfg(feature = "sampler")]
+    pub fn content_duration(&self) -> f64 {
+        let end_beat = self.content_end_beat();
+        let tempo = self.transport().get_tempo() as f64;
+        if tempo > 0.0 {
+            end_beat * 60.0 / tempo
+        } else {
+            0.0
         }
-
-        Ok(wave)
     }
 
     /// Export audio from the current graph.
@@ -716,39 +853,103 @@ impl TuttiEngine {
     /// ```
     #[cfg(feature = "export")]
     pub fn export(&self) -> crate::export::ExportBuilder {
-        let net = self.core.clone_net();
+        let mut net = self.core.clone_net();
         let sample_rate = self.core.sample_rate();
-        let context = self.core.create_export_context();
+        let mut context = self.core.create_export_context();
+
+        // Transfer pending MIDI events from the live registry into the export snapshot.
+        // Events are placed at beat 0.0 (start of export) since they were queued
+        // as immediate events without beat positions.
+        #[cfg(feature = "midi")]
+        {
+            self.core.graph(|tutti_net| {
+                tutti_net
+                    .midi_registry()
+                    .drain_into_snapshot(context.midi_snapshot_mut(), 0.0);
+            });
+
+            // Create a MidiSnapshotReader and inject it into all MIDI-consuming
+            // nodes in the cloned net. Each node gets its own clone so cursors
+            // are independent.
+            let reader = tutti_core::midi::MidiSnapshotReader::new(
+                context.midi_snapshot.clone(),
+                context.timeline.clone(),
+            );
+
+            Self::inject_midi_sources(&mut net, &reader);
+        }
+
+        // Replace transport on timeline-aware sampler nodes with export timeline.
+        // Only affects samplers that already have a transport (start_beat was set).
+        // Samplers without transport use self-advancing playback and don't need injection.
+        #[cfg(feature = "sampler")]
+        {
+            use tutti_core::AudioUnit;
+
+            let timeline: std::sync::Arc<dyn tutti_core::TransportReader> =
+                context.timeline.clone();
+            let node_ids: Vec<_> = net.ids().copied().collect();
+            for node_id in node_ids {
+                if let Some(sampler) = <dyn AudioUnit>::as_any_mut(net.node_mut(node_id))
+                    .downcast_mut::<crate::sampler::SamplerUnit>()
+                {
+                    if sampler.has_transport() {
+                        sampler.replace_transport(timeline.clone());
+                    }
+                }
+            }
+        }
 
         crate::export::ExportBuilder::new(net, sample_rate).with_context(context)
+    }
+
+    /// Inject a `MidiSnapshotReader` into all MIDI-consuming nodes in a cloned net.
+    ///
+    /// Iterates all nodes, attempts to downcast to known MIDI-consuming types
+    /// (PolySynth, SoundFontUnit, NeuralSynthNode), and sets the MIDI source.
+    #[cfg(all(feature = "export", feature = "midi"))]
+    fn inject_midi_sources(
+        net: &mut tutti_core::dsp::Net,
+        reader: &tutti_core::midi::MidiSnapshotReader,
+    ) {
+        use tutti_core::AudioUnit;
+
+        let node_ids: Vec<_> = net.ids().copied().collect();
+        for node_id in node_ids {
+            let unit = net.node_mut(node_id);
+
+            // Try PolySynth
+            #[cfg(all(feature = "synth", feature = "midi"))]
+            if let Some(synth) =
+                <dyn AudioUnit>::as_any_mut(unit).downcast_mut::<tutti_synth::PolySynth>()
+            {
+                synth.set_midi_source(Box::new(reader.clone()));
+                continue;
+            }
+
+            // Try SoundFontUnit
+            #[cfg(feature = "soundfont")]
+            if let Some(sf_unit) =
+                <dyn AudioUnit>::as_any_mut(unit).downcast_mut::<tutti_synth::SoundFontUnit>()
+            {
+                sf_unit.set_midi_source(Box::new(reader.clone()));
+                continue;
+            }
+
+            // Try NeuralSynthNode
+            #[cfg(all(feature = "neural", feature = "midi"))]
+            if let Some(neural_synth) =
+                <dyn AudioUnit>::as_any_mut(unit).downcast_mut::<tutti_neural::NeuralSynthNode>()
+            {
+                neural_synth.set_midi_source(Box::new(reader.clone()));
+                continue;
+            }
+        }
     }
 
     // =========================================================================
     // MIDI Event Helpers
     // =========================================================================
-
-    /// Queue MIDI events to a specific audio node.
-    ///
-    /// Events are placed in the MidiRegistry and pulled by the node during
-    /// audio processing (pull-based MIDI delivery).
-    ///
-    /// # Example
-    /// ```ignore
-    /// use tutti_midi_io::MidiEvent;
-    /// let note_on = MidiEvent::note_on_builder(60, 100).build();
-    /// engine.queue_midi_to_node(synth_id, &[note_on]);
-    /// ```
-    #[cfg(feature = "midi")]
-    pub fn queue_midi_to_node(
-        &self,
-        node: crate::core::NodeId,
-        events: &[crate::MidiEvent],
-    ) -> &Self {
-        self.core.graph(|net| {
-            net.queue_midi(node, events);
-        });
-        self
-    }
 
     /// Send a Note On event to a node.
     ///
@@ -757,11 +958,7 @@ impl TuttiEngine {
     /// # Example
     /// ```ignore
     /// use tutti::midi::Note;
-    ///
-    /// // Using Note enum (recommended)
     /// engine.note_on(synth_id, Note::C4, 100);
-    ///
-    /// // Using raw MIDI number
     /// engine.note_on(synth_id, 60u8, 100);
     /// ```
     #[cfg(feature = "midi")]
@@ -769,8 +966,7 @@ impl TuttiEngine {
         let event = crate::MidiEvent::note_on_builder(note.into(), velocity)
             .channel(0)
             .build();
-        self.queue_midi_to_node(node, &[event]);
-        self
+        self.queue_midi(node, &[event])
     }
 
     /// Send a Note On event to a specific MIDI channel.
@@ -785,8 +981,7 @@ impl TuttiEngine {
         let event = crate::MidiEvent::note_on_builder(note.into(), velocity)
             .channel(channel)
             .build();
-        self.queue_midi_to_node(node, &[event]);
-        self
+        self.queue_midi(node, &[event])
     }
 
     /// Send a Note Off event to a node.
@@ -795,8 +990,7 @@ impl TuttiEngine {
         let event = crate::MidiEvent::note_off_builder(note.into())
             .channel(0)
             .build();
-        self.queue_midi_to_node(node, &[event]);
-        self
+        self.queue_midi(node, &[event])
     }
 
     /// Send a Note Off event to a specific MIDI channel.
@@ -810,8 +1004,7 @@ impl TuttiEngine {
         let event = crate::MidiEvent::note_off_builder(note.into())
             .channel(channel)
             .build();
-        self.queue_midi_to_node(node, &[event]);
-        self
+        self.queue_midi(node, &[event])
     }
 
     /// Send a Control Change event to a node.
@@ -826,8 +1019,18 @@ impl TuttiEngine {
         let event = crate::MidiEvent::cc_builder(cc, value)
             .channel(channel)
             .build();
-        self.queue_midi_to_node(node, &[event]);
-        self
+        self.queue_midi(node, &[event])
+    }
+
+    /// Send a Pitch Bend event to a node.
+    ///
+    /// `value` is a 14-bit unsigned value: 0-16383, where 8192 = center (no bend).
+    #[cfg(feature = "midi")]
+    pub fn pitch_bend(&self, node: crate::core::NodeId, channel: u8, value: u16) -> &Self {
+        let event = crate::MidiEvent::bend_builder(value.min(16383))
+            .channel(channel)
+            .build();
+        self.queue_midi(node, &[event])
     }
 
     // =========================================================================

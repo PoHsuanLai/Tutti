@@ -10,11 +10,12 @@
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         net.add(sine_hz::<f64>(440.0) * 0.5).master();
     });
 

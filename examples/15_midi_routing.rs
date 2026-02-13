@@ -1,15 +1,16 @@
-//! # 10 - MIDI Synth
+//! # 15 - MIDI Synth
 //!
 //! Create a polyphonic synthesizer that responds to MIDI note_on/note_off.
 //!
 //! **Concepts:** `engine.synth()`, `note_on`, `note_off`, `Note` enum, polyphony
 //!
 //! ```bash
-//! cargo run --example 10_midi_routing --features "synth,midi"
+//! cargo run --example 15_midi_routing --features "synth,midi"
 //! ```
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
     let engine = TuttiEngine::builder().midi().build()?;
@@ -23,7 +24,7 @@ fn main() -> tutti::Result<()> {
         .adsr(0.01, 0.1, 0.7, 0.3)
         .build()?;
 
-    let synth_id = engine.graph(|net| net.add(synth).master());
+    let synth_id = engine.graph_mut(|net: &mut TuttiNet| net.add(synth).master());
 
     engine.transport().play();
     println!("Playing arpeggio...");

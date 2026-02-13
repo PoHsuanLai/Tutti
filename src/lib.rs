@@ -29,11 +29,11 @@
 //! let sample = engine.wav("kick.wav").build()?;
 //!
 //! // Add nodes to graph
-//! let piano_id = engine.graph(|net| net.add(piano).master());
-//! let sample_id = engine.graph(|net| net.add(sample).master());
+//! let piano_id = engine.graph_mut(|net| net.add(piano).master());
+//! let sample_id = engine.graph_mut(|net| net.add(sample).master());
 //!
 //! // Or create DSP nodes directly
-//! engine.graph(|net| {
+//! engine.graph_mut(|net| {
 //!     let osc = net.add(sine_hz::<f32>(440.0)).id();
 //!     let filter = net.add(lowpass_hz::<f32>(2000.0, 1.0)).id();
 //!     chain!(net, osc, filter => output);
@@ -73,6 +73,10 @@
 /// Re-export of tutti-core for direct access
 pub use tutti_core as core;
 
+// Centralized error type (wraps all subsystem errors)
+mod error;
+pub use error::{Error, Result};
+
 // Core types
 pub use tutti_core::{
     // Click (metronome as AudioUnit)
@@ -89,13 +93,12 @@ pub use tutti_core::{
     BufferMut,
     BufferRef,
     ClickNode,
+    ClickSettings,
     ClickState,
     CpuMeter,
     CpuMetrics,
 
     Direction,
-    // Error
-    Error,
     EventId,
     Fade,
     // Metering (includes LUFS!)
@@ -112,7 +115,6 @@ pub use tutti_core::{
     NodeInfo,
     NodeParamValue,
     NodeParams,
-    // Note: NodeRegistry is now internal - use engine.register() / engine.load_*() APIs
     NodeRegistryError,
     Params,
     PdcDelayUnit,
@@ -122,7 +124,6 @@ pub use tutti_core::{
     PdcState,
     ReplayMode,
 
-    Result,
     // Sequencer
     Sequencer,
     Shared,
@@ -138,6 +139,8 @@ pub use tutti_core::{
     TransportManager,
     TransportReader,
     TuttiNet,
+    // Audio data
+    Wave,
     BBT,
 };
 
@@ -153,12 +156,24 @@ pub use tutti_midi_io as midi;
 
 #[cfg(feature = "midi")]
 pub use tutti_midi_io::{
-    Channel, ChannelVoiceMsg, ControlChange, MidiEvent, MidiHandle, MidiMsg, MidiSystem,
+    CCMapping, CCMappingManager, CCNumber, CCProcessResult, CCTarget, Channel, ChannelVoiceMsg,
+    ControlChange, MappingId, MidiChannel, MidiEvent, MidiHandle, MidiMsg, MidiSystem,
     MidiSystemBuilder, Note, PortInfo, RawMidiEvent,
 };
 
+#[cfg(feature = "midi-hardware")]
+pub use tutti_midi_io::{MidiInputDevice, MidiOutputDevice};
+
+#[cfg(feature = "mpe")]
+pub use tutti_midi_io::{MpeHandle, MpeMode, MpeZone, MpeZoneConfig};
+
+#[cfg(feature = "midi2")]
+pub use tutti_midi_io::{Midi2Event, Midi2Handle, Midi2MessageType, UnifiedMidiEvent};
+
 #[cfg(feature = "midi")]
-pub use tutti_core::{MidiEventBuilder, MidiRegistry, MidiRoutingTable};
+pub use tutti_core::{
+    MidiEventBuilder, MidiRegistry, MidiRoutingTable, MidiSnapshotReader, MidiSource,
+};
 
 // Sampler subsystem (optional)
 #[cfg(feature = "sampler")]
@@ -166,13 +181,22 @@ pub use tutti_sampler as sampler;
 
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::{
-    AudioInput, AudioInputBackend, PlayDirection, SamplerHandle, SamplerSystem,
-    SamplerSystemBuilder, SamplerUnit, StreamingSamplerUnit, TimeStretchUnit,
+    AudioInput, AudioInputBackend, ImportHandle, ImportStatus, PlayDirection, SamplerHandle,
+    SamplerSystem, SamplerSystemBuilder, SamplerUnit, StreamingSamplerUnit, TimeStretchUnit,
+    Varispeed,
 };
 
 // Time stretch types from sampler subcrate
 #[cfg(feature = "sampler")]
 pub use tutti_sampler::TimeStretchParams;
+
+// Recording types from sampler subcrate
+#[cfg(feature = "sampler")]
+pub use tutti_sampler::{
+    PunchEvent, QuantizeSettings, QuantizeSettingsBuilder, RecordedData, RecordingBuffer,
+    RecordingConfig, RecordingConfigBuilder, RecordingMode, RecordingSession, RecordingSource,
+    RecordingState as SamplerRecordingState, XRunEvent, XRunType,
+};
 
 // Synth subsystem (building blocks for synthesis)
 #[cfg(feature = "synth")]
@@ -180,7 +204,9 @@ pub use tutti_synth as synth;
 
 // SoundFont synthesis
 #[cfg(feature = "soundfont")]
-pub use tutti_synth::{SoundFontHandle, SoundFontSystem, SoundFontUnit};
+pub use tutti_synth::{
+    SoundFont, SoundFontHandle, SoundFontSystem, SoundFontUnit, SynthesizerSettings,
+};
 
 // DSP nodes
 pub use tutti_dsp as dsp_nodes;
@@ -188,15 +214,12 @@ pub use tutti_dsp as dsp_nodes;
 // LFO is always available
 pub use tutti_dsp::{LfoMode, LfoNode, LfoShape};
 
-// Dynamics (compressors, gates) - requires dsp-dynamics feature
-#[cfg(feature = "dsp-dynamics")]
+// Dynamics + spatial (compressors, gates, VBAP, binaural)
+#[cfg(feature = "dsp")]
 pub use tutti_dsp::{
-    SidechainCompressor, SidechainGate, StereoSidechainCompressor, StereoSidechainGate,
+    BinauralPannerNode, ChannelLayout, SidechainCompressor, SidechainGate, SpatialPannerNode,
+    StereoSidechainCompressor, StereoSidechainGate,
 };
-
-// Spatial audio (VBAP, binaural) - requires dsp-spatial feature
-#[cfg(feature = "dsp-spatial")]
-pub use tutti_dsp::{BinauralPannerNode, ChannelLayout, SpatialPannerNode};
 
 // Analysis tools (optional)
 #[cfg(feature = "analysis")]
@@ -214,7 +237,10 @@ pub use tutti_analysis::{
 pub use tutti_export as export;
 
 #[cfg(feature = "export")]
-pub use tutti_export::{AudioFormat, ExportBuilder, ExportConfig, ExportContext, ExportOptions, NormalizationMode};
+pub use tutti_export::{
+    AudioFormat, ExportBuilder, ExportConfig, ExportContext, ExportHandle, ExportOptions,
+    ExportStatus, NormalizationMode,
+};
 
 // Export timeline (for advanced export scenarios)
 #[cfg(feature = "export")]
@@ -227,7 +253,7 @@ pub use tutti_plugin as plugin;
 #[cfg(feature = "plugin")]
 pub use tutti_plugin::{
     register_all_system_plugins, register_plugin, register_plugin_directory, BridgeConfig,
-    PluginClient, PluginHandle,
+    ParameterFlags, ParameterInfo, PluginClient, PluginHandle, PluginMetadata,
 };
 
 // Neural audio
@@ -242,6 +268,16 @@ pub use tutti_neural::{NeuralHandle, NeuralSystem, NeuralSystemBuilder};
 pub use tutti_core::{
     BackendCapabilities, BackendFactory, InferenceBackend, InferenceConfig, InferenceError,
     NeuralModelId,
+};
+
+// Automation (optional)
+#[cfg(feature = "automation")]
+pub use tutti_automation as automation;
+
+#[cfg(feature = "automation")]
+pub use tutti_automation::{
+    AutomationClip, AutomationEnvelope, AutomationLane, AutomationPoint, AutomationState,
+    CurveType, LiveAutomationLane,
 };
 
 // Burn ML backend (optional)
@@ -276,26 +312,16 @@ pub use builder::TuttiEngineBuilder;
 pub use engine::TuttiEngine;
 
 // Re-export builder types for convenience
-#[cfg(feature = "soundfont")]
-pub use builders::Sf2Builder;
-#[cfg(all(feature = "sampler", feature = "wav"))]
-pub use builders::WavBuilder;
-#[cfg(all(feature = "sampler", feature = "flac"))]
-pub use builders::FlacBuilder;
-#[cfg(all(feature = "sampler", feature = "mp3"))]
-pub use builders::Mp3Builder;
-#[cfg(all(feature = "sampler", feature = "ogg"))]
-pub use builders::OggBuilder;
-#[cfg(all(feature = "plugin", feature = "vst3"))]
-pub use builders::Vst3Builder;
-#[cfg(all(feature = "plugin", feature = "vst2"))]
-pub use builders::Vst2Builder;
-#[cfg(all(feature = "plugin", feature = "clap"))]
-pub use builders::ClapBuilder;
-#[cfg(all(feature = "neural", feature = "midi"))]
-pub use builders::NeuralSynthBuilder;
 #[cfg(feature = "neural")]
 pub use builders::NeuralEffectBuilder;
+#[cfg(all(feature = "neural", feature = "midi"))]
+pub use builders::NeuralSynthBuilder;
+#[cfg(feature = "plugin")]
+pub use builders::PluginBuilder;
+#[cfg(feature = "sampler")]
+pub use builders::SampleBuilder;
+#[cfg(feature = "soundfont")]
+pub use builders::Sf2Builder;
 
 // SynthHandle for fluent synth creation
 #[cfg(all(feature = "synth", feature = "midi"))]
@@ -342,4 +368,8 @@ pub mod prelude {
     // Analysis (optional)
     #[cfg(feature = "analysis")]
     pub use crate::analysis::{PitchDetector, TransientDetector};
+
+    // Automation (optional)
+    #[cfg(feature = "automation")]
+    pub use crate::automation::{AutomationEnvelope, AutomationLane, AutomationPoint, CurveType};
 }

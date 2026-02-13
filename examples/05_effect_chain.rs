@@ -10,11 +10,12 @@
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         let saw = net.add(saw_hz(110.0) * 0.3).id();
         let filter = net.add(lowpole_hz::<f64>(800.0)).id();
         let stereo = net.add_split();

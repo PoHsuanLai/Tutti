@@ -90,13 +90,20 @@ fn test_sampler_load_and_play() {
 
     // Load the test sine wave file
     let test_file = test_data_dir().join("regression/test_sine.wav");
-    assert!(test_file.exists(), "Test file should exist: {:?}", test_file);
+    assert!(
+        test_file.exists(),
+        "Test file should exist: {:?}",
+        test_file
+    );
 
     // New fluent API: engine.wav(path).build() returns AudioUnit
-    let sampler = engine.wav(&test_file).build().expect("Should load test WAV");
+    let sampler = engine
+        .wav(&test_file)
+        .build()
+        .expect("Should load test WAV");
 
     // Add to graph
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sampler).master();
     });
 
@@ -137,11 +144,11 @@ fn test_sampler_cache_hit() {
 
     // Load and create first instance
     let sampler1 = engine.wav(&test_file).build().expect("First load");
-    let _id1 = engine.graph(|net| net.add(sampler1).master());
+    let _id1 = engine.graph_mut(|net| net.add(sampler1).master());
 
     // Load and create second instance (same file - should use cache)
     let sampler2 = engine.wav(&test_file).build().expect("Second load");
-    let _id2 = engine.graph(|net| net.add(sampler2).master());
+    let _id2 = engine.graph_mut(|net| net.add(sampler2).master());
 
     // Both should work - the cache should handle this
 }
@@ -171,7 +178,10 @@ fn test_sampler_io_metrics_initial() {
 
     let metrics = sampler.io_metrics();
     assert_eq!(metrics.bytes_read, 0, "Initial bytes_read should be 0");
-    assert_eq!(metrics.bytes_written, 0, "Initial bytes_written should be 0");
+    assert_eq!(
+        metrics.bytes_written, 0,
+        "Initial bytes_written should be 0"
+    );
 }
 
 /// Test sampler cache stats are accessible.
@@ -524,7 +534,7 @@ fn test_in_memory_sampler_renders_correctly() {
     // New fluent API: engine.wav(path).build() returns AudioUnit
     let sampler = engine.wav(&test_file).build().expect("Load WAV");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sampler).master();
     });
 
@@ -633,7 +643,7 @@ fn test_sampler_record_load_roundtrip() {
     // Load via sampler and render using new fluent API
     let sampler = engine.wav(&output_path).build().expect("Load");
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         net.add(sampler).master();
     });
 
@@ -897,10 +907,7 @@ fn test_sampler_unit_varispeed() {
     // At 0.5x speed, should still be playing after original duration
     let (left_half, _) = render_samples(&mut unit_half, duration_samples);
 
-    assert!(
-        unit_half.is_playing(),
-        "0.5x speed should still be playing"
-    );
+    assert!(unit_half.is_playing(), "0.5x speed should still be playing");
 
     // Both should have audio content
     assert!(rms(&left_2x) > 0.1, "2x speed should have audio");
@@ -953,10 +960,7 @@ fn test_sampler_unit_trigger_stop() {
 
     // Render while stopped (should be silent)
     let (left_stopped, _) = render_samples(&mut unit, 100);
-    assert!(
-        rms(&left_stopped) < 0.001,
-        "Stopped unit should be silent"
-    );
+    assert!(rms(&left_stopped) < 0.001, "Stopped unit should be silent");
 
     // Trigger from start
     unit.trigger();
@@ -985,7 +989,11 @@ fn test_sampler_unit_trigger_at_position() {
     unit.trigger_at(start_pos);
 
     assert!(unit.is_playing(), "Should be playing");
-    assert_eq!(unit.position(), start_pos, "Position should be at trigger point");
+    assert_eq!(
+        unit.position(),
+        start_pos,
+        "Position should be at trigger point"
+    );
 
     // Should stop sooner (only half the samples left)
     let (left, _) = render_samples(&mut unit, 300);
@@ -1043,7 +1051,11 @@ fn test_io_metrics_track_file_reads() {
     }
 
     let file_size = std::fs::metadata(&file_path).unwrap().len();
-    assert!(file_size > 1_000_000, "Test file should be >1MB, got {}", file_size);
+    assert!(
+        file_size > 1_000_000,
+        "Test file should be >1MB, got {}",
+        file_size
+    );
 
     let engine = test_engine();
     let handle = engine.sampler();
@@ -1051,7 +1063,10 @@ fn test_io_metrics_track_file_reads() {
     // Reset metrics to start fresh
     handle.reset_io_metrics();
     let metrics_before = handle.io_metrics();
-    assert_eq!(metrics_before.bytes_read, 0, "Should start at 0 after reset");
+    assert_eq!(
+        metrics_before.bytes_read, 0,
+        "Should start at 0 after reset"
+    );
 
     // Stream the real file - this should trigger disk reads
     handle.stream(&file_path).channel(0).start();
@@ -1321,13 +1336,28 @@ fn test_handle_loop_range_causes_looping() {
         assert!(
             variance < 0.15,
             "Looped iterations should have consistent RMS, variance={} (rms2={}, rms3={}, rms4={})",
-            variance, rms2, rms3, rms4
+            variance,
+            rms2,
+            rms3,
+            rms4
         );
 
         // Also verify that all RMS values are reasonable (not zero, not too high)
-        assert!(rms2 > 0.1, "Loop iteration 2 should have audio content, rms={}", rms2);
-        assert!(rms3 > 0.1, "Loop iteration 3 should have audio content, rms={}", rms3);
-        assert!(rms4 > 0.1, "Loop iteration 4 should have audio content, rms={}", rms4);
+        assert!(
+            rms2 > 0.1,
+            "Loop iteration 2 should have audio content, rms={}",
+            rms2
+        );
+        assert!(
+            rms3 > 0.1,
+            "Loop iteration 3 should have audio content, rms={}",
+            rms3
+        );
+        assert!(
+            rms4 > 0.1,
+            "Loop iteration 4 should have audio content, rms={}",
+            rms4
+        );
     }
 
     handle.stop_stream(0);
@@ -1529,7 +1559,10 @@ fn test_sampler_unit_speed_variations() {
     // All should have audio content
     assert!(rms(&left_1x) > 0.1, "1x should have audio");
     assert!(rms(&left_half) > 0.1, "0.5x should have audio");
-    assert!(rms(&left_2x[..duration_samples / 2]) > 0.1, "2x should have audio");
+    assert!(
+        rms(&left_2x[..duration_samples / 2]) > 0.1,
+        "2x should have audio"
+    );
 }
 
 /// Test SamplerUnit with very short sample (edge case).
@@ -1713,8 +1746,8 @@ fn test_butler_loop_crossfade_smooth() {
                 unit.tick(&[], &mut output);
 
                 // Check for discontinuities (large jumps)
-                let jump = ((output[0] - prev_sample.0).abs())
-                    .max((output[1] - prev_sample.1).abs());
+                let jump =
+                    ((output[0] - prev_sample.0).abs()).max((output[1] - prev_sample.1).abs());
                 max_jump = max_jump.max(jump);
 
                 prev_sample = (output[0], output[1]);
@@ -1973,4 +2006,72 @@ fn test_butler_pause_resume() {
     // Test passes if no crash occurred during pause/resume cycle
     // The streaming state may vary based on timing
     sampler.stop_stream(0);
+}
+
+// =============================================================================
+// Downcast Tests — verify SamplerUnit can be found via node_ref_typed
+// =============================================================================
+
+/// Verify that a SamplerUnit added to the graph can be found via node_ref_typed downcast.
+#[test]
+#[cfg(all(feature = "wav", feature = "export"))]
+fn test_sampler_downcast_in_graph() {
+    use tutti::core::Wave;
+
+    let engine = test_engine();
+
+    // Create a wave directly and cache it
+    let wave = Arc::new(Wave::with_capacity(2, 44100.0, 44100));
+    let test_path = std::path::Path::new("/tmp/test_downcast.wav");
+    engine.cache_wave(test_path, wave);
+
+    let sampler = engine
+        .wav(test_path)
+        .build()
+        .expect("Should build from cached wave");
+
+    // Add sampler to graph and track its node ID
+    let node_id = engine.graph_mut(|net| net.add(sampler).master());
+
+    // Now verify we can downcast it back
+    engine.graph(|net| {
+        let typed = net.node_ref_typed::<SamplerUnit>(node_id);
+        assert!(
+            typed.is_some(),
+            "SamplerUnit should be findable via node_ref_typed. node_id={:?}",
+            node_id,
+        );
+    });
+}
+
+/// Verify content_end_beat finds sampler nodes.
+#[test]
+#[cfg(all(feature = "wav", feature = "export"))]
+fn test_content_end_beat_finds_samplers() {
+    use tutti::core::Wave;
+
+    let engine = test_engine();
+
+    // Create a wave directly and cache it
+    let wave = Arc::new(Wave::with_capacity(2, 44100.0, 44100));
+    let test_path = std::path::Path::new("/tmp/test_content_end.wav");
+    engine.cache_wave(test_path, wave);
+
+    let sampler = engine
+        .wav(test_path)
+        .start_beat(0.0)
+        .duration_beats(8.0)
+        .build()
+        .expect("Should build from cached wave");
+
+    engine.graph_mut(|net| {
+        net.add(sampler).master();
+    });
+
+    let end_beat = engine.content_end_beat();
+    assert!(
+        end_beat >= 8.0,
+        "content_end_beat should be >= 8.0, got {}",
+        end_beat,
+    );
 }

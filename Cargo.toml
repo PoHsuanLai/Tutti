@@ -62,27 +62,24 @@ files = ["wav", "flac", "mp3", "ogg"]
 # Plugin hosting requires explicit format selection: --features clap, --features vst3, etc.
 full = [
     "files",
-    "midi", "midi-io", "mpe", "midi2",
+    "midi", "midi-hardware", "mpe", "midi2",
     "synth", "soundfont",
-    "neural", "burn",
     "sampler",
     "export", "analysis",
     "automation",
-    "dsp-full"
+    "dsp"
 ]
 
 # All plugin formats (convenience)
 all-plugins = ["clap", "vst3", "vst2"]
 
 # === DSP Features ===
-dsp-dynamics = ["tutti-dsp/dynamics"]  # Compressors, gates
-dsp-spatial = ["tutti-dsp/spatial"]    # VBAP, binaural (adds vbap crate)
-dsp-full = ["dsp-dynamics", "dsp-spatial"]
+dsp = ["tutti-dsp/full"]  # Compressors, gates, VBAP, binaural
 
 # === MIDI Features ===
 # Note: When neural is also enabled, tutti-neural/midi is activated automatically
 midi = ["dep:tutti-midi-io", "tutti-core/midi", "tutti-neural?/midi"]
-midi-io = ["midi", "tutti-midi-io/midi-io"]  # Hardware MIDI I/O
+midi-hardware = ["midi", "tutti-midi-io/midi-io"]  # Hardware MIDI I/O (midir)
 mpe = ["midi", "tutti-midi-io/mpe"]          # MPE support
 midi2 = ["midi", "tutti-midi-io/midi2"]      # MIDI 2.0
 
@@ -106,13 +103,7 @@ neural = ["std", "dep:tutti-neural", "tutti-core/neural"]
 burn = ["neural", "dep:tutti-burn"]
 
 # === Sampler Features ===
-# Note: sampler enables wav by default via tutti-sampler
 sampler = ["dep:tutti-sampler"]
-sampler-wav = ["sampler", "tutti-sampler/wav"]
-sampler-flac = ["sampler", "tutti-sampler/flac"]
-sampler-mp3 = ["sampler", "tutti-sampler/mp3"]
-sampler-ogg = ["sampler", "tutti-sampler/ogg"]
-sampler-files = ["sampler", "tutti-sampler/files"]
 
 # === Export & Analysis ===
 export = ["dep:tutti-export"]
@@ -139,6 +130,7 @@ tutti-neural = { version = "0.0.1", path = "crates/tutti-neural", optional = tru
 tutti-burn = { version = "0.0.1", path = "crates/tutti-burn", optional = true }
 tutti-automation = { version = "0.0.1", path = "crates/tutti-automation", optional = true }
 
+thiserror = "2"
 
 [dev-dependencies]
 approx = "0.5"
@@ -150,46 +142,76 @@ clap-host = { path = "crates/clap-host" }
 vst3-host = { path = "crates/vst3-host" }
 
 # Example-specific feature requirements
-[[example]]
-name = "09_midi_synth"
-required-features = ["midi", "synth"]
+# Examples 01-07 and 13 use only default features (no entry needed)
 
 [[example]]
-name = "11_soundfont"
-required-features = ["soundfont"]
-
-[[example]]
-name = "13_export"
-required-features = ["export"]
-
-[[example]]
-name = "14_streaming"
-required-features = ["sampler"]
-
-[[example]]
-name = "15_recording"
-required-features = ["sampler", "export"]
-
-[[example]]
-name = "17_plugin_loading"
-required-features = ["plugin", "vst3"]
-
-[[example]]
-name = "18_neural_closure"
-required-features = ["neural", "burn", "midi"]
-
-[[example]]
-name = "19_neural_models"
-required-features = ["neural", "burn"]
-
-[[example]]
-name = "20_neural_workflow"
-required-features = ["neural", "burn"]
-
-[[example]]
-name = "21_load_audio"
+name = "08_load_audio"
 required-features = ["sampler", "wav"]
 
 [[example]]
-name = "22_plugin_editor"
+name = "09_streaming"
+required-features = ["sampler"]
+
+[[example]]
+name = "10_export"
+required-features = ["export"]
+
+[[example]]
+name = "11_recording"
+required-features = ["sampler", "export"]
+
+[[example]]
+name = "12_automation"
+required-features = ["automation"]
+
+[[example]]
+name = "14_midi_synth"
+required-features = ["midi", "synth"]
+
+[[example]]
+name = "15_midi_routing"
+required-features = ["synth", "midi"]
+
+[[example]]
+name = "16_soundfont"
+required-features = ["soundfont"]
+
+[[example]]
+name = "17_midi_hardware"
+required-features = ["midi", "midi-hardware"]
+
+[[example]]
+name = "18_mpe"
+required-features = ["midi", "mpe"]
+
+[[example]]
+name = "19_midi2"
+required-features = ["midi", "midi2"]
+
+[[example]]
+name = "20_dynamics"
+required-features = ["dsp"]
+
+[[example]]
+name = "21_spatial_audio"
+required-features = ["dsp"]
+
+[[example]]
+name = "22_plugin_loading"
+required-features = ["plugin", "vst3"]
+
+[[example]]
+name = "23_plugin_editor"
 required-features = ["plugin", "midi"]
+
+[[example]]
+name = "24_neural_closure"
+required-features = ["neural", "burn", "midi"]
+
+[[example]]
+name = "25_neural_models"
+required-features = ["neural", "burn"]
+
+[[example]]
+name = "26_neural_workflow"
+required-features = ["neural", "burn"]

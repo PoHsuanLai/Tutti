@@ -50,7 +50,7 @@ fn test_multiple_synths() {
     let engine1 = test_engine_with_midi();
 
     let lead = engine1.synth().saw().poly(4).build().unwrap();
-    let lead_id = engine1.graph(|net| net.add(lead).master());
+    let lead_id = engine1.graph_mut(|net| net.add(lead).master());
 
     // Send note (don't call transport.play() - it would consume the MIDI events)
     engine1.note_on(lead_id, Note::C4, 100);
@@ -71,8 +71,8 @@ fn test_multiple_synths() {
     let lead = engine2.synth().saw().poly(4).build().unwrap();
     let bass = engine2.synth().square(0.5).poly(1).build().unwrap();
 
-    let lead_id = engine2.graph(|net| net.add(lead).master());
-    let bass_id = engine2.graph(|net| net.add(bass).master());
+    let lead_id = engine2.graph_mut(|net| net.add(lead).master());
+    let bass_id = engine2.graph_mut(|net| net.add(bass).master());
 
     engine2.note_on(lead_id, Note::C4, 100);
     engine2.note_on(bass_id, Note::C2, 100);
@@ -117,7 +117,7 @@ fn test_synth_oscillator_types() {
     // Sine oscillator
     let engine_sine = test_engine_with_midi();
     let sine_synth = engine_sine.synth().sine().poly(2).build().unwrap();
-    let sine_id = engine_sine.graph(|net| net.add(sine_synth).master());
+    let sine_id = engine_sine.graph_mut(|net| net.add(sine_synth).master());
 
     engine_sine.note_on(sine_id, Note::A4, 100);
 
@@ -135,7 +135,7 @@ fn test_synth_oscillator_types() {
     // Square oscillator
     let engine_square = test_engine_with_midi();
     let square_synth = engine_square.synth().square(0.5).poly(2).build().unwrap();
-    let square_id = engine_square.graph(|net| net.add(square_synth).master());
+    let square_id = engine_square.graph_mut(|net| net.add(square_synth).master());
 
     engine_square.note_on(square_id, Note::A4, 100);
 
@@ -151,8 +151,16 @@ fn test_synth_oscillator_types() {
     let square_peak = peak(&square_out);
 
     // Both should produce audio
-    assert!(sine_rms > 0.01, "Sine synth should produce audio, RMS={}", sine_rms);
-    assert!(square_rms > 0.01, "Square synth should produce audio, RMS={}", square_rms);
+    assert!(
+        sine_rms > 0.01,
+        "Sine synth should produce audio, RMS={}",
+        sine_rms
+    );
+    assert!(
+        square_rms > 0.01,
+        "Square synth should produce audio, RMS={}",
+        square_rms
+    );
 
     // If peaks are similar, square should have higher RMS (lower crest factor)
     // This is because square wave has constant amplitude

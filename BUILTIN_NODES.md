@@ -121,7 +121,7 @@ let wave = tutti_sampler::load_wav("kick.wav")?;
 let sampler = SamplerUnit::new(wave);
 
 // Add to graph
-let kick = engine.graph(|net| net.add(Box::new(sampler)));
+let kick = engine.graph_mut(|net| net.add(Box::new(sampler)));
 
 // Trigger playback
 sampler.trigger();
@@ -195,7 +195,7 @@ use tutti::prelude::*;
 let (input, backend) = AudioInput::new(2, 512); // 2 channels, 512 buffer
 
 // Add to graph
-let input_node = engine.graph(|net| net.add(Box::new(input)));
+let input_node = engine.graph_mut(|net| net.add(Box::new(input)));
 
 // In audio callback, write captured samples:
 // backend.write(&captured_samples);
@@ -220,7 +220,7 @@ let lfo = LfoNode::new(44100.0)
     .shape(LfoShape::Sine)    // Sine wave
     .mode(LfoMode::Unipolar); // 0.0 to 1.0 range
 
-let lfo_node = engine.graph(|net| net.add(Box::new(lfo)));
+let lfo_node = engine.graph_mut(|net| net.add(Box::new(lfo)));
 ```
 
 **Shapes:**
@@ -336,7 +336,7 @@ let panner = BinauralPannerNode::new(44100.0)
     .elevation(0.0)     // Degrees (-90 to 90)
     .distance(1.0);     // Distance in meters
 
-let panned = engine.graph(|net| net.add(Box::new(panner)));
+let panned = engine.graph_mut(|net| net.add(Box::new(panner)));
 ```
 
 **Parameters:**
@@ -529,7 +529,7 @@ sine_hz(440.0) | sine_hz(550.0)  // Stereo output
 ```rust
 use tutti::prelude::*;
 
-engine.graph(|net| {
+engine.graph_mut(|net| {
     let osc = net.add(Box::new(sine_hz(440.0)));
     let filter = net.add(Box::new(lowpass_hz(1000.0, 1.0)));
     net.connect(osc, 0, filter, 0);

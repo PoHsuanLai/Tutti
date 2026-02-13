@@ -18,7 +18,11 @@ fn test_engine_custom_sample_rate() {
 
     // Engine should report a valid sample rate (common rates: 44100, 48000, 96000)
     let rate = engine.sample_rate();
-    assert!(rate >= 8000.0 && rate <= 192000.0, "Sample rate {} is outside valid range", rate);
+    assert!(
+        rate >= 8000.0 && rate <= 192000.0,
+        "Sample rate {} is outside valid range",
+        rate
+    );
 }
 
 /// Test that multiple engines can be created sequentially.
@@ -26,9 +30,7 @@ fn test_engine_custom_sample_rate() {
 #[test]
 fn test_engine_sequential_creation() {
     for i in 0..3 {
-        let engine = TuttiEngine::builder()
-            .build()
-            .unwrap();
+        let engine = TuttiEngine::builder().build().unwrap();
 
         assert!(engine.is_running());
         // Engine is dropped here, releasing audio device
@@ -41,8 +43,8 @@ fn test_graph_node_creation() {
     let engine = test_engine();
 
     // Create nodes directly in graph
-    let node1 = engine.graph(|net| net.add(sine_hz::<f32>(440.0)).id());
-    let node2 = engine.graph(|net| net.add(sine_hz::<f32>(880.0)).id());
+    let node1 = engine.graph_mut(|net| net.add(sine_hz::<f32>(440.0)).id());
+    let node2 = engine.graph_mut(|net| net.add(sine_hz::<f32>(880.0)).id());
 
     // Both should succeed and be different
     assert_ne!(node1, node2);
@@ -53,7 +55,7 @@ fn test_graph_node_creation() {
 fn test_graph_operations() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         let osc = net.add(sine_hz::<f32>(440.0)).id();
         net.pipe_output(osc);
     });

@@ -1,11 +1,11 @@
-//! # 20 - Neural Workflow
+//! # 26 - Neural Workflow
 //!
 //! Complete workflow for neural model creation, conversion, and usage.
 //!
 //! **Concepts:** Model pipeline, Burn backend, SafeTensors format
 //!
 //! ```bash
-//! cargo run --example 20_neural_workflow --features neural,burn
+//! cargo run --example 26_neural_workflow --features neural,burn
 //! ```
 
 use tutti::prelude::*;
@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("  2. Export: torch.onnx.export(model, input, \"model.onnx\")");
     println!("  3. Convert: burn-import onnx model.onnx --out-type burn model.mpk");
     println!("  4. Load: let (synth, _id) = engine.neural_synth(\"model.mpk\").build()?;");
-    println!("  5. Use: engine.graph(|net| net.add_boxed(synth).master());");
+    println!("  5. Use: engine.graph_mut(|net| net.add_boxed(synth).master());");
 
     Ok(())
 }

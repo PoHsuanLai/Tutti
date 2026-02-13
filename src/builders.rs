@@ -8,20 +8,21 @@
 //! ```ignore
 //! // SoundFont
 //! let piano = engine.sf2("piano.sf2").preset(0).build()?;
-//! engine.graph(|net| net.add(piano).master());
+//! engine.graph_mut(|net| net.add(piano).master());
 //!
 //! // Audio samples
 //! let kick = engine.wav("kick.wav").build()?;
 //! let snare = engine.flac("snare.flac").speed(0.8).build()?;
 //!
 //! // Compose before adding
-//! engine.graph(|net| {
+//! engine.graph_mut(|net| {
 //!     net.add(kick >> reverb);
 //! });
 //! ```
 
 use crate::Result;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 // ============================================================================
 // SoundFont Builder
@@ -39,7 +40,7 @@ use std::path::PathBuf;
 ///     .preset(0)
 ///     .channel(0)
 ///     .build()?;
-/// engine.graph(|net| net.add(piano).master());
+/// engine.graph_mut(|net| net.add(piano).master());
 /// ```
 #[cfg(feature = "soundfont")]
 pub struct Sf2Builder<'a> {
@@ -86,12 +87,10 @@ impl<'a> Sf2Builder<'a> {
         let soundfont_system = self.engine.soundfont_system();
 
         // Load (or get cached) SoundFont
-        let handle = soundfont_system.load(&self.path).map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to load SoundFont: {:?}", e))
-        })?;
+        let handle = soundfont_system.load(&self.path)?;
 
         let soundfont = soundfont_system.get(&handle).ok_or_else(|| {
-            crate::Error::InvalidConfig("SoundFont not found in cache".to_string())
+            tutti_core::Error::InvalidConfig("SoundFont not found in cache".to_string())
         })?;
 
         let settings = soundfont_system.default_settings();
@@ -99,7 +98,7 @@ impl<'a> Sf2Builder<'a> {
         // Create unit with or without MIDI registry
         #[cfg(feature = "midi")]
         let mut unit = {
-            let midi_registry = self.engine.graph(|net| net.midi_registry().clone());
+            let midi_registry = self.engine.graph_mut(|net| net.midi_registry().clone());
             crate::synth::SoundFontUnit::with_midi(soundfont, &settings, midi_registry)
         };
 
@@ -114,13 +113,13 @@ impl<'a> Sf2Builder<'a> {
 }
 
 // ============================================================================
-// Audio Sample Builders
+// Audio Sample Builder
 // ============================================================================
 
-/// Fluent builder for WAV audio samples.
+/// Fluent builder for audio samples (WAV, FLAC, MP3, OGG).
 ///
-/// Created via `engine.wav(path)`. Loads the audio file (cached) and creates
-/// a sampler unit for playback.
+/// Created via `engine.wav(path)`, `engine.flac(path)`, etc. Loads the audio
+/// file (cached) and creates a sampler unit for playback.
 ///
 /// # Example
 ///
@@ -130,20 +129,21 @@ impl<'a> Sf2Builder<'a> {
 ///     .speed(1.2)
 ///     .looping(true)
 ///     .build()?;
-/// engine.graph(|net| net.add(kick).master());
+/// engine.graph_mut(|net| net.add(kick).master());
 /// ```
-#[cfg(all(feature = "sampler", feature = "wav"))]
-pub struct WavBuilder<'a> {
+#[cfg(feature = "sampler")]
+pub struct SampleBuilder<'a> {
     engine: &'a crate::TuttiEngine,
     path: PathBuf,
     gain: f32,
     speed: f32,
     looping: bool,
+    start_beat: Option<f64>,
+    duration_beats: f64,
 }
 
-#[cfg(all(feature = "sampler", feature = "wav"))]
-impl<'a> WavBuilder<'a> {
-    /// Create a new WAV builder.
+#[cfg(feature = "sampler")]
+impl<'a> SampleBuilder<'a> {
     pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
         Self {
             engine,
@@ -151,6 +151,8 @@ impl<'a> WavBuilder<'a> {
             gain: 1.0,
             speed: 1.0,
             looping: false,
+            start_beat: None,
+            duration_beats: 0.0,
         }
     }
 
@@ -178,177 +180,50 @@ impl<'a> WavBuilder<'a> {
         self
     }
 
+    /// Place this sample on the timeline at a beat position.
+    /// Enables transport-aware playback: the sampler will only produce
+    /// audio when the transport is playing and the playhead is within range.
+    pub fn start_beat(mut self, beat: f64) -> Self {
+        self.start_beat = Some(beat);
+        self
+    }
+
+    /// Set the duration in beats for transport-aware playback.
+    /// 0.0 means play the entire sample.
+    pub fn duration_beats(mut self, beats: f64) -> Self {
+        self.duration_beats = beats;
+        self
+    }
+
     /// Build the sampler unit.
     ///
     /// Returns a `SamplerUnit` that can be added to the audio graph.
-    /// The audio file is loaded and cached if not already loaded.
+    /// Tries the cache first; if not cached, loads the file synchronously
+    /// and caches it for future use.
     pub fn build(self) -> Result<crate::sampler::SamplerUnit> {
-        let wave = self.engine.load_wave_cached(&self.path)?;
-        Ok(crate::sampler::SamplerUnit::with_settings(
-            wave,
-            self.gain,
-            self.speed,
-            self.looping,
-        ))
-    }
-}
-
-/// Fluent builder for FLAC audio samples.
-#[cfg(all(feature = "sampler", feature = "flac"))]
-pub struct FlacBuilder<'a> {
-    engine: &'a crate::TuttiEngine,
-    path: PathBuf,
-    gain: f32,
-    speed: f32,
-    looping: bool,
-}
-
-#[cfg(all(feature = "sampler", feature = "flac"))]
-impl<'a> FlacBuilder<'a> {
-    /// Create a new FLAC builder.
-    pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
-        Self {
-            engine,
-            path,
-            gain: 1.0,
-            speed: 1.0,
-            looping: false,
+        let wave = match self.engine.get_wave_cached(&self.path) {
+            Ok(w) => w,
+            Err(_) => {
+                // Synchronous fallback: load from disk and cache
+                let w = tutti_core::Wave::load_with_progress(&self.path, |_| {}).map_err(|e| {
+                    crate::Error::Core(tutti_core::Error::InvalidConfig(format!(
+                        "Failed to load {}: {}",
+                        self.path.display(),
+                        e
+                    )))
+                })?;
+                let w = Arc::new(w);
+                self.engine.cache_wave(&self.path, w.clone());
+                w
+            }
+        };
+        let mut unit =
+            crate::sampler::SamplerUnit::with_settings(wave, self.gain, self.speed, self.looping);
+        if let Some(start) = self.start_beat {
+            let transport = self.engine.transport();
+            unit.set_transport(Arc::new(transport), start, self.duration_beats);
         }
-    }
-
-    /// Set playback gain.
-    pub fn gain(mut self, gain: f32) -> Self {
-        self.gain = gain;
-        self
-    }
-
-    /// Set playback speed multiplier.
-    pub fn speed(mut self, speed: f32) -> Self {
-        self.speed = speed;
-        self
-    }
-
-    /// Enable or disable looping.
-    pub fn looping(mut self, looping: bool) -> Self {
-        self.looping = looping;
-        self
-    }
-
-    /// Build the sampler unit.
-    pub fn build(self) -> Result<crate::sampler::SamplerUnit> {
-        let wave = self.engine.load_wave_cached(&self.path)?;
-        Ok(crate::sampler::SamplerUnit::with_settings(
-            wave,
-            self.gain,
-            self.speed,
-            self.looping,
-        ))
-    }
-}
-
-/// Fluent builder for MP3 audio samples.
-#[cfg(all(feature = "sampler", feature = "mp3"))]
-pub struct Mp3Builder<'a> {
-    engine: &'a crate::TuttiEngine,
-    path: PathBuf,
-    gain: f32,
-    speed: f32,
-    looping: bool,
-}
-
-#[cfg(all(feature = "sampler", feature = "mp3"))]
-impl<'a> Mp3Builder<'a> {
-    /// Create a new MP3 builder.
-    pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
-        Self {
-            engine,
-            path,
-            gain: 1.0,
-            speed: 1.0,
-            looping: false,
-        }
-    }
-
-    /// Set playback gain.
-    pub fn gain(mut self, gain: f32) -> Self {
-        self.gain = gain;
-        self
-    }
-
-    /// Set playback speed multiplier.
-    pub fn speed(mut self, speed: f32) -> Self {
-        self.speed = speed;
-        self
-    }
-
-    /// Enable or disable looping.
-    pub fn looping(mut self, looping: bool) -> Self {
-        self.looping = looping;
-        self
-    }
-
-    /// Build the sampler unit.
-    pub fn build(self) -> Result<crate::sampler::SamplerUnit> {
-        let wave = self.engine.load_wave_cached(&self.path)?;
-        Ok(crate::sampler::SamplerUnit::with_settings(
-            wave,
-            self.gain,
-            self.speed,
-            self.looping,
-        ))
-    }
-}
-
-/// Fluent builder for OGG Vorbis audio samples.
-#[cfg(all(feature = "sampler", feature = "ogg"))]
-pub struct OggBuilder<'a> {
-    engine: &'a crate::TuttiEngine,
-    path: PathBuf,
-    gain: f32,
-    speed: f32,
-    looping: bool,
-}
-
-#[cfg(all(feature = "sampler", feature = "ogg"))]
-impl<'a> OggBuilder<'a> {
-    /// Create a new OGG builder.
-    pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
-        Self {
-            engine,
-            path,
-            gain: 1.0,
-            speed: 1.0,
-            looping: false,
-        }
-    }
-
-    /// Set playback gain.
-    pub fn gain(mut self, gain: f32) -> Self {
-        self.gain = gain;
-        self
-    }
-
-    /// Set playback speed multiplier.
-    pub fn speed(mut self, speed: f32) -> Self {
-        self.speed = speed;
-        self
-    }
-
-    /// Enable or disable looping.
-    pub fn looping(mut self, looping: bool) -> Self {
-        self.looping = looping;
-        self
-    }
-
-    /// Build the sampler unit.
-    pub fn build(self) -> Result<crate::sampler::SamplerUnit> {
-        let wave = self.engine.load_wave_cached(&self.path)?;
-        Ok(crate::sampler::SamplerUnit::with_settings(
-            wave,
-            self.gain,
-            self.speed,
-            self.looping,
-        ))
+        Ok(unit)
     }
 }
 
@@ -381,13 +256,11 @@ fn load_plugin(
                 &path,
                 sample_rate,
                 block_size,
-            )
-            .map_err(|e| crate::Error::InvalidConfig(format!("CLAP load failed: {e}")))?;
+            )?;
             // Activate on the main thread (CLAP requirement).
             // start_processing() will be called lazily on the bridge thread
             // by the first process_f32() call.
-            inst.activate()
-                .map_err(|e| crate::Error::InvalidConfig(format!("CLAP activate failed: {e}")))?;
+            inst.activate()?;
             Box::new(inst)
         }
         #[cfg(feature = "vst3")]
@@ -396,8 +269,7 @@ fn load_plugin(
                 &path,
                 sample_rate,
                 block_size,
-            )
-            .map_err(|e| crate::Error::InvalidConfig(format!("VST3 load failed: {e}")))?;
+            )?;
             Box::new(inst)
         }
         #[cfg(feature = "vst2")]
@@ -406,19 +278,23 @@ fn load_plugin(
                 &path,
                 sample_rate,
                 block_size,
-            )
-            .map_err(|e| crate::Error::InvalidConfig(format!("VST2 load failed: {e}")))?;
+            )?;
             Box::new(inst)
         }
         _ => {
-            return Err(crate::Error::InvalidConfig(format!(
+            return Err(tutti_core::Error::InvalidConfig(format!(
                 "Unsupported plugin format: .{ext}"
-            )));
+            ))
+            .into());
         }
     };
 
     let metadata = instance.metadata().clone();
-    let num_channels = metadata.audio_io.inputs.max(metadata.audio_io.outputs).max(2);
+    let num_channels = metadata
+        .audio_io
+        .inputs
+        .max(metadata.audio_io.outputs)
+        .max(2);
 
     let (bridge, thread_handle) =
         crate::plugin::InProcessBridge::new(instance, num_channels, block_size);
@@ -433,30 +309,27 @@ fn load_plugin(
     }
 
     // Create PluginClient for AudioUnit impl
-    let mut client = crate::plugin::PluginClient::from_bridge(
-        bridge_arc.clone(),
-        metadata.clone(),
-        block_size,
-    );
+    let mut client =
+        crate::plugin::PluginClient::from_bridge(bridge_arc.clone(), metadata.clone(), block_size);
 
     // Inject MIDI registry so engine.note_on() reaches the plugin
     #[cfg(feature = "midi")]
     {
-        let midi_registry = engine.graph(|net| net.midi_registry().clone());
+        let midi_registry = engine.graph_mut(|net| net.midi_registry().clone());
         client.set_midi_registry(midi_registry);
     }
 
-    let plugin_handle =
-        crate::plugin::PluginHandle::from_bridge_and_metadata(bridge_arc, metadata);
+    let plugin_handle = crate::plugin::PluginHandle::from_bridge_and_metadata(bridge_arc, metadata);
 
     engine.store_inprocess_handle(thread_handle, plugin_handle.clone());
 
     Ok((Box::new(client), plugin_handle))
 }
 
-/// Fluent builder for VST3 plugins.
+/// Fluent builder for audio plugins (VST3, VST2, CLAP).
 ///
-/// Created via `engine.vst3(path)`. Loads the plugin in-process (GUI editor works).
+/// Created via `engine.vst3(path)`, `engine.vst2(path)`, or `engine.clap(path)`.
+/// Loads the plugin in-process (GUI editor works).
 ///
 /// # Example
 ///
@@ -466,75 +339,15 @@ fn load_plugin(
 ///     .build()?;
 /// handle.open_editor(window_handle);
 /// ```
-#[cfg(all(feature = "plugin", feature = "vst3"))]
-pub struct Vst3Builder<'a> {
+#[cfg(feature = "plugin")]
+pub struct PluginBuilder<'a> {
     engine: &'a crate::TuttiEngine,
     path: PathBuf,
     params: std::collections::HashMap<String, f32>,
 }
 
-#[cfg(all(feature = "plugin", feature = "vst3"))]
-impl<'a> Vst3Builder<'a> {
-    pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
-        Self {
-            engine,
-            path,
-            params: std::collections::HashMap::new(),
-        }
-    }
-
-    /// Set a plugin parameter by numeric ID.
-    pub fn param(mut self, name: impl Into<String>, value: f32) -> Self {
-        self.params.insert(name.into(), value);
-        self
-    }
-
-    /// Build the plugin instance.
-    pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::plugin::PluginHandle)> {
-        load_plugin(self.engine, self.path, &self.params)
-    }
-}
-
-/// Fluent builder for VST2 plugins.
-#[cfg(all(feature = "plugin", feature = "vst2"))]
-pub struct Vst2Builder<'a> {
-    engine: &'a crate::TuttiEngine,
-    path: PathBuf,
-    params: std::collections::HashMap<String, f32>,
-}
-
-#[cfg(all(feature = "plugin", feature = "vst2"))]
-impl<'a> Vst2Builder<'a> {
-    pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
-        Self {
-            engine,
-            path,
-            params: std::collections::HashMap::new(),
-        }
-    }
-
-    /// Set a plugin parameter by numeric ID.
-    pub fn param(mut self, name: impl Into<String>, value: f32) -> Self {
-        self.params.insert(name.into(), value);
-        self
-    }
-
-    /// Build the plugin instance.
-    pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::plugin::PluginHandle)> {
-        load_plugin(self.engine, self.path, &self.params)
-    }
-}
-
-/// Fluent builder for CLAP plugins.
-#[cfg(all(feature = "plugin", feature = "clap"))]
-pub struct ClapBuilder<'a> {
-    engine: &'a crate::TuttiEngine,
-    path: PathBuf,
-    params: std::collections::HashMap<String, f32>,
-}
-
-#[cfg(all(feature = "plugin", feature = "clap"))]
-impl<'a> ClapBuilder<'a> {
+#[cfg(feature = "plugin")]
+impl<'a> PluginBuilder<'a> {
     pub(crate) fn new(engine: &'a crate::TuttiEngine, path: PathBuf) -> Self {
         Self {
             engine,
@@ -568,7 +381,7 @@ impl<'a> ClapBuilder<'a> {
 ///
 /// ```ignore
 /// let violin = engine.neural_synth("violin.mpk").build()?;
-/// engine.graph(|net| net.add_neural(violin, model_id).master());
+/// engine.graph_mut(|net| net.add_neural(violin, model_id).master());
 /// ```
 #[cfg(all(feature = "neural", feature = "midi"))]
 pub struct NeuralSynthBuilder<'a> {
@@ -588,18 +401,15 @@ impl<'a> NeuralSynthBuilder<'a> {
     /// Returns the voice unit and its model ID for batched inference.
     pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::NeuralModelId)> {
         let neural = self.engine.neural();
-        let path_str = self.path.to_str().ok_or_else(|| {
-            crate::Error::InvalidConfig("Invalid UTF-8 in path".to_string())
-        })?;
+        let path_str = self
+            .path
+            .to_str()
+            .ok_or_else(|| tutti_core::Error::InvalidConfig("Invalid UTF-8 in path".to_string()))?;
 
-        let builder = neural.load_synth(path_str).map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to load neural synth model: {}", e))
-        })?;
+        let builder = neural.load_synth(path_str)?;
 
         let model_id = builder.model_id();
-        let voice = builder.build_voice().map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to build neural voice: {}", e))
-        })?;
+        let voice = builder.build_voice()?;
 
         Ok((voice, model_id))
     }
@@ -627,18 +437,15 @@ impl<'a> NeuralEffectBuilder<'a> {
     /// Returns the effect unit and its model ID for batched inference.
     pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::NeuralModelId)> {
         let neural = self.engine.neural();
-        let path_str = self.path.to_str().ok_or_else(|| {
-            crate::Error::InvalidConfig("Invalid UTF-8 in path".to_string())
-        })?;
+        let path_str = self
+            .path
+            .to_str()
+            .ok_or_else(|| tutti_core::Error::InvalidConfig("Invalid UTF-8 in path".to_string()))?;
 
-        let builder = neural.load_effect(path_str).map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to load neural effect model: {}", e))
-        })?;
+        let builder = neural.load_effect(path_str)?;
 
         let model_id = builder.model_id();
-        let effect = builder.build_effect().map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to build neural effect: {}", e))
-        })?;
+        let effect = builder.build_effect()?;
 
         Ok((effect, model_id))
     }
@@ -672,23 +479,18 @@ where
     /// Returns the voice unit and its model ID for batched inference.
     pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::NeuralModelId)> {
         // Get MIDI registry for pull-based MIDI delivery
-        let midi_registry = self.engine.graph(|net| net.midi_registry().clone());
+        let midi_registry = self.engine.graph_mut(|net| net.midi_registry().clone());
 
         let neural_handle = self.engine.neural();
         let neural_system = neural_handle.inner().ok_or_else(|| {
-            crate::Error::InvalidConfig("Neural subsystem not enabled".into())
+            tutti_core::Error::InvalidConfig("Neural subsystem not enabled".into())
         })?;
 
-        let builder = neural_system
-            .register_synth("_closure_synth", self.infer_fn, Some(midi_registry))
-            .map_err(|e| {
-                crate::Error::InvalidConfig(format!("Failed to register neural synth: {}", e))
-            })?;
+        let builder =
+            neural_system.register_synth("_closure_synth", self.infer_fn, Some(midi_registry))?;
 
         let model_id = builder.model_id();
-        let voice = builder.build_voice().map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to build neural synth: {}", e))
-        })?;
+        let voice = builder.build_voice()?;
 
         Ok((voice, model_id))
     }
@@ -720,19 +522,13 @@ where
     pub fn build(self) -> Result<(Box<dyn crate::AudioUnit>, crate::NeuralModelId)> {
         let neural_handle = self.engine.neural();
         let neural_system = neural_handle.inner().ok_or_else(|| {
-            crate::Error::InvalidConfig("Neural subsystem not enabled".into())
+            tutti_core::Error::InvalidConfig("Neural subsystem not enabled".into())
         })?;
 
-        let builder = neural_system
-            .register_effect("_closure_effect", self.infer_fn)
-            .map_err(|e| {
-                crate::Error::InvalidConfig(format!("Failed to register neural effect: {}", e))
-            })?;
+        let builder = neural_system.register_effect("_closure_effect", self.infer_fn)?;
 
         let model_id = builder.model_id();
-        let effect = builder.build_effect().map_err(|e| {
-            crate::Error::InvalidConfig(format!("Failed to build neural effect: {}", e))
-        })?;
+        let effect = builder.build_effect()?;
 
         Ok((effect, model_id))
     }

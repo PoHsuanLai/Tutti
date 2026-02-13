@@ -57,7 +57,7 @@ let sine = engine.create("sine", &params! { "frequency" => 440.0 })?;
 let filter = engine.create("lowpass", &params! { "cutoff" => 2000.0 })?;
 
 // Build audio graph with macros
-engine.graph(|net| {
+engine.graph_mut(|net| {
     chain!(net, sine, filter => output);
 });
 
@@ -111,7 +111,7 @@ let reverb = engine.create("reverb", &params! { "room_size" => 0.9 })?;
 let filter = engine.create("my_filter", &params! { "cutoff" => 2000.0 })?;
 
 // Build graph with node IDs
-engine.graph(|net| {
+engine.graph_mut(|net| {
     chain!(net, synth, filter, reverb => output);
 });
 ```
@@ -199,7 +199,7 @@ engine.load_flac("snare", "snare.flac")?;
 let kick = engine.create("kick", &params! {})?;
 let snare = engine.create("snare", &params! {})?;
 
-engine.graph(|net| {
+engine.graph_mut(|net| {
     let mix = mix!(net, kick, snare);
     net.pipe_output(mix);
 });
@@ -268,7 +268,7 @@ You can also use subsystems independently without the umbrella crate:
 use tutti_core::TuttiSystem;
 
 let system = TuttiSystem::builder().build()?;
-system.graph(|net| {
+system.graph_mut(|net| {
     // Build DSP graph
 });
 ```

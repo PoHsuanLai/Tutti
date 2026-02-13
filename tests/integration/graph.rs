@@ -16,9 +16,9 @@ fn test_graph_direct_nodes() {
     let engine = test_engine();
 
     // Create nodes directly in graph
-    let osc1 = engine.graph(|net| net.add(sine_hz::<f64>(220.0)).id());
-    let osc2 = engine.graph(|net| net.add(sine_hz::<f64>(440.0)).id());
-    let filter = engine.graph(|net| net.add(lowpole_hz(800.0)).id());
+    let osc1 = engine.graph_mut(|net| net.add(sine_hz::<f64>(220.0)).id());
+    let osc2 = engine.graph_mut(|net| net.add(sine_hz::<f64>(440.0)).id());
+    let filter = engine.graph_mut(|net| net.add(lowpole_hz(800.0)).id());
 
     // Verify different instances get unique IDs
     assert_ne!(osc1, osc2);
@@ -42,8 +42,8 @@ fn test_graph_registered_nodes() {
     });
 
     // Nodes can now be accessed via registry, but we use graph() directly
-    let osc = engine.graph(|net| net.add(sine_hz::<f64>(440.0)).id());
-    let filter = engine.graph(|net| net.add(lowpole_hz(800.0)).id());
+    let osc = engine.graph_mut(|net| net.add(sine_hz::<f64>(440.0)).id());
+    let filter = engine.graph_mut(|net| net.add(lowpole_hz(800.0)).id());
 
     // Verify different nodes get unique IDs
     assert_ne!(osc, filter);
@@ -63,8 +63,8 @@ fn test_graph_dsp_lfo() {
     let lfo2 = LfoNode::new(LfoShape::Sine, 5.0);
     lfo2.set_depth(0.8);
 
-    let lfo1_id = engine.graph(|net| net.add(lfo1).id());
-    let lfo2_id = engine.graph(|net| net.add(lfo2).id());
+    let lfo1_id = engine.graph_mut(|net| net.add(lfo1).id());
+    let lfo2_id = engine.graph_mut(|net| net.add(lfo2).id());
 
     assert_ne!(lfo1_id, lfo2_id);
 }
@@ -74,7 +74,7 @@ fn test_graph_dsp_lfo() {
 fn test_graph_stereo_split() {
     let engine = test_engine();
 
-    engine.graph(|net| {
+    engine.graph_mut(|net| {
         let mono = net.add(sine_hz::<f64>(440.0)).id();
         let split = net.add_split();
         let reverb = net.add(reverb_stereo(10.0, 2.0, 0.5)).id();

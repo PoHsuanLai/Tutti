@@ -1,50 +1,102 @@
-//! # 16 - Spatial Audio
+//! # 21 - Spatial Audio
 //!
-//! 3D audio positioning with binaural (headphones) and VBAP (surround) panning.
+//! Compare two spatial panning methods:
+//! 1. **VBAP** (Vector Base Amplitude Panning) — amplitude-only, clean panning
+//! 2. **Binaural** (ITD/ILD) — time + level differences, more 3D on headphones
 //!
-//! **Concepts:** `BinauralPannerNode`, `SpatialPannerNode`, azimuth, elevation
+//! Each method does: hard left → hard right → center → continuous rotation.
+//!
+//! **Concepts:** `SpatialPannerNode`, `BinauralPannerNode`, VBAP, ITD/ILD, Arc-shared atomics
 //!
 //! ```bash
-//! cargo run --example 16_spatial_audio
+//! cargo run --example 21_spatial_audio --features dsp
 //! ```
 
 use std::time::Duration;
 use tutti::prelude::*;
-use tutti::BinauralPannerNode;
+use tutti::{BinauralPannerNode, SpatialPannerNode, TuttiNet};
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder()
-        .sample_rate(44100.0)
-        .outputs(2)
-        .build()?;
+    let engine = TuttiEngine::builder().outputs(2).build()?;
 
-    let panner = BinauralPannerNode::new(44100.0);
+    println!("Put on headphones for best effect!\n");
 
-    // Create audio source directly in graph
-    let source = engine.graph(|net| net.add(sine_hz::<f32>(880.0) * 0.4).id());
+    // ── Part 1: VBAP ──
+    println!("=== VBAP (amplitude panning) ===\n");
 
-    engine.graph(|net| {
-        let panner_id = net.add(panner.clone()).id();
-        net.pipe(source, panner_id);
-        net.pipe_output(panner_id);
+    let vbap = SpatialPannerNode::stereo()?;
+    let vbap_handle = vbap.clone();
+    let source = sine_hz::<f32>(440.0) * 0.5;
+
+    engine.graph_mut(|net: &mut TuttiNet| {
+        let src_id = net.add(source).id();
+        let pan_id = net.add(vbap).id();
+        net.connect_ports(src_id, 0, pan_id, 0);
+        net.connect_ports(src_id, 0, pan_id, 1);
+        net.pipe_output(pan_id);
     });
 
     engine.transport().play();
-    println!("Binaural panning (use headphones)...");
+    run_spatial_test(&vbap_handle);
 
-    // Rotate around listener
-    for i in 0..16 {
-        let azimuth = (i as f32) * 22.5;
-        panner.set_position(azimuth, 0.0);
-        std::thread::sleep(Duration::from_millis(500));
-    }
+    // ── Part 2: Binaural ──
+    // Replace the graph with a binaural panner
+    println!("\n=== Binaural (ITD/ILD) ===\n");
 
-    // Elevation demo
-    panner.set_position(0.0, 0.0);
-    for elevation in [-45.0_f32, 0.0, 45.0, 0.0, -45.0] {
-        panner.set_position(0.0, elevation);
-        std::thread::sleep(Duration::from_millis(800));
-    }
+    let binaural = BinauralPannerNode::new(48000.0);
+    let binaural_handle = binaural.clone();
+    let source2 = sine_hz::<f32>(440.0) * 0.5;
 
+    engine.graph_mut(|net: &mut TuttiNet| {
+        net.reset();
+        let src_id = net.add(source2).id();
+        let pan_id = net.add(binaural).id();
+        net.connect_ports(src_id, 0, pan_id, 0);
+        net.connect_ports(src_id, 0, pan_id, 1);
+        net.pipe_output(pan_id);
+    });
+
+    run_spatial_test(&binaural_handle);
+
+    println!("Done.");
     Ok(())
+}
+
+trait SpatialHandle {
+    fn set_position(&self, azimuth: f32, elevation: f32);
+}
+
+impl SpatialHandle for SpatialPannerNode {
+    fn set_position(&self, azimuth: f32, elevation: f32) {
+        SpatialPannerNode::set_position(self, azimuth, elevation);
+    }
+}
+
+impl SpatialHandle for BinauralPannerNode {
+    fn set_position(&self, azimuth: f32, elevation: f32) {
+        BinauralPannerNode::set_position(self, azimuth, elevation);
+    }
+}
+
+fn run_spatial_test(handle: &dyn SpatialHandle) {
+    println!("Hard LEFT for 2 seconds...");
+    handle.set_position(90.0, 0.0);
+    std::thread::sleep(Duration::from_secs(2));
+
+    println!("Hard RIGHT for 2 seconds...");
+    handle.set_position(-90.0, 0.0);
+    std::thread::sleep(Duration::from_secs(2));
+
+    println!("CENTER for 2 seconds...");
+    handle.set_position(0.0, 0.0);
+    std::thread::sleep(Duration::from_secs(2));
+
+    println!("Rotating (5 seconds)...");
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(5) {
+        let t = start.elapsed().as_secs_f32();
+        let azimuth = (t * 360.0) % 360.0 - 180.0;
+        handle.set_position(azimuth, 0.0);
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }

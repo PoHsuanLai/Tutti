@@ -1,24 +1,25 @@
-//! # 12 - Metering
+//! # 13 - Metering
 //!
 //! Monitor audio levels: peak, RMS, LUFS loudness, stereo correlation.
 //!
 //! **Concepts:** `metering()`, amplitude, LUFS, stereo analysis, CPU meter
 //!
 //! ```bash
-//! cargo run --example 12_metering
+//! cargo run --example 13_metering
 //! ```
 
 use std::time::Duration;
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
     // Enable meters with fluent API
     engine.metering().amp().lufs().correlation().cpu();
 
     // Create a test signal: stereo sine with slight detune (creates movement)
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         let left = sine_hz::<f64>(440.0) * 0.5;
         let right = sine_hz::<f64>(442.0) * 0.5; // Slight detune
         net.add(left | right).master();

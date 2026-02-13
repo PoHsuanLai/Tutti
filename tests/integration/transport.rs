@@ -103,10 +103,7 @@ fn test_transport_loop_enable() {
     assert!(!engine.transport().is_loop_enabled());
 
     // Set loop range and enable
-    engine
-        .transport()
-        .loop_range(0.0, 4.0)
-        .enable_loop();
+    engine.transport().loop_range(0.0, 4.0).enable_loop();
 
     assert!(engine.transport().is_loop_enabled());
 

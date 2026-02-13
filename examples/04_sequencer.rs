@@ -10,11 +10,12 @@
 
 use std::time::{Duration, Instant};
 use tutti::prelude::*;
+use tutti::TuttiNet;
 
 fn main() -> tutti::Result<()> {
-    let engine = TuttiEngine::builder().sample_rate(44100.0).build()?;
+    let engine = TuttiEngine::builder().build()?;
 
-    engine.graph(|net| {
+    engine.graph_mut(|net: &mut TuttiNet| {
         net.add(dc(0.0)).master();
     });
 
@@ -36,13 +37,13 @@ fn main() -> tutti::Result<()> {
             last = time;
             print!("{} ", sound);
             match sound {
-                'K' => engine.graph(|net| {
+                'K' => engine.graph_mut(|net: &mut TuttiNet| {
                     net.add(sine_hz::<f32>(110.0) * 0.5).master();
                 }),
-                'S' => engine.graph(|net| {
+                'S' => engine.graph_mut(|net: &mut TuttiNet| {
                     net.add(sine_hz::<f32>(200.0) * 0.4).master();
                 }),
-                'H' => engine.graph(|net| {
+                'H' => engine.graph_mut(|net: &mut TuttiNet| {
                     net.add(pink::<f64>() >> (bandpass_hz::<f32>(8000.0, 100.0) * 0.2))
                         .master();
                 }),

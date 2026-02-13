@@ -119,7 +119,7 @@ register_neural_model(&registry, &neural, "my_model", "path/to/model.mpk")?;
 let synth = registry.create("my_model", &params! {})?;
 
 // 3. Use in audio graph
-engine.graph(|net| {
+engine.graph_mut(|net| {
     let id = net.add(synth);
     net.pipe_output(id);
 });
