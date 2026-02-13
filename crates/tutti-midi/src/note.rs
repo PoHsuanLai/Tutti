@@ -386,9 +386,9 @@ mod tests {
         assert_eq!(Note::G9.transpose(-128), None); // -128 fits in i8
 
         // Middle note both directions
-        assert_eq!(Note::C4.transpose(67), Some(Note::G9));  // 60 + 67 = 127
-        assert_eq!(Note::C4.transpose(68), None);             // 60 + 68 = 128, out of range
+        assert_eq!(Note::C4.transpose(67), Some(Note::G9)); // 60 + 67 = 127
+        assert_eq!(Note::C4.transpose(68), None); // 60 + 68 = 128, out of range
         assert_eq!(Note::C4.transpose(-60), Some(Note::Cm1)); // 60 - 60 = 0
-        assert_eq!(Note::C4.transpose(-61), None);            // 60 - 61 = -1, out of range
+        assert_eq!(Note::C4.transpose(-61), None); // 60 - 61 = -1, out of range
     }
 }

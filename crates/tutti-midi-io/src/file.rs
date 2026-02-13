@@ -26,12 +26,25 @@ pub struct TimedMidiEvent {
 
 #[derive(Debug, Clone, Copy)]
 pub enum MidiEventType {
-    NoteOn { note: u8, velocity: u8 },
-    NoteOff { note: u8, velocity: u8 },
-    ControlChange { controller: u8, value: u8 },
-    ProgramChange { program: u8 },
+    NoteOn {
+        note: u8,
+        velocity: u8,
+    },
+    NoteOff {
+        note: u8,
+        velocity: u8,
+    },
+    ControlChange {
+        controller: u8,
+        value: u8,
+    },
+    ProgramChange {
+        program: u8,
+    },
     /// Value range: -8192 to 8191.
-    PitchBend { value: i16 },
+    PitchBend {
+        value: i16,
+    },
 }
 
 impl ParsedMidiFile {
@@ -141,11 +154,9 @@ impl ParsedMidiFile {
                     MidiMessage::ProgramChange { program } => MidiEventType::ProgramChange {
                         program: program.as_int(),
                     },
-                    MidiMessage::PitchBend { bend } => {
-                        MidiEventType::PitchBend {
-                            value: bend.as_int(),
-                        }
-                    }
+                    MidiMessage::PitchBend { bend } => MidiEventType::PitchBend {
+                        value: bend.as_int(),
+                    },
                     _ => return None,
                 };
 

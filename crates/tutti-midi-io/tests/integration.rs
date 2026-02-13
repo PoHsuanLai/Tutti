@@ -2,6 +2,7 @@
 //!
 //! These tests exercise multi-component workflows without hardware MIDI devices.
 
+use std::time::Instant;
 use tutti_midi_io::{
     cc::{CCMappingManager, CCTarget},
     midi_output_channel, MidiEvent, MidiOutputAggregator, MidiSystem, ParsedMidiFile, PortType,
@@ -31,11 +32,11 @@ fn test_midi_system_port_flow() {
     // Simulate hardware callback: push Note On + CC
     let note_on = MidiEvent::note_on(0, 0, 60, 100);
     let cc_msg = MidiEvent::control_change(10, 0, 7, 127);
-    assert!(producer.push(note_on));
-    assert!(producer.push(cc_msg));
+    assert!(producer.push(note_on, Instant::now()));
+    assert!(producer.push(cc_msg, Instant::now()));
 
     // Simulate audio thread: read all inputs
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, Instant::now(), 44100.0);
     assert_eq!(events.len(), 2);
     assert!(events[0].1.is_note_on());
     assert_eq!(events[0].1.note(), Some(60));
@@ -64,13 +65,13 @@ fn test_inactive_port_skipped_in_cycle() {
     let handle_a = pm.get_input_producer_handle(port_a).unwrap();
     let handle_b = pm.get_input_producer_handle(port_b).unwrap();
 
-    handle_a.push(MidiEvent::note_on(0, 0, 60, 100));
-    handle_b.push(MidiEvent::note_on(0, 0, 72, 100));
+    handle_a.push(MidiEvent::note_on(0, 0, 60, 100), Instant::now());
+    handle_b.push(MidiEvent::note_on(0, 0, 72, 100), Instant::now());
 
     // Deactivate port B
     pm.set_port_active(PortType::Input, port_b, false);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, Instant::now(), 44100.0);
     assert_eq!(events.len(), 1, "Only active port events should appear");
     assert_eq!(events[0].1.note(), Some(60));
 }
@@ -245,7 +246,10 @@ fn make_midi_file_bytes(ticks_per_beat: u16, tempo_us: u32, track_events: &[u8])
 
     // Track length: tempo meta event + user events + end-of-track
     let tempo_event = [
-        0x00, 0xFF, 0x51, 0x03,
+        0x00,
+        0xFF,
+        0x51,
+        0x03,
         (tempo_us >> 16) as u8,
         (tempo_us >> 8) as u8,
         tempo_us as u8,
@@ -271,8 +275,7 @@ fn test_midi_file_parse_note_pair() {
     // 480 ticks per beat, 120 BPM (500000 us/qn)
     let track_events = [
         // Delta=0, Note On ch0, note 60, vel 100
-        0x00, 0x90, 60, 100,
-        // Delta=480 (one beat), Note Off ch0, note 60, vel 0
+        0x00, 0x90, 60, 100, // Delta=480 (one beat), Note Off ch0, note 60, vel 0
         0x83, 0x60, // VLQ for 480
         0x80, 60, 0,
     ];
@@ -312,9 +315,9 @@ fn test_midi_file_parse_note_pair() {
 #[test]
 fn test_midi_file_velocity_zero_is_note_off() {
     let track_events = [
-        0x00, 0x90, 60, 100,   // Note On
-        0x83, 0x60,             // delta 480
-        0x90, 60, 0,            // Note On vel=0 → should become NoteOff
+        0x00, 0x90, 60, 100, // Note On
+        0x83, 0x60, // delta 480
+        0x90, 60, 0, // Note On vel=0 → should become NoteOff
     ];
 
     let data = make_midi_file_bytes(480, 500_000, &track_events);
@@ -326,7 +329,10 @@ fn test_midi_file_velocity_zero_is_note_off() {
             assert_eq!(note, 60);
             assert_eq!(velocity, 0);
         }
-        _ => panic!("Expected NoteOff from vel=0, got {:?}", file.events[1].event),
+        _ => panic!(
+            "Expected NoteOff from vel=0, got {:?}",
+            file.events[1].event
+        ),
     }
 }
 
@@ -335,8 +341,7 @@ fn test_midi_file_velocity_zero_is_note_off() {
 fn test_midi_file_cc_and_pitch_bend() {
     let track_events = [
         // CC: delta=0, ch0, CC7 = 100
-        0x00, 0xB0, 7, 100,
-        // Pitch Bend: delta=0, ch0, LSB=0, MSB=64 (center = 8192)
+        0x00, 0xB0, 7, 100, // Pitch Bend: delta=0, ch0, LSB=0, MSB=64 (center = 8192)
         0x00, 0xE0, 0x00, 0x40,
     ];
 
@@ -366,7 +371,7 @@ fn test_midi_file_cc_and_pitch_bend() {
 fn test_midi_file_events_in_range() {
     // Create 4 notes at beats 0, 1, 2, 3
     let track_events = [
-        0x00, 0x90, 60, 100,       // beat 0
+        0x00, 0x90, 60, 100, // beat 0
         0x83, 0x60, 0x90, 64, 100, // beat 1
         0x83, 0x60, 0x90, 67, 100, // beat 2
         0x83, 0x60, 0x90, 72, 100, // beat 3
@@ -419,11 +424,11 @@ fn test_event_creation_and_port_injection() {
     ];
 
     for e in &events {
-        assert!(handle.push(*e));
+        assert!(handle.push(*e, Instant::now()));
     }
 
     // Read back
-    let read = pm.cycle_start_read_all_inputs(512);
+    let read = pm.cycle_start_read_all_inputs(512, Instant::now(), 44100.0);
     assert_eq!(read.len(), 4);
     assert!(read[0].1.is_note_on());
     assert!(read[3].1.is_note_off());
@@ -481,10 +486,10 @@ fn test_midi_system_clone_shares_state() {
 #[test]
 fn test_midi_file_to_port_pipeline() {
     let track_events = [
-        0x00, 0x90, 60, 100,       // beat 0: Note On
-        0x83, 0x60, 0x80, 60, 0,   // beat 1: Note Off
-        0x00, 0x90, 64, 80,        // beat 1: Note On
-        0x83, 0x60, 0x80, 64, 0,   // beat 2: Note Off
+        0x00, 0x90, 60, 100, // beat 0: Note On
+        0x83, 0x60, 0x80, 60, 0, // beat 1: Note Off
+        0x00, 0x90, 64, 80, // beat 1: Note On
+        0x83, 0x60, 0x80, 64, 0, // beat 2: Note Off
     ];
 
     let data = make_midi_file_bytes(480, 500_000, &track_events);
@@ -513,11 +518,11 @@ fn test_midi_file_to_port_pipeline() {
             }
             tutti_midi_io::MidiEventType::ProgramChange { .. } => continue,
         };
-        assert!(handle.push(event));
+        assert!(handle.push(event, Instant::now()));
     }
 
     // Read all
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, Instant::now(), 44100.0);
     assert_eq!(events.len(), 4);
 
     // Verify ordering: on, off, on, off
@@ -543,7 +548,10 @@ fn test_cc_mapping_enable_disable_remove() {
     // Disable
     assert!(cc_mgr.set_mapping_enabled(id, false));
     let result = cc_mgr.process_cc(0, 7, 127);
-    assert!(result.targets.is_empty(), "Disabled mapping should not fire");
+    assert!(
+        result.targets.is_empty(),
+        "Disabled mapping should not fire"
+    );
 
     // Re-enable
     assert!(cc_mgr.set_mapping_enabled(id, true));
@@ -622,7 +630,10 @@ fn test_cc_find_mappings_excludes_disabled() {
     assert_eq!(cc_mgr.find_mappings(0, 7).len(), 1);
 
     cc_mgr.set_mapping_enabled(id, false);
-    assert!(cc_mgr.find_mappings(0, 7).is_empty(), "Disabled mapping should be excluded");
+    assert!(
+        cc_mgr.find_mappings(0, 7).is_empty(),
+        "Disabled mapping should be excluded"
+    );
 }
 
 /// clear_all removes everything; subsequent process_cc produces no targets.
@@ -703,11 +714,18 @@ fn test_cc_learn_blocks_normal_processing() {
     // Process CC7 ch0 — this should complete learn, NOT fire the volume mapping
     let result = cc_mgr.process_cc(0, 7, 127);
     assert!(result.learn_completed.is_some(), "Learn should complete");
-    assert!(result.targets.is_empty(), "Normal mappings should not fire during learn");
+    assert!(
+        result.targets.is_empty(),
+        "Normal mappings should not fire during learn"
+    );
 
     // Now the learn is done — process again, the original + learned mapping should fire
     let result = cc_mgr.process_cc(0, 7, 127);
-    assert_eq!(result.targets.len(), 2, "Both original and learned mapping should fire");
+    assert_eq!(
+        result.targets.len(),
+        2,
+        "Both original and learned mapping should fire"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -941,7 +959,10 @@ mod mpe_integration {
 
         // Reset should clear everything
         mpe.reset();
-        assert!(mpe.get_channel(60).is_none(), "Channel allocation should be cleared");
+        assert!(
+            mpe.get_channel(60).is_none(),
+            "Channel allocation should be cleared"
+        );
     }
 
     /// MpeHandle::expression returns shared expression state.

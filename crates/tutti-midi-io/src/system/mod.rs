@@ -336,24 +336,52 @@ impl MidiSystem {
     }
 
     /// Inject a MIDI 2.0 event into the processing pipeline without hardware.
-    /// Useful for sequencers, AI, or tests.
+    ///
+    /// Converts to MIDI 1.0 and pushes through the standard audio pipeline.
+    /// MIDI 2.0-only messages (e.g. `PerNotePitchBend`) that have no MIDI 1.0
+    /// equivalent are routed to the MPE processor (when `mpe` feature is enabled)
+    /// instead.
     #[cfg(feature = "midi2")]
     pub fn push_midi2_event(&self, port_index: usize, event: Midi2Event) -> bool {
-        let unified = crate::event::UnifiedMidiEvent::V2(event);
-        self.inner
-            .port_manager
-            .push_unified_event(port_index, unified)
+        // Also feed MPE processor for MIDI 2.0-only per-note messages
+        #[cfg(feature = "mpe")]
+        if let Some(ref processor) = self.inner.mpe_processor {
+            let unified = crate::event::UnifiedMidiEvent::V2(event);
+            processor.write().process_unified(&unified);
+        }
+
+        // Convert to MIDI 1.0 and push through standard pipeline
+        if let Some(midi1) = event.to_midi1() {
+            self.inner.port_manager.push_input_event(port_index, midi1)
+        } else {
+            // MIDI 2.0-only messages (PerNotePitchBend, etc.) were handled
+            // by MPE processor above; no MIDI 1.0 equivalent to push.
+            true
+        }
     }
 
+    /// Inject a unified MIDI event (1.0 or 2.0) into the processing pipeline.
     #[cfg(feature = "midi2")]
     pub fn push_unified_event(
         &self,
         port_index: usize,
         event: crate::event::UnifiedMidiEvent,
     ) -> bool {
-        self.inner
-            .port_manager
-            .push_unified_event(port_index, event)
+        match event {
+            crate::event::UnifiedMidiEvent::V1(midi1) => {
+                self.inner.port_manager.push_input_event(port_index, midi1)
+            }
+            crate::event::UnifiedMidiEvent::V2(midi2) => self.push_midi2_event(port_index, midi2),
+        }
+    }
+
+    /// Set a UI observer that receives a copy of all incoming MIDI events.
+    /// Used by framework integrations (e.g. Bevy) to expose MIDI input as events.
+    #[cfg(feature = "midi-io")]
+    pub fn set_ui_observer(&self, sender: crossbeam_channel::Sender<MidiEvent>) {
+        if let Some(ref manager) = self.inner.input_manager {
+            manager.set_ui_observer(sender);
+        }
     }
 
     /// For framework integration; prefer the high-level API methods.

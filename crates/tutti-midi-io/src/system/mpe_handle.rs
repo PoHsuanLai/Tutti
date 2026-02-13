@@ -82,7 +82,7 @@ impl MpeHandle {
     pub fn mode(&self) -> MpeMode {
         self.processor
             .as_ref()
-            .map(|p| p.read().mode().clone())
+            .map(|p| *p.read().mode())
             .unwrap_or(MpeMode::Disabled)
     }
 
@@ -183,9 +183,9 @@ mod tests {
 
     #[test]
     fn test_enabled_expression_reads() {
-        let processor = Arc::new(RwLock::new(
-            MpeProcessor::new(MpeMode::LowerZone(MpeZoneConfig::lower(15))),
-        ));
+        let processor = Arc::new(RwLock::new(MpeProcessor::new(MpeMode::LowerZone(
+            MpeZoneConfig::lower(15),
+        ))));
         let handle = MpeHandle::new(Some(processor.clone()));
 
         assert!(handle.is_enabled());
@@ -212,16 +212,19 @@ mod tests {
 
     #[test]
     fn test_channel_allocation_and_release() {
-        let processor = Arc::new(RwLock::new(
-            MpeProcessor::new(MpeMode::LowerZone(MpeZoneConfig::lower(5))),
-        ));
+        let processor = Arc::new(RwLock::new(MpeProcessor::new(MpeMode::LowerZone(
+            MpeZoneConfig::lower(5),
+        ))));
         let handle = MpeHandle::new(Some(processor));
 
         // Allocate a channel for note 60
         let ch = handle.allocate_channel(60);
         assert!(ch.is_some(), "Should allocate a member channel");
         let ch = ch.unwrap();
-        assert!(ch >= 1 && ch <= 5, "Channel should be in member range 1-5, got {ch}");
+        assert!(
+            ch >= 1 && ch <= 5,
+            "Channel should be in member range 1-5, got {ch}"
+        );
 
         // Should be able to look up the channel
         let found = handle.get_channel(60);
@@ -235,17 +238,17 @@ mod tests {
     #[test]
     fn test_zone_detection() {
         // Lower zone only
-        let proc_lower = Arc::new(RwLock::new(
-            MpeProcessor::new(MpeMode::LowerZone(MpeZoneConfig::lower(15))),
-        ));
+        let proc_lower = Arc::new(RwLock::new(MpeProcessor::new(MpeMode::LowerZone(
+            MpeZoneConfig::lower(15),
+        ))));
         let handle = MpeHandle::new(Some(proc_lower));
         assert!(handle.has_lower_zone());
         assert!(!handle.has_upper_zone());
 
         // Upper zone only
-        let proc_upper = Arc::new(RwLock::new(
-            MpeProcessor::new(MpeMode::UpperZone(MpeZoneConfig::upper(5))),
-        ));
+        let proc_upper = Arc::new(RwLock::new(MpeProcessor::new(MpeMode::UpperZone(
+            MpeZoneConfig::upper(5),
+        ))));
         let handle = MpeHandle::new(Some(proc_upper));
         assert!(!handle.has_lower_zone());
         assert!(handle.has_upper_zone());

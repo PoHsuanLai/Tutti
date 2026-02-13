@@ -33,11 +33,11 @@ impl MpeProcessor {
 
         let (lower_zone_map, upper_zone_map) = match &mode {
             MpeMode::Disabled => (None, None),
-            MpeMode::LowerZone(config) => (Some(MpeChannelVoiceMap::new(config.clone())), None),
-            MpeMode::UpperZone(config) => (None, Some(MpeChannelVoiceMap::new(config.clone()))),
+            MpeMode::LowerZone(config) => (Some(MpeChannelVoiceMap::new(*config)), None),
+            MpeMode::UpperZone(config) => (None, Some(MpeChannelVoiceMap::new(*config))),
             MpeMode::DualZone { lower, upper } => (
-                Some(MpeChannelVoiceMap::new(lower.clone())),
-                Some(MpeChannelVoiceMap::new(upper.clone())),
+                Some(MpeChannelVoiceMap::new(*lower)),
+                Some(MpeChannelVoiceMap::new(*upper)),
             ),
         };
 
@@ -466,12 +466,18 @@ mod tests {
         // Pitch bend on channel 14 → should affect note 60
         processor.process_midi1(&MidiEvent::pitch_bend(0, 14, 16383));
         let bend = processor.expression().get_pitch_bend(60);
-        assert!((bend - 1.0).abs() < 0.01, "Upper zone member pitch bend failed");
+        assert!(
+            (bend - 1.0).abs() < 0.01,
+            "Upper zone member pitch bend failed"
+        );
 
         // Master channel pitch bend (ch 15) → global
         processor.process_midi1(&MidiEvent::pitch_bend(0, 15, 0)); // Max down
         let global = processor.expression().get_pitch_bend_global();
-        assert!((global - (-1.0)).abs() < 0.01, "Upper zone master pitch bend failed");
+        assert!(
+            (global - (-1.0)).abs() < 0.01,
+            "Upper zone master pitch bend failed"
+        );
     }
 
     #[test]
@@ -525,13 +531,22 @@ mod tests {
         processor.process_midi1(&MidiEvent::pitch_bend(0, 3, 16383));
         let bend_60 = processor.expression().get_pitch_bend_per_note(60);
         let bend_72 = processor.expression().get_pitch_bend_per_note(72);
-        assert!((bend_60 - 1.0).abs() < 0.01, "Lower zone bend should affect note 60");
-        assert!((bend_72 - 0.0).abs() < 0.01, "Lower zone bend should NOT affect note 72");
+        assert!(
+            (bend_60 - 1.0).abs() < 0.01,
+            "Lower zone bend should affect note 60"
+        );
+        assert!(
+            (bend_72 - 0.0).abs() < 0.01,
+            "Lower zone bend should NOT affect note 72"
+        );
 
         // Pitch bend on ch 12 → affects note 72, not 60
         processor.process_midi1(&MidiEvent::pitch_bend(0, 12, 0));
         let bend_72 = processor.expression().get_pitch_bend_per_note(72);
-        assert!((bend_72 - (-1.0)).abs() < 0.01, "Upper zone bend should affect note 72");
+        assert!(
+            (bend_72 - (-1.0)).abs() < 0.01,
+            "Upper zone bend should affect note 72"
+        );
         // note 60 per-note should still be 1.0
         let bend_60 = processor.expression().get_pitch_bend_per_note(60);
         assert!((bend_60 - 1.0).abs() < 0.01);
@@ -552,7 +567,10 @@ mod tests {
         // Upper master (ch 15) pitch bend — overwrites global
         processor.process_midi1(&MidiEvent::pitch_bend(0, 15, 0));
         let global = processor.expression().get_pitch_bend_global();
-        assert!((global - (-1.0)).abs() < 0.01, "Upper master pitch bend should overwrite global");
+        assert!(
+            (global - (-1.0)).abs() < 0.01,
+            "Upper master pitch bend should overwrite global"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -620,7 +638,10 @@ mod tests {
 
         let ch1 = processor.allocate_channel_for_note(60).unwrap();
         let ch2 = processor.allocate_channel_for_note(60).unwrap();
-        assert_eq!(ch1, ch2, "Re-allocating same note should return same channel");
+        assert_eq!(
+            ch1, ch2,
+            "Re-allocating same note should return same channel"
+        );
     }
 
     #[test]
@@ -629,7 +650,10 @@ mod tests {
 
         let ch = processor.allocate_channel_for_note(60).unwrap();
         // Upper zone with 3 members: channels 12, 13, 14
-        assert!(ch >= 12 && ch <= 14, "Upper zone channel should be 12-14, got {ch}");
+        assert!(
+            ch >= 12 && ch <= 14,
+            "Upper zone channel should be 12-14, got {ch}"
+        );
     }
 
     #[test]
@@ -641,7 +665,10 @@ mod tests {
 
         let ch = processor.allocate_channel_for_note(60).unwrap();
         // Should prefer lower zone: channels 1-3
-        assert!(ch >= 1 && ch <= 3, "Dual zone should prefer lower zone, got {ch}");
+        assert!(
+            ch >= 1 && ch <= 3,
+            "Dual zone should prefer lower zone, got {ch}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -707,7 +734,10 @@ mod tests {
         let p60 = processor.expression().get_pressure_per_note(60);
         let p72 = processor.expression().get_pressure_per_note(72);
         assert!((p60 - 100.0 / 127.0).abs() < 0.01);
-        assert!((p72).abs() < 0.01, "Note 72 should have no per-note pressure");
+        assert!(
+            (p72).abs() < 0.01,
+            "Note 72 should have no per-note pressure"
+        );
 
         // Master pressure (ch 0) → global, affects both via max()
         processor.process_midi1(&MidiEvent::aftertouch(0, 0, 64));
@@ -860,13 +890,8 @@ mod tests {
         assert!(processor.expression().is_active(60));
 
         // V2 event
-        let v2_note = crate::midi2::Midi2Event::note_on(
-            0,
-            u4::new(0),
-            u4::new(0),
-            u7::new(72),
-            65535,
-        );
+        let v2_note =
+            crate::midi2::Midi2Event::note_on(0, u4::new(0), u4::new(0), u7::new(72), 65535);
         let v2 = crate::event::UnifiedMidiEvent::V2(v2_note);
         processor.process_unified(&v2);
         assert!(processor.expression().is_active(72));

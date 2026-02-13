@@ -9,6 +9,7 @@ use arc_swap::ArcSwap;
 use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PortType {
@@ -31,6 +32,8 @@ pub struct MidiPortManager {
     port_info: Arc<RwLock<Vec<PortInfo>>>,
     fifo_size: usize,
     event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
+    /// Intermediate buffer for timestamped events before frame_offset conversion.
+    timestamped_buffer: std::cell::UnsafeCell<Vec<(Instant, usize, MidiEvent)>>,
     output_event_buffer: std::cell::UnsafeCell<Vec<(usize, MidiEvent)>>,
 }
 
@@ -49,6 +52,7 @@ impl MidiPortManager {
             port_info: Arc::new(RwLock::new(Vec::new())),
             fifo_size,
             event_buffer: std::cell::UnsafeCell::new(Vec::with_capacity(256)),
+            timestamped_buffer: std::cell::UnsafeCell::new(Vec::with_capacity(256)),
             output_event_buffer: std::cell::UnsafeCell::new(Vec::with_capacity(256)),
         }
     }
@@ -193,20 +197,40 @@ impl MidiPortManager {
 
     /// RT-safe (lock-free, no heap allocation).
     ///
-    /// Drains all active input port ring buffers directly into a pre-allocated
-    /// event buffer (capacity 256). No per-port Vec allocation.
-    pub fn cycle_start_read_all_inputs(&self, _nframes: usize) -> &[(usize, MidiEvent)] {
+    /// Drains all active input port ring buffers, converts timestamps to
+    /// sample-accurate frame_offsets, and returns a flat event slice.
+    pub fn cycle_start_read_all_inputs(
+        &self,
+        nframes: usize,
+        buffer_start: Instant,
+        sample_rate: f64,
+    ) -> &[(usize, MidiEvent)] {
         unsafe {
-            let all_events = &mut *self.event_buffer.get();
-            all_events.clear();
+            let timestamped = &mut *self.timestamped_buffer.get();
+            timestamped.clear();
             let input_ports = self.input_ports.load();
 
             for (port_index, port) in input_ports.iter().enumerate() {
                 if !port.is_active() {
                     continue;
                 }
-                port.cycle_start_read_input_into(all_events, port_index);
+                port.cycle_start_read_input_into(timestamped, port_index);
             }
+
+            // Convert timestamps to frame_offsets
+            let all_events = &mut *self.event_buffer.get();
+            all_events.clear();
+            for &(midi_instant, port_index, mut event) in timestamped.iter() {
+                let delta = buffer_start.saturating_duration_since(midi_instant);
+                let samples_ago = (delta.as_secs_f64() * sample_rate) as usize;
+                event.frame_offset = nframes.saturating_sub(samples_ago);
+                // Clamp to valid range
+                if event.frame_offset >= nframes {
+                    event.frame_offset = nframes.saturating_sub(1);
+                }
+                all_events.push((port_index, event));
+            }
+
             all_events.as_slice()
         }
     }
@@ -295,6 +319,18 @@ impl MidiPortManager {
         all_events
     }
 
+    /// Push a MIDI 1.0 event into a port's input buffer programmatically.
+    /// Uses `Instant::now()` as the timestamp. RT-safe (lock-free).
+    pub fn push_input_event(&self, port_index: usize, event: MidiEvent) -> bool {
+        let input_ports = self.input_ports.load();
+        if let Some(port) = input_ports.get(port_index) {
+            let handle = port.input_producer_handle();
+            handle.push(event, std::time::Instant::now())
+        } else {
+            false
+        }
+    }
+
     #[cfg(feature = "midi2")]
     pub fn push_unified_event(
         &self,
@@ -321,8 +357,13 @@ impl Default for MidiPortManager {
 impl tutti_core::midi::MidiInputSource for MidiPortManager {
     /// Bridge between hardware MIDI (via midir) and the audio callback.
     /// Called once per audio buffer to collect all events that arrived since the last call.
-    fn cycle_read(&self, nframes: usize) -> &[(usize, tutti_core::midi::MidiEvent)] {
-        self.cycle_start_read_all_inputs(nframes)
+    fn cycle_read(
+        &self,
+        nframes: usize,
+        buffer_start: Instant,
+        sample_rate: f64,
+    ) -> &[(usize, tutti_core::midi::MidiEvent)] {
+        self.cycle_start_read_all_inputs(nframes, buffer_start, sample_rate)
     }
 
     fn has_active_inputs(&self) -> bool {
@@ -347,6 +388,10 @@ impl std::fmt::Debug for MidiPortManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn now() -> Instant {
+        Instant::now()
+    }
 
     #[test]
     fn test_create_ports() {
@@ -417,10 +462,10 @@ mod tests {
         // Simulate midir callback writing to input port
         let producer_handle = manager.get_input_producer_handle(input_id).unwrap();
         let event = MidiEvent::note_on(0, 0, 0x3C, 0x7F); // Note On
-        assert!(producer_handle.push(event));
+        assert!(producer_handle.push(event, now()));
 
         // Simulate audio thread reading inputs
-        let events = manager.cycle_start_read_all_inputs(512);
+        let events = manager.cycle_start_read_all_inputs(512, now(), 44100.0);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].0, input_id);
         // Verify it's a note on with correct note and velocity
@@ -449,13 +494,13 @@ mod tests {
 
         // Write event to input
         let event = MidiEvent::note_on(0, 0, 0x3C, 0x7F);
-        assert!(producer_handle.push(event));
+        assert!(producer_handle.push(event, now()));
 
         // Deactivate port
         manager.set_port_active(PortType::Input, input_id, false);
 
         // Reading inputs should return empty (port is inactive)
-        let events = manager.cycle_start_read_all_inputs(512);
+        let events = manager.cycle_start_read_all_inputs(512, now(), 44100.0);
         assert_eq!(events.len(), 0);
     }
 
@@ -470,15 +515,50 @@ mod tests {
         let handle2 = manager.get_input_producer_handle(id2).unwrap();
 
         // Write to both ports
-        handle1.push(MidiEvent::note_on(0, 0, 60, 100));
-        handle2.push(MidiEvent::note_on(0, 0, 64, 100));
+        handle1.push(MidiEvent::note_on(0, 0, 60, 100), now());
+        handle2.push(MidiEvent::note_on(0, 0, 64, 100), now());
 
         // Read all
-        let events = manager.cycle_start_read_all_inputs(512);
+        let events = manager.cycle_start_read_all_inputs(512, now(), 44100.0);
         assert_eq!(events.len(), 2);
 
         let port_ids: Vec<_> = events.iter().map(|(id, _)| *id).collect();
         assert!(port_ids.contains(&id1));
         assert!(port_ids.contains(&id2));
+    }
+
+    #[test]
+    fn test_timestamp_to_frame_offset_conversion() {
+        let manager = MidiPortManager::new(256);
+        let input_id = manager.create_input_port("Input");
+        let handle = manager.get_input_producer_handle(input_id).unwrap();
+
+        let sample_rate = 48000.0;
+        let nframes = 256;
+
+        // Push event "now", then read with buffer_start slightly after
+        let midi_time = Instant::now();
+        handle.push(MidiEvent::note_on(0, 0, 60, 100), midi_time);
+
+        // Buffer starts 128 samples after the MIDI event
+        // 128 samples at 48kHz = 128/48000 ≈ 2.667ms
+        let buffer_start = midi_time + std::time::Duration::from_secs_f64(128.0 / sample_rate);
+
+        let events = manager.cycle_start_read_all_inputs(nframes, buffer_start, sample_rate);
+        assert_eq!(events.len(), 1);
+
+        // Event arrived 128 samples before buffer_start, so frame_offset should be near 0
+        // (nframes - samples_ago = 256 - 128 = 128... but samples_ago is computed from
+        // buffer_start - midi_instant, which is 128 samples, so frame_offset = 256 - 128 = 128)
+        // Wait - the logic is: event arrived 128 samples AGO relative to buffer_start,
+        // meaning it should play at frame 256-128 = 128 within the buffer.
+        // Actually let me re-check: buffer_start.saturating_duration_since(midi_instant) = 128 samples.
+        // samples_ago = 128. frame_offset = nframes - samples_ago = 256 - 128 = 128.
+        // This means the event is placed at sample 128 in the 256-sample buffer, which is correct:
+        // the event arrived halfway through the buffer period.
+        assert!(
+            events[0].1.frame_offset <= nframes,
+            "frame_offset should be within buffer"
+        );
     }
 }

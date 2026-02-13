@@ -18,8 +18,8 @@ tracing = "0.1"
 serde = { version = "1", features = ["derive"] }
 
 # Core types (MidiEvent, lockfree atomics)
-tutti-midi = { path = "../tutti-midi", default-features = false }
-tutti-core = { path = "../tutti-core", default-features = false, features = ["midi"] }
+tutti-midi = { path = "../tutti-midi", default-features = false, features = ["std"] }
+tutti-core = { path = "../tutti-core", default-features = false, features = ["std", "midi"] }
 
 # Lock-free
 ringbuf = "0.4"

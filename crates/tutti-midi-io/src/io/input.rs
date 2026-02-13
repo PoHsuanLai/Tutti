@@ -14,6 +14,7 @@ use midir::{MidiInput, MidiInputConnection};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time::Instant;
 use tracing::debug;
 
 #[cfg(feature = "mpe")]
@@ -30,6 +31,7 @@ pub struct MidiInputDevice {
 enum MidiCommand {
     Connect(usize, usize, InputProducerHandle), // (device_index, port_index, producer_handle)
     Disconnect,
+    SetObserver(Sender<MidiEvent>),
     Shutdown,
 }
 
@@ -37,7 +39,7 @@ enum MidiCommand {
 type MpeProcessorRef = Arc<RwLock<MpeProcessor>>;
 
 #[cfg(feature = "midi-io")]
-pub struct MidiInputManager {
+pub(crate) struct MidiInputManager {
     port_manager: Arc<MidiPortManager>,
     command_sender: Sender<MidiCommand>,
     connected_device: Arc<arc_swap::ArcSwap<Option<String>>>,
@@ -102,6 +104,7 @@ impl MidiInputManager {
         #[cfg(feature = "mpe")] mpe_processor: Option<MpeProcessorRef>,
     ) {
         let mut connection: Option<MidiInputConnection<()>> = None;
+        let mut ui_observer: Option<Sender<MidiEvent>> = None;
 
         loop {
             match command_receiver.recv_timeout(std::time::Duration::from_millis(100)) {
@@ -116,6 +119,7 @@ impl MidiInputManager {
                     match Self::connect_to_device(
                         device_index,
                         producer_handle,
+                        ui_observer.clone(),
                         #[cfg(feature = "mpe")]
                         mpe_processor.clone(),
                     ) {
@@ -138,6 +142,9 @@ impl MidiInputManager {
                         connected_port.store(Arc::new(None));
                     }
                 }
+                Ok(MidiCommand::SetObserver(sender)) => {
+                    ui_observer = Some(sender);
+                }
                 Ok(MidiCommand::Shutdown) => {
                     if let Some(conn) = connection.take() {
                         drop(conn);
@@ -155,6 +162,7 @@ impl MidiInputManager {
     fn connect_to_device(
         device_index: usize,
         producer_handle: InputProducerHandle,
+        ui_observer: Option<Sender<MidiEvent>>,
         #[cfg(feature = "mpe")] mpe_processor: Option<MpeProcessorRef>,
     ) -> Result<(MidiInputConnection<()>, String), crate::error::Error> {
         let midi_input = MidiInput::new("dawai-midi-input")?;
@@ -172,6 +180,7 @@ impl MidiInputManager {
             port,
             "dawai-input",
             move |_timestamp, message, _| {
+                let now = Instant::now();
                 match MidiEvent::from_bytes(message) {
                     Ok(event) => {
                         // Process through MPE if enabled.
@@ -185,8 +194,13 @@ impl MidiInputManager {
                             processor.write().process_midi1(&event);
                         }
 
-                        if !producer_handle.push(event) {
+                        if !producer_handle.push(event, now) {
                             debug!("MIDI input ring buffer full, dropping event");
+                        }
+
+                        // Send copy to UI/Bevy observer (non-blocking, drops on full)
+                        if let Some(ref observer) = ui_observer {
+                            let _ = observer.try_send(event);
                         }
                     }
                     Err(e) => {
@@ -247,6 +261,10 @@ impl MidiInputManager {
                 crate::error::Error::MidiDevice(format!("No MIDI device matching '{}' found", name))
             })?;
         self.connect(device.index)
+    }
+
+    pub fn set_ui_observer(&self, sender: Sender<MidiEvent>) {
+        let _ = self.command_sender.send(MidiCommand::SetObserver(sender));
     }
 
     pub fn disconnect(&self) {

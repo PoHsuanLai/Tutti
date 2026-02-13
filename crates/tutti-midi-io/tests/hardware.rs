@@ -63,9 +63,7 @@ fn connect_iac(midi: &MidiSystem) {
         .expect("IAC Driver not found. Enable it in Audio MIDI Setup → Window → Show MIDI Studio → IAC Driver → Device is online");
 
     // Connect output
-    let output_mgr = midi
-        .output_manager()
-        .expect("Output manager not enabled");
+    let output_mgr = midi.output_manager().expect("Output manager not enabled");
     output_mgr
         .connect_by_name("IAC")
         .expect("IAC Driver output not found");
@@ -80,7 +78,7 @@ fn connect_iac(midi: &MidiSystem) {
     // Drain stale events (loop until empty to handle OS-level buffering)
     let pm = midi.port_manager();
     for _ in 0..5 {
-        let stale = pm.cycle_start_read_all_inputs(512);
+        let stale = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
         if stale.is_empty() {
             break;
         }
@@ -89,33 +87,30 @@ fn connect_iac(midi: &MidiSystem) {
 }
 
 /// Send events via closure, wait, then read all input events.
-fn send_and_read(
-    midi: &MidiSystem,
-    send_fn: impl FnOnce(&MidiSystem),
-) -> Vec<MidiEvent> {
+fn send_and_read(midi: &MidiSystem, send_fn: impl FnOnce(&MidiSystem)) -> Vec<MidiEvent> {
     let pm = midi.port_manager();
     // Drain stale events twice with a gap to catch any in-flight messages
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     thread::sleep(Duration::from_millis(20));
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     send_fn(midi);
     thread::sleep(SEND_READ_DELAY);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     events.iter().map(|(_, e)| *e).collect()
 }
 
 /// Send raw bytes via output manager, wait, read.
 fn send_raw_and_read(midi: &MidiSystem, msg: MidiOutputMessage) -> Vec<MidiEvent> {
     let pm = midi.port_manager();
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     let output_mgr = midi.output_manager().unwrap();
     output_mgr.send_message(msg);
     thread::sleep(SEND_READ_DELAY);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     events.iter().map(|(_, e)| *e).collect()
 }
 
@@ -314,14 +309,14 @@ fn test_handle_send() {
     // Send via handle's fluent API, read via the inner system's port manager
     let inner = handle.inner().unwrap();
     let pm = inner.port_manager();
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     thread::sleep(Duration::from_millis(20));
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     handle.send().note_on(0, 60, 100);
     thread::sleep(SEND_READ_DELAY);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     assert_eq!(events.len(), 1, "Expected 1 event via handle send");
     assert!(events[0].1.is_note_on());
     assert_eq!(events[0].1.note(), Some(60));
@@ -382,7 +377,10 @@ fn test_connect_state_queries() {
 
     assert!(midi.is_device_connected());
     let name = midi.connected_device_name().unwrap();
-    assert!(name.contains("IAC"), "Device name should contain IAC, got: {name}");
+    assert!(
+        name.contains("IAC"),
+        "Device name should contain IAC, got: {name}"
+    );
     assert!(midi.connected_port_index().is_some());
 
     // Disconnect
@@ -411,12 +409,12 @@ fn test_reconnect_works() {
 
     // Drain stale events
     let pm = midi.port_manager();
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     // Send and verify loopback still works
     midi.send_note_on(0, 60, 100).unwrap();
     thread::sleep(SEND_READ_DELAY);
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     assert!(!events.is_empty(), "Should receive events after reconnect");
     assert!(events[0].1.is_note_on());
 }
@@ -433,13 +431,20 @@ fn test_send_after_output_disconnect() {
 
     // send_note_on should not panic (message silently dropped)
     let result = midi.send_note_on(0, 60, 100);
-    assert!(result.is_ok(), "send_note_on should not error even with disconnected output");
+    assert!(
+        result.is_ok(),
+        "send_note_on should not error even with disconnected output"
+    );
 
     // No events should arrive
     thread::sleep(SEND_READ_DELAY);
     let pm = midi.port_manager();
-    let events = pm.cycle_start_read_all_inputs(512);
-    assert_eq!(events.len(), 0, "No events should arrive after output disconnect");
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
+    assert_eq!(
+        events.len(),
+        0,
+        "No events should arrive after output disconnect"
+    );
 }
 
 #[test]
@@ -464,7 +469,7 @@ fn test_no_events_after_input_disconnect() {
     // The original port still exists but no new events should be pushed
     // (midir callback no longer running)
     let pm = midi.port_manager();
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     assert_eq!(events.len(), 0, "No events after input disconnect");
 }
 
@@ -633,7 +638,7 @@ fn test_all_16_channels() {
 
     // Drain
     let pm = midi.port_manager();
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     // Send note on each channel
     for ch in 0..16u8 {
@@ -641,7 +646,7 @@ fn test_all_16_channels() {
     }
     thread::sleep(BURST_DELAY);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     assert_eq!(events.len(), 16, "Expected 16 events, got {}", events.len());
 
     let mut channels: Vec<u8> = events.iter().map(|(_, e)| e.channel_num()).collect();
@@ -659,7 +664,7 @@ fn test_all_16_channels() {
 fn test_100_event_burst() {
     let midi = setup_iac();
     let pm = midi.port_manager();
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     let output_mgr = midi.output_manager().unwrap();
     for note in 0..100u8 {
@@ -667,7 +672,7 @@ fn test_100_event_burst() {
     }
     thread::sleep(BURST_DELAY);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     assert!(
         events.len() >= 95,
         "Expected >=95 events, got {} (some OS jitter allowed)",
@@ -684,7 +689,7 @@ fn test_100_event_burst() {
 fn test_interleaved_types() {
     let midi = setup_iac();
     let pm = midi.port_manager();
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     let output_mgr = midi.output_manager().unwrap();
     for _ in 0..20 {
@@ -695,7 +700,7 @@ fn test_interleaved_types() {
     }
     thread::sleep(BURST_DELAY);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     assert!(
         events.len() >= 76,
         "Expected >=76 of 80 events, got {}",
@@ -708,7 +713,7 @@ fn test_interleaved_types() {
 fn test_sustained_multi_channel() {
     let midi = setup_iac();
     let pm = midi.port_manager();
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     let output_mgr = midi.output_manager().unwrap();
     for ch in 0..16u8 {
@@ -718,7 +723,7 @@ fn test_sustained_multi_channel() {
     }
     thread::sleep(BURST_DELAY);
 
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     assert_eq!(
         events.len(),
         64,
@@ -738,13 +743,7 @@ fn test_cc_mapping_from_iac() {
     let cc_mgr = midi.cc_manager().unwrap();
 
     // Add mapping: CC7 ch0 → MasterVolume [0.0, 1.0]
-    cc_mgr.add_mapping(
-        Some(0),
-        7,
-        tutti_midi_io::CCTarget::MasterVolume,
-        0.0,
-        1.0,
-    );
+    cc_mgr.add_mapping(Some(0), 7, tutti_midi_io::CCTarget::MasterVolume, 0.0, 1.0);
 
     // Send CC7=127 on ch0 via IAC
     let events = send_and_read(&midi, |m| {
@@ -798,13 +797,7 @@ fn test_cc_mapping_channel_filter() {
     let cc_mgr = midi.cc_manager().unwrap();
 
     // Mapping only on ch0
-    cc_mgr.add_mapping(
-        Some(0),
-        7,
-        tutti_midi_io::CCTarget::MasterVolume,
-        0.0,
-        1.0,
-    );
+    cc_mgr.add_mapping(Some(0), 7, tutti_midi_io::CCTarget::MasterVolume, 0.0, 1.0);
 
     // Send on ch0 → should match
     let events = send_and_read(&midi, |m| {

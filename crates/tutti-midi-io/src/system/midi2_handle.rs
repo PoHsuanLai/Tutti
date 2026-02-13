@@ -136,7 +136,10 @@ mod tests {
         // Normal range
         let event = handle.note_on(60, 0.5, 0);
         let vel = event.velocity_16bit().unwrap();
-        assert!(vel > 32000 && vel < 33500, "0.5 should map to ~32768, got {vel}");
+        assert!(
+            vel > 32000 && vel < 33500,
+            "0.5 should map to ~32768, got {vel}"
+        );
 
         // Clamped: negative velocity → 0
         let event = handle.note_on(60, -1.0, 0);
@@ -190,7 +193,10 @@ mod tests {
         // Bend 1.0 → max (~0xFFFFFFFF)
         let event = handle.per_note_pitch_bend(60, 1.0, 0);
         if let Midi2MessageType::PerNotePitchBend { bend, .. } = event.message_type() {
-            assert!(bend > 0xFFFF_FF00, "bend 1.0 should be near max, got {bend}");
+            assert!(
+                bend > 0xFFFF_FF00,
+                "bend 1.0 should be near max, got {bend}"
+            );
         } else {
             panic!("Expected PerNotePitchBend");
         }

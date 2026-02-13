@@ -26,7 +26,10 @@ fn main() {
 
     // Wait for connection to establish (async thread)
     thread::sleep(Duration::from_millis(200));
-    assert!(midi.is_device_connected(), "Should be connected to IAC input");
+    assert!(
+        midi.is_device_connected(),
+        "Should be connected to IAC input"
+    );
     println!(
         "Connected input: {:?}",
         midi.connected_device_name().unwrap()
@@ -65,12 +68,12 @@ fn main() {
     println!("Input port index: {}", input_port_idx);
 
     // Drain any stale events
-    let _ = pm.cycle_start_read_all_inputs(512);
+    let _ = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
 
     println!("\n=== Test 1: Note On ===");
     output_mgr.send_message(tutti_midi_io::MidiOutputMessage::note_on(0, 60, 100));
     thread::sleep(Duration::from_millis(100));
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     if events.is_empty() {
         println!("  FAIL: No events received");
     } else {
@@ -89,7 +92,7 @@ fn main() {
     println!("\n=== Test 2: Note Off ===");
     output_mgr.send_message(tutti_midi_io::MidiOutputMessage::note_off(0, 60, 64));
     thread::sleep(Duration::from_millis(100));
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     if events.is_empty() {
         println!("  FAIL: No events received");
     } else {
@@ -106,7 +109,7 @@ fn main() {
     println!("\n=== Test 3: Control Change ===");
     output_mgr.send_message(tutti_midi_io::MidiOutputMessage::control_change(0, 74, 127));
     thread::sleep(Duration::from_millis(100));
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     if events.is_empty() {
         println!("  FAIL: No events received");
     } else {
@@ -118,7 +121,7 @@ fn main() {
     println!("\n=== Test 4: Pitch Bend (center) ===");
     output_mgr.send_message(tutti_midi_io::MidiOutputMessage::pitch_bend(0, 0));
     thread::sleep(Duration::from_millis(100));
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     if events.is_empty() {
         println!("  FAIL: No events received");
     } else {
@@ -132,7 +135,7 @@ fn main() {
         output_mgr.send_message(tutti_midi_io::MidiOutputMessage::note_on(0, note, 80));
     }
     thread::sleep(Duration::from_millis(200));
-    let events = pm.cycle_start_read_all_inputs(512);
+    let events = pm.cycle_start_read_all_inputs(512, std::time::Instant::now(), 44100.0);
     let count = events.len();
     let all_note_on = events.iter().all(|(_, e)| e.is_note_on());
     println!(

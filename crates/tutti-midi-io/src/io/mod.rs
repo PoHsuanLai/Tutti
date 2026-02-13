@@ -6,5 +6,6 @@
 mod input;
 mod output;
 
-pub use input::{MidiInputDevice, MidiInputManager};
+pub use input::MidiInputDevice;
+pub(crate) use input::MidiInputManager;
 pub use output::{MidiOutputDevice, MidiOutputManager, MidiOutputMessage};

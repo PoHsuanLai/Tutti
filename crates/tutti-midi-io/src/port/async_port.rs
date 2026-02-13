@@ -12,6 +12,7 @@ use ringbuf::{
     HeapRb,
 };
 use std::cell::UnsafeCell;
+use std::time::Instant;
 
 pub use crate::MidiEvent;
 
@@ -21,7 +22,7 @@ pub use crate::MidiEvent;
 /// This handle must only be used from a single thread (the midir callback thread).
 /// SPSC ring buffers require exactly one producer - concurrent pushes are undefined behavior.
 pub struct InputProducerHandle {
-    producer: *mut ringbuf::HeapProd<MidiEvent>,
+    producer: *mut ringbuf::HeapProd<(Instant, MidiEvent)>,
 }
 
 // SAFETY: InputProducerHandle is Send because the underlying HeapProd is Send.
@@ -36,10 +37,10 @@ impl InputProducerHandle {
     /// # Safety
     /// Must only be called from a single thread (the midir callback thread).
     #[inline]
-    pub fn push(&self, event: MidiEvent) -> bool {
+    pub fn push(&self, event: MidiEvent, timestamp: Instant) -> bool {
         // SAFETY: We have exclusive access as the single producer (SPSC invariant).
         let prod = unsafe { &mut *self.producer };
-        prod.try_push(event).is_ok()
+        prod.try_push((timestamp, event)).is_ok()
     }
 }
 
@@ -117,8 +118,8 @@ impl OutputProducerHandle {
 pub struct AsyncMidiPort {
     name: String,
     active: std::sync::atomic::AtomicBool,
-    input_consumer: UnsafeCell<ringbuf::HeapCons<MidiEvent>>,
-    input_producer: UnsafeCell<ringbuf::HeapProd<MidiEvent>>,
+    input_consumer: UnsafeCell<ringbuf::HeapCons<(Instant, MidiEvent)>>,
+    input_producer: UnsafeCell<ringbuf::HeapProd<(Instant, MidiEvent)>>,
     output_producer: UnsafeCell<ringbuf::HeapProd<MidiEvent>>,
     output_consumer: UnsafeCell<ringbuf::HeapCons<MidiEvent>>,
     #[cfg(feature = "midi2")]
@@ -130,7 +131,7 @@ pub struct AsyncMidiPort {
 impl AsyncMidiPort {
     pub fn new(name: impl Into<String>, fifo_size: usize) -> Self {
         let name = name.into();
-        let input_rb = HeapRb::<MidiEvent>::new(fifo_size);
+        let input_rb = HeapRb::<(Instant, MidiEvent)>::new(fifo_size);
         let (input_producer, input_consumer) = input_rb.split();
         let output_rb = HeapRb::<MidiEvent>::new(fifo_size);
         let (output_producer, output_consumer) = output_rb.split();
@@ -199,11 +200,16 @@ impl AsyncMidiPort {
     }
 
     /// RT-safe: drain input ring buffer directly into caller's pre-allocated buffer.
+    /// Returns timestamped events for frame_offset conversion.
     #[inline]
-    pub fn cycle_start_read_input_into(&self, buf: &mut Vec<(usize, MidiEvent)>, port_index: usize) {
+    pub fn cycle_start_read_input_into(
+        &self,
+        buf: &mut Vec<(Instant, usize, MidiEvent)>,
+        port_index: usize,
+    ) {
         let consumer = unsafe { &mut *self.input_consumer.get() };
-        while let Some(event) = consumer.try_pop() {
-            buf.push((port_index, event));
+        while let Some((timestamp, event)) = consumer.try_pop() {
+            buf.push((timestamp, port_index, event));
         }
     }
 
@@ -261,7 +267,7 @@ mod tests {
     fn read_input(port: &AsyncMidiPort) -> Vec<MidiEvent> {
         let mut buf = Vec::new();
         port.cycle_start_read_input_into(&mut buf, 0);
-        buf.into_iter().map(|(_, e)| e).collect()
+        buf.into_iter().map(|(_, _, e)| e).collect()
     }
 
     /// Test helper: drain output into a fresh Vec.
@@ -277,7 +283,7 @@ mod tests {
         let producer_handle = port.input_producer_handle();
 
         let event = MidiEvent::note_on(0, 0, 0x3C, 0x7F);
-        assert!(producer_handle.push(event));
+        assert!(producer_handle.push(event, Instant::now()));
 
         let events = read_input(&port);
         assert_eq!(events.len(), 1);
@@ -334,10 +340,13 @@ mod tests {
 
         // Push to input only
         let event = MidiEvent::note_on(0, 0, 60, 100);
-        input_handle.push(event);
+        input_handle.push(event, Instant::now());
 
         // Output should be empty
-        assert!(flush_output(&port).is_empty(), "Output should not receive input events");
+        assert!(
+            flush_output(&port).is_empty(),
+            "Output should not receive input events"
+        );
 
         // Input should have the event
         assert_eq!(read_input(&port).len(), 1);
@@ -347,7 +356,10 @@ mod tests {
         output_handle.push(event);
 
         // Input should be empty
-        assert!(read_input(&port).is_empty(), "Input should not receive output events");
+        assert!(
+            read_input(&port).is_empty(),
+            "Input should not receive output events"
+        );
 
         // Output should have the event
         assert_eq!(flush_output(&port).len(), 1);

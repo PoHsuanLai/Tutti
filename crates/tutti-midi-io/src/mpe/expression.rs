@@ -271,9 +271,18 @@ mod tests {
 
         // note_on should reset all per-note values
         expr.note_on(60);
-        assert!((expr.get_pitch_bend_per_note(60)).abs() < 0.001, "Pitch bend should reset to 0");
-        assert!((expr.get_pressure_per_note(60)).abs() < 0.001, "Pressure should reset to 0");
-        assert!((expr.get_slide(60) - 0.5).abs() < 0.001, "Slide should reset to 0.5 (center)");
+        assert!(
+            (expr.get_pitch_bend_per_note(60)).abs() < 0.001,
+            "Pitch bend should reset to 0"
+        );
+        assert!(
+            (expr.get_pressure_per_note(60)).abs() < 0.001,
+            "Pressure should reset to 0"
+        );
+        assert!(
+            (expr.get_slide(60) - 0.5).abs() < 0.001,
+            "Slide should reset to 0.5 (center)"
+        );
         assert!(expr.is_active(60));
     }
 
@@ -306,7 +315,7 @@ mod tests {
         assert!((expr.get_pitch_bend_per_note(60)).abs() < 0.001);
         assert!((expr.get_pressure_per_note(72)).abs() < 0.001);
         assert!((expr.get_slide(60) - 0.5).abs() < 0.001); // Reset to default
-        // Global should be cleared
+                                                           // Global should be cleared
         assert!((expr.get_pitch_bend_global()).abs() < 0.001);
         assert!((expr.get_pressure(60)).abs() < 0.001); // max(0, 0) = 0
     }

@@ -135,10 +135,7 @@ mod tests {
 
     #[test]
     fn test_build_with_cc_mapping() {
-        let midi = MidiSystemBuilder::default()
-            .cc_mapping()
-            .build()
-            .unwrap();
+        let midi = MidiSystemBuilder::default().cc_mapping().build().unwrap();
 
         // CC manager should be present
         let cc = midi.cc_manager();

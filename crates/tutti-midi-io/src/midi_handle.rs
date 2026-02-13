@@ -134,6 +134,9 @@ mod tests {
         let handle2 = handle1.clone();
 
         // Both handles should point to the same system
-        assert!(Arc::ptr_eq(handle1.inner().unwrap(), handle2.inner().unwrap()));
+        assert!(Arc::ptr_eq(
+            handle1.inner().unwrap(),
+            handle2.inner().unwrap()
+        ));
     }
 }

@@ -635,12 +635,7 @@ mod tests {
     fn test_to_midi1_channel_pressure() {
         // Channel pressure uses >> 25 to convert 32-bit to 7-bit
         // 127 << 25 = 0xFE000000, so max 7-bit maps to near-max 32-bit
-        let midi2_event = Midi2Event::channel_pressure(
-            10,
-            u4::new(0),
-            u4::new(5),
-            0xFFFFFFFF,
-        );
+        let midi2_event = Midi2Event::channel_pressure(10, u4::new(0), u4::new(5), 0xFFFFFFFF);
         let midi1 = midi2_event.to_midi1().unwrap();
         assert_eq!(midi1.frame_offset, 10);
         assert_eq!(midi1.channel_num(), 5);
@@ -652,12 +647,7 @@ mod tests {
         }
 
         // Zero pressure
-        let midi2_event = Midi2Event::channel_pressure(
-            0,
-            u4::new(0),
-            u4::new(0),
-            0,
-        );
+        let midi2_event = Midi2Event::channel_pressure(0, u4::new(0), u4::new(0), 0);
         let midi1 = midi2_event.to_midi1().unwrap();
         match midi1.msg {
             crate::ChannelVoiceMsg::ChannelPressure { pressure } => {
@@ -670,13 +660,8 @@ mod tests {
     #[test]
     fn test_to_midi1_key_pressure() {
         // Per-note pressure (poly aftertouch)
-        let midi2_event = Midi2Event::key_pressure(
-            20,
-            u4::new(0),
-            u4::new(2),
-            u7::new(72),
-            0xFFFFFFFF,
-        );
+        let midi2_event =
+            Midi2Event::key_pressure(20, u4::new(0), u4::new(2), u7::new(72), 0xFFFFFFFF);
         let midi1 = midi2_event.to_midi1().unwrap();
         assert_eq!(midi1.frame_offset, 20);
         assert_eq!(midi1.channel_num(), 2);
@@ -690,13 +675,7 @@ mod tests {
 
         // Mid-value
         let mid_32 = 0x80000000u32; // ~64 in 7-bit
-        let midi2_event = Midi2Event::key_pressure(
-            0,
-            u4::new(0),
-            u4::new(0),
-            u7::new(60),
-            mid_32,
-        );
+        let midi2_event = Midi2Event::key_pressure(0, u4::new(0), u4::new(0), u7::new(60), mid_32);
         let midi1 = midi2_event.to_midi1().unwrap();
         match midi1.msg {
             crate::ChannelVoiceMsg::PolyPressure { note, pressure } => {
@@ -740,13 +719,7 @@ mod tests {
     #[test]
     fn test_to_midi1_program_change() {
         // Program change without bank select
-        let midi2_event = Midi2Event::program_change(
-            5,
-            u4::new(0),
-            u4::new(9),
-            u7::new(42),
-            None,
-        );
+        let midi2_event = Midi2Event::program_change(5, u4::new(0), u4::new(9), u7::new(42), None);
         let midi1 = midi2_event.to_midi1().unwrap();
         assert_eq!(midi1.frame_offset, 5);
         assert_eq!(midi1.channel_num(), 9);
@@ -758,13 +731,8 @@ mod tests {
         }
 
         // Program change with bank select (bank is dropped in MIDI 1.0 conversion)
-        let midi2_event = Midi2Event::program_change(
-            0,
-            u4::new(0),
-            u4::new(0),
-            u7::new(0),
-            Some(u14::new(128)),
-        );
+        let midi2_event =
+            Midi2Event::program_change(0, u4::new(0), u4::new(0), u7::new(0), Some(u14::new(128)));
         let midi1 = midi2_event.to_midi1().unwrap();
         match midi1.msg {
             crate::ChannelVoiceMsg::ProgramChange { program } => {
@@ -777,33 +745,29 @@ mod tests {
     #[test]
     fn test_program_change_bank_roundtrip() {
         // Create a ProgramChange with bank select
-        let event = Midi2Event::program_change(
-            0,
-            u4::new(0),
-            u4::new(0),
-            u7::new(42),
-            Some(u14::new(128)),
-        );
+        let event =
+            Midi2Event::program_change(0, u4::new(0), u4::new(0), u7::new(42), Some(u14::new(128)));
 
         // Verify bank_valid flag is detected
         match event.message_type() {
             Midi2MessageType::ProgramChange { program, bank } => {
                 assert_eq!(program, 42);
-                assert!(bank.is_some(), "Bank should be Some when set via program_change constructor");
+                assert!(
+                    bank.is_some(),
+                    "Bank should be Some when set via program_change constructor"
+                );
                 let bank_val = bank.unwrap();
-                assert_eq!(bank_val, 128, "Bank value should roundtrip correctly, got {}", bank_val);
+                assert_eq!(
+                    bank_val, 128,
+                    "Bank value should roundtrip correctly, got {}",
+                    bank_val
+                );
             }
             _ => panic!("Expected ProgramChange"),
         }
 
         // Without bank
-        let event = Midi2Event::program_change(
-            0,
-            u4::new(0),
-            u4::new(0),
-            u7::new(0),
-            None,
-        );
+        let event = Midi2Event::program_change(0, u4::new(0), u4::new(0), u7::new(0), None);
         match event.message_type() {
             Midi2MessageType::ProgramChange { bank, .. } => {
                 assert!(bank.is_none(), "Bank should be None when not set");
@@ -815,7 +779,8 @@ mod tests {
     #[test]
     fn test_to_midi1_returns_none_for_midi2_only_types() {
         // Per-note pitch bend
-        let event = Midi2Event::per_note_pitch_bend(0, u4::new(0), u4::new(0), u7::new(60), 0x80000000);
+        let event =
+            Midi2Event::per_note_pitch_bend(0, u4::new(0), u4::new(0), u7::new(60), 0x80000000);
         assert!(event.to_midi1().is_none());
 
         // Registered per-note controller (raw UMP)
@@ -860,13 +825,7 @@ mod tests {
         }
 
         // Without attribute — attr_type byte should be 0
-        let event_no_attr = Midi2Event::note_on(
-            0,
-            u4::new(0),
-            u4::new(0),
-            u7::new(60),
-            32768,
-        );
+        let event_no_attr = Midi2Event::note_on(0, u4::new(0), u4::new(0), u7::new(60), 32768);
         match event_no_attr.message_type() {
             Midi2MessageType::NoteOn { attribute, .. } => {
                 assert!(attribute.is_none(), "No attribute should be present");
@@ -881,7 +840,11 @@ mod tests {
         // UMP format: 0x40F0_NNDD where NN=note, DD=flags (bit 1=detach, bit 0=reset)
         let event = Midi2Event::try_from_ump(0, &[0x40F0_3C03, 0x00000000]).unwrap();
         match event.message_type() {
-            Midi2MessageType::PerNoteManagement { note, detach, reset } => {
+            Midi2MessageType::PerNoteManagement {
+                note,
+                detach,
+                reset,
+            } => {
                 assert_eq!(note, 60);
                 assert!(detach);
                 assert!(reset);
