@@ -6,11 +6,11 @@ use arc_swap::ArcSwap;
 
 #[derive(Clone)]
 pub struct PdcState {
-    pub channel_latencies: Vec<usize>,
-    pub return_latencies: Vec<usize>,
-    pub channel_compensations: Vec<usize>,
-    pub return_compensations: Vec<usize>,
-    pub max_latency: usize,
+    pub(crate) channel_latencies: Vec<usize>,
+    pub(crate) return_latencies: Vec<usize>,
+    pub(crate) channel_compensations: Vec<usize>,
+    pub(crate) return_compensations: Vec<usize>,
+    pub(crate) max_latency: usize,
 }
 
 impl PdcState {
@@ -29,13 +29,31 @@ impl PdcState {
         let max_return = self.return_latencies.iter().copied().max().unwrap_or(0);
         self.max_latency = max_track.max(max_return);
 
-        for (i, latency) in self.channel_latencies.iter().enumerate() {
-            self.channel_compensations[i] = self.max_latency.saturating_sub(*latency);
-        }
+        self.channel_compensations
+            .iter_mut()
+            .zip(&self.channel_latencies)
+            .for_each(|(comp, &lat)| *comp = self.max_latency.saturating_sub(lat));
 
-        for (i, latency) in self.return_latencies.iter().enumerate() {
-            self.return_compensations[i] = self.max_latency.saturating_sub(*latency);
-        }
+        self.return_compensations
+            .iter_mut()
+            .zip(&self.return_latencies)
+            .for_each(|(comp, &lat)| *comp = self.max_latency.saturating_sub(lat));
+    }
+
+    pub fn channel_latencies(&self) -> &[usize] {
+        &self.channel_latencies
+    }
+    pub fn return_latencies(&self) -> &[usize] {
+        &self.return_latencies
+    }
+    pub fn channel_compensations(&self) -> &[usize] {
+        &self.channel_compensations
+    }
+    pub fn return_compensations(&self) -> &[usize] {
+        &self.return_compensations
+    }
+    pub fn max_latency(&self) -> usize {
+        self.max_latency
     }
 }
 

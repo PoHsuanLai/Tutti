@@ -152,11 +152,9 @@ impl super::TransportReader for ExportTimeline {
     }
 
     fn get_loop_range(&self) -> Option<(f64, f64)> {
-        if self.loop_enabled.get() {
-            Some((self.loop_start.get(), self.loop_end.get()))
-        } else {
-            None
-        }
+        self.loop_enabled
+            .get()
+            .then(|| (self.loop_start.get(), self.loop_end.get()))
     }
 
     fn is_playing(&self) -> bool {
@@ -172,6 +170,10 @@ impl super::TransportReader for ExportTimeline {
     fn is_in_preroll(&self) -> bool {
         // Export timeline is never in preroll
         false
+    }
+
+    fn tempo(&self) -> f32 {
+        self.tempo.get()
     }
 }
 
@@ -301,5 +303,4 @@ mod tests {
         assert!(!timeline.is_loop_enabled());
         assert_eq!(timeline.get_loop_range(), None);
     }
-
 }

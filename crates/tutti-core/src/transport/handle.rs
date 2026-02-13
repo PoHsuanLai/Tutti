@@ -352,4 +352,8 @@ impl super::TransportReader for TransportHandle {
     fn is_in_preroll(&self) -> bool {
         self.transport.is_in_preroll()
     }
+
+    fn tempo(&self) -> f32 {
+        self.transport.get_tempo()
+    }
 }

@@ -46,7 +46,7 @@ pub(crate) enum TransportEvent {
     Locate(MusicalPosition),
     LocateWithDeclick(MusicalPosition),
     LocateAndPlay(MusicalPosition),
-    ToggleLoop,
+    SetLoopEnabled(bool),
     SetLoopRange(LoopRange),
     ClearLoop,
     FastForward,
@@ -176,10 +176,10 @@ impl TransportFSM {
                 Some(TransitionResult::Locating(pos))
             }
 
-            ToggleLoop => {
-                self.loop_enabled = !self.loop_enabled;
+            SetLoopEnabled(enabled) => {
+                self.loop_enabled = enabled;
                 self.state_changed.set(true);
-                Some(TransitionResult::LoopModeChanged(self.loop_enabled))
+                Some(TransitionResult::LoopModeChanged(enabled))
             }
 
             SetLoopRange(range) => {
@@ -288,15 +288,15 @@ mod tests {
             Some(TransitionResult::LoopModeChanged(true))
         ));
 
-        // Toggle off
-        let result = fsm.transition(TransportEvent::ToggleLoop);
+        // Disable
+        let result = fsm.transition(TransportEvent::SetLoopEnabled(false));
         assert!(matches!(
             result,
             Some(TransitionResult::LoopModeChanged(false))
         ));
 
-        // Toggle on
-        let result = fsm.transition(TransportEvent::ToggleLoop);
+        // Enable
+        let result = fsm.transition(TransportEvent::SetLoopEnabled(true));
         assert!(matches!(
             result,
             Some(TransitionResult::LoopModeChanged(true))

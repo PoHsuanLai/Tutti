@@ -5,6 +5,7 @@
 //! consuming them.
 
 use crate::compat::{HashMap, Vec};
+use crate::{AtomicUsize, Ordering};
 use tutti_midi::MidiEvent;
 
 /// A MIDI event with its scheduled beat position.
@@ -37,12 +38,28 @@ pub struct TimedMidiEvent {
 /// let events = snapshot.poll_range(synth_id, 0.0, 0.5);
 /// assert_eq!(events.len(), 1);
 /// ```
-#[derive(Debug, Clone, Default)]
+/// Note: `poll_range` uses atomic cursors so it can take `&self` (RT-safe).
+#[derive(Debug, Default)]
 pub struct MidiSnapshot {
     /// Events per unit ID, sorted by beat.
     events: HashMap<u64, Vec<TimedMidiEvent>>,
     /// Current read cursor per unit (index into events vec).
-    cursors: HashMap<u64, usize>,
+    /// Atomic so `poll_range` can advance without `&mut self`.
+    cursors: HashMap<u64, AtomicUsize>,
+}
+
+impl Clone for MidiSnapshot {
+    fn clone(&self) -> Self {
+        let cursors = self
+            .cursors
+            .iter()
+            .map(|(&k, v)| (k, AtomicUsize::new(v.load(Ordering::Relaxed))))
+            .collect();
+        Self {
+            events: self.events.clone(),
+            cursors,
+        }
+    }
 }
 
 impl MidiSnapshot {
@@ -57,32 +74,44 @@ impl MidiSnapshot {
         events.push(TimedMidiEvent { event, beat });
         // Keep sorted by beat
         events.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+        // Ensure cursor exists for this unit
+        self.cursors
+            .entry(unit_id)
+            .or_insert_with(|| AtomicUsize::new(0));
     }
 
     /// Poll events in the given beat range [start, end).
     ///
     /// Returns events that fall within the range and advances the cursor.
     /// Events are returned in beat order.
-    pub fn poll_range(&mut self, unit_id: u64, start_beat: f64, end_beat: f64) -> Vec<MidiEvent> {
+    ///
+    /// Uses atomic cursors so this can be called with `&self` (RT-safe).
+    pub fn poll_range(&self, unit_id: u64, start_beat: f64, end_beat: f64) -> Vec<MidiEvent> {
         let events = match self.events.get(&unit_id) {
             Some(e) => e,
             None => return Vec::new(),
         };
 
-        let cursor = self.cursors.entry(unit_id).or_insert(0);
+        let cursor = match self.cursors.get(&unit_id) {
+            Some(c) => c,
+            None => return Vec::new(),
+        };
+
+        let mut pos = cursor.load(Ordering::Relaxed);
         let mut result = Vec::new();
 
         // Advance past any events before start_beat
-        while *cursor < events.len() && events[*cursor].beat < start_beat {
-            *cursor += 1;
+        while pos < events.len() && events[pos].beat < start_beat {
+            pos += 1;
         }
 
         // Collect events in range
-        while *cursor < events.len() && events[*cursor].beat < end_beat {
-            result.push(events[*cursor].event);
-            *cursor += 1;
+        while pos < events.len() && events[pos].beat < end_beat {
+            result.push(events[pos].event);
+            pos += 1;
         }
 
+        cursor.store(pos, Ordering::Relaxed);
         result
     }
 
@@ -99,16 +128,16 @@ impl MidiSnapshot {
     /// Reset all cursors to the beginning.
     ///
     /// Call this before re-rendering to replay all events.
-    pub fn reset(&mut self) {
-        for cursor in self.cursors.values_mut() {
-            *cursor = 0;
+    pub fn reset(&self) {
+        for cursor in self.cursors.values() {
+            cursor.store(0, Ordering::Relaxed);
         }
     }
 
     /// Reset cursor for a specific unit.
-    pub fn reset_unit(&mut self, unit_id: u64) {
-        if let Some(cursor) = self.cursors.get_mut(&unit_id) {
-            *cursor = 0;
+    pub fn reset_unit(&self, unit_id: u64) {
+        if let Some(cursor) = self.cursors.get(&unit_id) {
+            cursor.store(0, Ordering::Relaxed);
         }
     }
 

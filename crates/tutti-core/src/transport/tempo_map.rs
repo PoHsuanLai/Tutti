@@ -2,7 +2,7 @@
 
 use crate::compat::{Arc, Vec};
 
-pub const SUPERCLOCK_TICKS_PER_SECOND: u64 = 282_240_000;
+pub(crate) const SUPERCLOCK_TICKS_PER_SECOND: u64 = 282_240_000;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct TempoPoint {

@@ -9,5 +9,5 @@ mod unit;
 pub use delay_buffer::DelayBuffer;
 
 pub use manager::{PdcManager, PdcState};
-pub use mono_delay::MonoPdcDelayUnit;
+pub(crate) use mono_delay::MonoPdcDelayUnit;
 pub use unit::PdcDelayUnit;

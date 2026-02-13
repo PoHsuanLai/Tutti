@@ -1,3 +1,4 @@
+mod automation_reader;
 mod click;
 mod clock;
 mod export_timeline;
@@ -8,10 +9,9 @@ pub(crate) mod position;
 pub mod sync;
 pub(crate) mod tempo_map;
 
-pub use click::{click, ClickNode, ClickState, MetronomeMode};
-pub use clock::{
-    curves as automation_curves, AutomationEnvelopeFn, AutomationReaderInput, TransportClock,
-};
+pub use automation_reader::{AutomationEnvelopeFn, AutomationReaderInput};
+pub use click::{click, ClickNode, ClickSettings, ClickState, MetronomeMode};
+pub use clock::TransportClock;
 pub use export_timeline::{ExportConfig, ExportTimeline};
 pub use handle::{MetronomeHandle, TransportHandle};
 pub use manager::{Direction, MotionState, TransportManager};
@@ -41,4 +41,7 @@ pub trait TransportReader: Send + Sync {
 
     /// Check if in preroll count-in.
     fn is_in_preroll(&self) -> bool;
+
+    /// Get current tempo in BPM.
+    fn tempo(&self) -> f32;
 }

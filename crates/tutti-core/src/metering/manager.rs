@@ -249,11 +249,9 @@ impl MeteringManager {
         // try_lock: skip this callback if the producer is being swapped
         if let Some(ref mut guard) = self.analysis_tap_producer.try_lock() {
             if let Some(ref mut prod) = **guard {
-                for i in 0..frames {
-                    let l = output[i * 2];
-                    let r = output[i * 2 + 1];
-                    let _ = prod.try_push((l, r));
-                }
+                output.chunks_exact(2).take(frames).for_each(|ch| {
+                    let _ = prod.try_push((ch[0], ch[1]));
+                });
             }
         }
     }

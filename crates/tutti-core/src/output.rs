@@ -136,8 +136,8 @@ where
                 let frames = data.len() / channels;
                 let start = Instant::now();
 
-                // Process DSP graph
-                process_dsp(&state, frames, &mut output_f32);
+                // Process DSP graph (pass buffer_start for MIDI timestamp conversion)
+                process_dsp(&state, frames, &mut output_f32, start);
 
                 // Update all meters (amplitude, stereo, LUFS, CPU)
                 let elapsed = start.elapsed();
@@ -162,12 +162,17 @@ where
 
 /// Process DSP graph into stereo f32 buffer.
 #[inline]
-fn process_dsp(state: &AudioCallbackState, frames: usize, output: &mut Vec<f32>) {
+fn process_dsp(
+    state: &AudioCallbackState,
+    frames: usize,
+    output: &mut Vec<f32>,
+    buffer_start: Instant,
+) {
     let needed = frames * 2;
     // RT-safe: Vec was pre-allocated with capacity for MAX_FRAMES * 2
     // resize() within capacity is just a length adjustment + fill, no allocation
     output.resize(needed, 0.0);
-    crate::callback::process_audio(state, &mut output[..needed]);
+    crate::callback::process_audio(state, &mut output[..needed], buffer_start);
 }
 
 /// Convert stereo f32 to output format and write to device buffer.

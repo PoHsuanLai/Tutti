@@ -14,7 +14,7 @@ default = ["std"]
 
 # std feature: Only needed for CPAL audio I/O
 # Everything else works with no_std + alloc
-std = ["fundsp/std", "dep:cpal"]
+std = ["fundsp/std", "dep:cpal", "tutti-midi?/std"]
 
 # Individual audio format support (each pulls only its codec)
 wav = ["std", "fundsp/wav"]

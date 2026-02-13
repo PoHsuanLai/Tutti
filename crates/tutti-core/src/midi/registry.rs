@@ -146,11 +146,32 @@ impl MidiRegistry {
     pub fn pending_count(&self) -> usize {
         self.slots.iter().filter(|slot| !slot.rx.is_empty()).count()
     }
+
+    /// Drain all pending MIDI events into a [`MidiSnapshot`] at the given beat position.
+    ///
+    /// This is used by the export path to transfer queued MIDI events from the
+    /// live registry into a snapshot for offline rendering. Events are consumed
+    /// (removed from the registry).
+    pub fn drain_into_snapshot(&self, snapshot: &mut super::snapshot::MidiSnapshot, beat: f64) {
+        for entry in self.slots.iter() {
+            let unit_id = *entry.key();
+            let slot = entry.value();
+            while let Ok(event) = slot.rx.try_recv() {
+                snapshot.add_event(unit_id, beat, event);
+            }
+        }
+    }
 }
 
 impl Default for MidiRegistry {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl super::source::MidiSource for MidiRegistry {
+    fn poll_into(&self, unit_id: u64, buffer: &mut [MidiEvent]) -> usize {
+        self.poll_into(unit_id, buffer)
     }
 }
 

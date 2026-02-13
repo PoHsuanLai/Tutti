@@ -21,7 +21,7 @@
 //!
 //! let system = TuttiSystem::builder().build()?;
 //!
-//! system.graph(|net| {
+//! system.graph_mut(|net| {
 //!     let osc = net.add(Box::new(sine_hz(440.0)));
 //!     net.pipe_output(osc);
 //! });
@@ -51,7 +51,7 @@ pub use net_frontend::{NodeInfo, TuttiNet};
 
 pub(crate) mod transport;
 pub use transport::{
-    automation_curves, click, AutomationEnvelopeFn, AutomationReaderInput, ClickNode, ClickState,
+    click, AutomationEnvelopeFn, AutomationReaderInput, ClickNode, ClickSettings, ClickState,
     Direction, ExportConfig, ExportTimeline, MetronomeHandle, MetronomeMode, MotionState,
     SmpteFrameRate, SyncSnapshot, SyncSource, SyncState, SyncStatus, TempoMap, TimeSignature,
     TransportClock, TransportHandle, TransportManager, TransportReader, BBT,
@@ -70,7 +70,9 @@ pub(crate) mod pdc;
 pub use pdc::{DelayBuffer, PdcDelayUnit, PdcManager, PdcState};
 
 pub mod registry;
-pub use registry::{NodeConstructor, NodeParamValue, NodeParams, NodeRegistry, ParamConvert, Params};
+pub use registry::{
+    NodeConstructor, NodeParamValue, NodeParams, NodeRegistry, ParamConvert, Params,
+};
 
 pub(crate) mod lockfree;
 pub use compat::{Arc, AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
@@ -84,6 +86,7 @@ pub mod dsp {
 pub use fundsp::biquad::{
     LinkwitzRileyCrossover, LinkwitzRileyHighpass, LinkwitzRileyLowpass, LrOrder,
 };
+pub use fundsp::buffer::BufferVec;
 pub use fundsp::fft::{inverse_fft, real_fft};
 pub use fundsp::math::Complex32;
 pub use fundsp::net::{NodeId, Source};
@@ -96,6 +99,7 @@ pub use fundsp::sequencer::{EventId, Fade, ReplayMode, Sequencer};
 pub use fundsp::setting::Setting;
 pub use fundsp::signal::SignalFrame;
 pub use fundsp::wave::Wave;
+pub use fundsp::MAX_BUFFER_SIZE;
 pub use fundsp::{Sample, F32, F64};
 
 /// Voice identifier for polyphonic synths.
@@ -118,8 +122,8 @@ pub mod midi;
 #[cfg(feature = "midi")]
 pub use midi::{
     Channel, ChannelVoiceMsg, ControlChange, MidiEvent, MidiEventBuilder, MidiInputSource, MidiMsg,
-    MidiRegistry, MidiRoute, MidiRoutingSnapshot, MidiRoutingTable, MidiSnapshot, NoMidiInput,
-    RawMidiEvent, TimedMidiEvent,
+    MidiRegistry, MidiRoute, MidiRoutingSnapshot, MidiRoutingTable, MidiSnapshot,
+    MidiSnapshotReader, MidiSource, NoMidiInput, RawMidiEvent, TimedMidiEvent,
 };
 
 #[cfg(feature = "neural")]

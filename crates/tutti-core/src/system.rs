@@ -9,7 +9,9 @@ use crate::error::Result;
 use crate::metering::MeteringManager;
 use crate::net_frontend::TuttiNet;
 use crate::pdc::PdcManager;
-use crate::transport::{ClickState, TransportHandle, TransportManager};
+use crate::transport::{
+    ClickSettings, ClickState, TransportClock, TransportHandle, TransportManager,
+};
 
 #[cfg(feature = "std")]
 use crate::output::AudioEngine;
@@ -82,20 +84,37 @@ impl TuttiSystem {
         }
     }
 
-    /// Modify the DSP graph (non-realtime).
+    /// Access the DSP graph for reading, querying, or side-effects.
     ///
-    /// The graph changes are automatically committed to the audio thread
-    /// when the closure returns.
+    /// Does **not** commit changes to the audio thread. Use this for
+    /// operations that don't change graph structure (querying nodes,
+    /// queueing MIDI events via the shared registry, cloning data).
+    ///
+    /// For structural changes (add/remove/connect nodes), use [`graph_mut`].
+    pub fn graph<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut TuttiNet) -> R,
+    {
+        let mut net = self.net.lock();
+        f(&mut net)
+    }
+
+    /// Modify the DSP graph and auto-commit to the audio thread.
+    ///
+    /// Use this for structural changes: adding/removing nodes,
+    /// connecting/disconnecting, resetting the graph.
+    ///
+    /// Changes are automatically committed when the closure returns.
     ///
     /// # Example
     /// ```ignore
-    /// system.graph(|net| {
+    /// system.graph_mut(|net| {
     ///     let node = net.add(Box::new(sine_hz(440.0)));
     ///     net.pipe_output(node);
     ///     // Auto-committed here
     /// });
     /// ```
-    pub fn graph<F, R>(&self, f: F) -> R
+    pub fn graph_mut<F, R>(&self, f: F) -> R
     where
         F: FnOnce(&mut TuttiNet) -> R,
     {
@@ -175,10 +194,8 @@ impl TuttiSystem {
     pub fn create_export_context(&self) -> crate::ExportContext {
         use crate::transport::ExportConfig;
 
-        let transport_handle = TransportHandle::new(
-            self.transport.clone(),
-            self.click_state.clone(),
-        );
+        let transport_handle =
+            TransportHandle::new(self.transport.clone(), self.click_state.clone());
 
         crate::ExportContext::new(ExportConfig {
             start_beat: 0.0,
@@ -232,7 +249,7 @@ impl TuttiSystem {
     ///
     /// # Example
     /// ```ignore
-    /// let synth_id = system.graph(|net| {
+    /// let synth_id = system.graph_mut(|net| {
     ///     let id = net.add(Box::new(soundfont_unit));
     ///     net.pipe_output(id);
     ///     net.node(id).get_id()
@@ -333,12 +350,7 @@ impl TuttiSystemBuilder {
 
         let transport = Arc::new(TransportManager::new(sample_rate));
         let metering = Arc::new(MeteringManager::new(sample_rate));
-        let click_state = Arc::new(ClickState::new(
-            transport.current_beat().clone(),
-            transport.paused().clone(),
-            transport.recording().clone(),
-            transport.in_preroll().clone(),
-        ));
+        let click_state = Arc::new(ClickSettings::new());
 
         // Initialize PDC with outputs count (channels = outputs for now)
         let pdc = Arc::new(PdcManager::new(outputs, 0));
@@ -355,7 +367,26 @@ impl TuttiSystemBuilder {
             callback_state.set_net_backend(backend);
 
             // Set up click node for metronome (mixed into output automatically)
-            callback_state.set_click_node(click_state.clone(), sample_rate);
+            let click_transport = TransportHandle::new(transport.clone(), click_state.clone());
+            callback_state.set_click_node(click_transport, click_state.clone(), sample_rate);
+
+            // Create TransportClock for per-sample position advancement
+            let clock = TransportClock::new(
+                transport.tempo().clone(),
+                transport.paused().clone(),
+                sample_rate,
+            )
+            .with_seek(
+                transport.seek_target().clone(),
+                transport.seek_pending().clone(),
+            )
+            .with_loop(
+                transport.loop_enabled_flag().clone(),
+                transport.loop_start_beat_atomic().clone(),
+                transport.loop_end_beat_atomic().clone(),
+            )
+            .with_position_writeback(transport.current_beat().clone());
+            callback_state.set_transport_clock(clock);
 
             // Wire up MIDI input routing if configured
             #[cfg(feature = "midi")]
@@ -413,7 +444,7 @@ mod tests {
     fn test_graph_closure() {
         let system = TuttiSystem::builder().build().unwrap();
 
-        system.graph(|net| {
+        system.graph_mut(|net| {
             use fundsp::prelude::*;
             let _node = net.add(sine_hz::<f32>(440.0));
         });

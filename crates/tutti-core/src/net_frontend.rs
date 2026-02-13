@@ -15,20 +15,29 @@ use crate::neural::{
 /// Metadata about a node in the graph
 #[derive(Debug, Clone)]
 pub struct NodeInfo {
-    /// Node ID
-    pub id: NodeId,
+    pub(crate) id: NodeId,
+    pub(crate) inputs: usize,
+    pub(crate) outputs: usize,
+    pub(crate) latency: usize,
+    pub(crate) type_name: String,
+}
 
-    /// Number of input channels
-    pub inputs: usize,
-
-    /// Number of output channels
-    pub outputs: usize,
-
-    /// Reported latency in samples (for PDC)
-    pub latency: usize,
-
-    /// Type name (from std::any::type_name)
-    pub type_name: String,
+impl NodeInfo {
+    pub fn id(&self) -> NodeId {
+        self.id
+    }
+    pub fn inputs(&self) -> usize {
+        self.inputs
+    }
+    pub fn outputs(&self) -> usize {
+        self.outputs
+    }
+    pub fn latency(&self) -> usize {
+        self.latency
+    }
+    pub fn type_name(&self) -> &str {
+        &self.type_name
+    }
 }
 
 /// Fluent handle for chaining node connections.
@@ -165,7 +174,7 @@ impl TuttiNet {
     ///
     /// # Example
     /// ```ignore
-    /// system.graph(|net| {
+    /// system.graph_mut(|net| {
     ///     let voice = builder.build_voice().unwrap();
     ///     net.add_neural(voice, builder.model_id()).master();
     /// });
@@ -268,6 +277,61 @@ impl TuttiNet {
     /// Connect a node's output to the graph output.
     pub fn pipe_output(&mut self, source: NodeId) {
         self.net.pipe_output(source);
+    }
+
+    /// Sum multiple stereo sources and route to the graph output.
+    ///
+    /// This is the standard way to route multiple tracks/sources to master.
+    /// Each source is assumed to have at least 2 output channels (stereo).
+    /// Left and right channels are summed independently.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let track1 = net.add(sampler1).id();
+    /// let track2 = net.add(sampler2).id();
+    /// let synth = net.add(sine_hz(440.0)).id();
+    /// net.mix_to_master(&[track1, track2, synth]);
+    /// ```
+    pub fn mix_to_master(&mut self, sources: &[NodeId]) {
+        use fundsp::prelude::*;
+
+        match sources.len() {
+            0 => {}
+            1 => {
+                self.net.pipe_output(sources[0]);
+            }
+            _ => {
+                // Pairwise stereo summing: for each additional source,
+                // create two join::<U2>() nodes (one per channel) to sum
+                // with the running accumulator.
+                let mut accum_id = sources[0];
+                let mut accum_l_port = 0;
+                let mut accum_r_port = 1;
+
+                for &src in &sources[1..] {
+                    // Sum left channels
+                    let sum_l = self.net.push(Box::new(join::<typenum::U2>()));
+                    self.net.connect(accum_id, accum_l_port, sum_l, 0);
+                    self.net.connect(src, 0, sum_l, 1);
+
+                    // Sum right channels
+                    let sum_r = self.net.push(Box::new(join::<typenum::U2>()));
+                    self.net.connect(accum_id, accum_r_port, sum_r, 0);
+                    self.net.connect(src, 1, sum_r, 1);
+
+                    // Pack L+R into a stereo node for the next iteration
+                    let stereo = self.net.push(Box::new(pass() | pass()));
+                    self.net.connect(sum_l, 0, stereo, 0);
+                    self.net.connect(sum_r, 0, stereo, 1);
+
+                    accum_id = stereo;
+                    accum_l_port = 0;
+                    accum_r_port = 1;
+                }
+
+                self.net.pipe_output(accum_id);
+            }
+        }
     }
 
     /// Connect the graph input to a node's input.

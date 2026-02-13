@@ -10,6 +10,8 @@
 pub mod registry;
 pub mod routing;
 pub mod snapshot;
+pub mod snapshot_reader;
+pub mod source;
 
 pub use tutti_midi::{
     event, input_source, Channel, ChannelModeMsg, ChannelVoiceMsg, ControlChange, MidiEvent,
@@ -20,3 +22,5 @@ pub use tutti_midi::{
 pub use registry::MidiRegistry;
 pub use routing::{MidiRoute, MidiRoutingSnapshot, MidiRoutingTable};
 pub use snapshot::{MidiSnapshot, TimedMidiEvent};
+pub use snapshot_reader::MidiSnapshotReader;
+pub use source::MidiSource;

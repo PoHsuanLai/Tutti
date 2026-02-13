@@ -52,6 +52,8 @@ pub struct TransportManager {
     loop_start_beat: Arc<AtomicDouble>,
     loop_end_beat: Arc<AtomicDouble>,
     motion_state: Arc<AtomicU8>,
+    seek_target: Arc<AtomicDouble>,
+    seek_pending: Arc<AtomicFlag>,
 
     // Tempo map
     tempo_map: Arc<ArcSwap<TempoMap>>,
@@ -92,6 +94,8 @@ impl TransportManager {
             loop_start_beat: Arc::new(AtomicDouble::new(0.0)),
             loop_end_beat: Arc::new(AtomicDouble::new(16.0)),
             motion_state: Arc::new(AtomicU8::new(MotionState::Stopped.to_u8())),
+            seek_target: Arc::new(AtomicDouble::new(0.0)),
+            seek_pending: Arc::new(AtomicFlag::new(false)),
             tempo_map: Arc::new(ArcSwap::new(Arc::new(tempo_map))),
             tempo_map_shared,
             sync_state: Arc::new(SyncState::new()),
@@ -140,6 +144,31 @@ impl TransportManager {
         &self.in_preroll
     }
 
+    /// Get the loop enabled flag Arc for sharing with TransportClock.
+    pub fn loop_enabled_flag(&self) -> &Arc<AtomicFlag> {
+        &self.loop_enabled
+    }
+
+    /// Get the loop start beat Arc for sharing with TransportClock.
+    pub fn loop_start_beat_atomic(&self) -> &Arc<AtomicDouble> {
+        &self.loop_start_beat
+    }
+
+    /// Get the loop end beat Arc for sharing with TransportClock.
+    pub fn loop_end_beat_atomic(&self) -> &Arc<AtomicDouble> {
+        &self.loop_end_beat
+    }
+
+    /// Get the seek target Arc for sharing with TransportClock.
+    pub fn seek_target(&self) -> &Arc<AtomicDouble> {
+        &self.seek_target
+    }
+
+    /// Get the seek pending flag Arc for sharing with TransportClock.
+    pub fn seek_pending(&self) -> &Arc<AtomicFlag> {
+        &self.seek_pending
+    }
+
     pub fn tempo_map_shared(&self) -> &Arc<ArcSwap<TempoMapSnapshot>> {
         &self.tempo_map_shared
     }
@@ -185,11 +214,9 @@ impl TransportManager {
     }
 
     pub fn get_loop_range(&self) -> Option<(f64, f64)> {
-        if self.loop_enabled.get() {
-            Some((self.loop_start_beat.get(), self.loop_end_beat.get()))
-        } else {
-            None
-        }
+        self.loop_enabled
+            .get()
+            .then(|| (self.loop_start_beat.get(), self.loop_end_beat.get()))
     }
 
     pub fn set_tempo(&self, bpm: f32) {
@@ -291,17 +318,26 @@ impl TransportManager {
 
     /// Toggle loop enabled/disabled.
     pub fn toggle_loop(&self) {
-        self.send_command(TransportEvent::ToggleLoop);
+        // Flip atomic immediately so readers see the change right away,
+        // then sync the FSM on the next audio callback.
+        let current = self.loop_enabled.get();
+        self.loop_enabled.set(!current);
+        self.send_command(TransportEvent::SetLoopEnabled(!current));
     }
 
     /// Set loop range (start and end in beats).
     pub fn set_loop_range_fsm(&self, start: f64, end: f64) {
+        // Set atomics immediately so advance_position_rt sees them right away
+        self.loop_start_beat.set(start);
+        self.loop_end_beat.set(end);
+        self.loop_enabled.set(true);
         let range = LoopRange::new(start, end);
         self.send_command(TransportEvent::SetLoopRange(range));
     }
 
     /// Clear loop range.
     pub fn clear_loop(&self) {
+        self.loop_enabled.set(false);
         self.send_command(TransportEvent::ClearLoop);
     }
 
@@ -349,6 +385,8 @@ impl TransportManager {
             }
             TransitionResult::Locating(pos) => {
                 self.current_beat.set(pos.beats);
+                self.seek_target.set(pos.beats);
+                self.seek_pending.set(true);
             }
             TransitionResult::LoopModeChanged(enabled) => {
                 self.loop_enabled.set(enabled);
@@ -360,7 +398,10 @@ impl TransportManager {
     }
 
     pub fn set_loop_enabled(&self, enabled: bool) {
+        // Set atomic immediately so readers see the change right away,
+        // then sync the FSM on the next audio callback.
         self.loop_enabled.set(enabled);
+        self.send_command(TransportEvent::SetLoopEnabled(enabled));
     }
 
     pub fn set_loop_range(&self, start: f64, end: f64) {
@@ -598,12 +639,14 @@ mod tests {
 
         manager.set_loop_range(2.0, 8.0);
         manager.set_loop_enabled(true);
+        manager.process_commands(); // flush FSM queue
 
         assert!(manager.is_loop_enabled());
         assert_eq!(manager.get_loop_range(), Some((2.0, 8.0)));
 
         // Disable loop
         manager.set_loop_enabled(false);
+        manager.process_commands();
         assert_eq!(manager.get_loop_range(), None);
     }
 

@@ -8,7 +8,7 @@ use fundsp::signal::SignalFrame;
 ///
 /// 1 input, 1 output. For mono edges in the graph where
 /// stereo `PdcDelayUnit` would be a channel-count mismatch.
-pub struct MonoPdcDelayUnit {
+pub(crate) struct MonoPdcDelayUnit {
     buffer: Vec<f32>,
     write_pos: usize,
     delay_samples: usize,

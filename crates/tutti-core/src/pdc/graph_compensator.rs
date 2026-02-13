@@ -12,30 +12,30 @@ use hashbrown::HashSet;
 
 /// Compensation needed at a specific node input port.
 #[derive(Debug, Clone)]
-pub struct PdcCompensation {
-    pub node_id: NodeId,
-    pub input_port: usize,
-    pub delay_samples: usize,
+pub(crate) struct PdcCompensation {
+    pub(crate) node_id: NodeId,
+    pub(crate) input_port: usize,
+    pub(crate) delay_samples: usize,
 }
 
 /// Compensation needed at a graph output channel.
 #[derive(Debug, Clone)]
-pub struct PdcOutputCompensation {
-    pub output_channel: usize,
-    pub delay_samples: usize,
+pub(crate) struct PdcOutputCompensation {
+    pub(crate) output_channel: usize,
+    pub(crate) delay_samples: usize,
 }
 
 /// Result of PDC graph analysis.
 #[derive(Debug, Clone, Default)]
-pub struct PdcAnalysis {
+pub(crate) struct PdcAnalysis {
     /// Per-input-port compensation delays.
-    pub compensations: Vec<PdcCompensation>,
+    pub(crate) compensations: Vec<PdcCompensation>,
     /// Per-output-channel compensation delays.
-    pub output_compensations: Vec<PdcOutputCompensation>,
+    pub(crate) output_compensations: Vec<PdcOutputCompensation>,
     /// Maximum latency across all paths to the output (total graph latency).
-    pub total_latency: usize,
+    pub(crate) total_latency: usize,
     /// Per-node latency cache (for node_info display).
-    pub node_latencies: HashMap<NodeId, usize>,
+    pub(crate) node_latencies: HashMap<NodeId, usize>,
 }
 
 /// Analyze the graph and compute per-input compensation delays.
@@ -43,7 +43,7 @@ pub struct PdcAnalysis {
 /// Requires `&mut Net` because `AudioUnit::latency()` takes `&mut self`.
 ///
 /// Returns empty analysis if all nodes have zero latency (common fast path).
-pub fn analyze(net: &mut Net) -> PdcAnalysis {
+pub(crate) fn analyze(net: &mut Net) -> PdcAnalysis {
     let node_ids: Vec<NodeId> = net.ids().copied().collect();
 
     if node_ids.is_empty() {
@@ -51,19 +51,16 @@ pub fn analyze(net: &mut Net) -> PdcAnalysis {
     }
 
     // Step 1: Query latency for each node
-    let mut node_latencies: HashMap<NodeId, usize> = HashMap::with_capacity(node_ids.len());
-    let mut has_any_latency = false;
-
-    for &id in &node_ids {
-        let lat = net.node_mut(id).latency().unwrap_or(0.0).round() as usize;
-        if lat > 0 {
-            has_any_latency = true;
-        }
-        node_latencies.insert(id, lat);
-    }
+    let node_latencies: HashMap<NodeId, usize> = node_ids
+        .iter()
+        .map(|&id| {
+            let lat = net.node_mut(id).latency().unwrap_or(0.0).round() as usize;
+            (id, lat)
+        })
+        .collect();
 
     // Fast path: no latency in the graph
-    if !has_any_latency {
+    if !node_latencies.values().any(|&lat| lat > 0) {
         return PdcAnalysis {
             node_latencies,
             ..Default::default()
@@ -79,16 +76,18 @@ pub fn analyze(net: &mut Net) -> PdcAnalysis {
 
     for &id in &topo_order {
         let inputs = net.inputs_in(id);
-        let mut max_arrival: usize = 0;
-
-        for port in 0..inputs {
-            if let Source::Local(src_id, _) = net.source(id, port) {
-                let src_arrival = arrival_time.get(&src_id).copied().unwrap_or(0);
-                let src_lat = node_latencies.get(&src_id).copied().unwrap_or(0);
-                max_arrival = max_arrival.max(src_arrival + src_lat);
-            }
-            // Global and Zero sources have arrival_time = 0
-        }
+        let max_arrival = (0..inputs)
+            .filter_map(|port| {
+                if let Source::Local(src_id, _) = net.source(id, port) {
+                    let src_arrival = arrival_time.get(&src_id).copied().unwrap_or(0);
+                    let src_lat = node_latencies.get(&src_id).copied().unwrap_or(0);
+                    Some(src_arrival + src_lat)
+                } else {
+                    None
+                }
+            })
+            .max()
+            .unwrap_or(0);
 
         arrival_time.insert(id, max_arrival);
     }
@@ -96,39 +95,40 @@ pub fn analyze(net: &mut Net) -> PdcAnalysis {
     // Step 4: Compute per-input compensation at fan-in points
     let mut compensations = Vec::new();
 
+    // Helper: compute arrival time at a source port
+    let source_arrival = |src_id: NodeId| -> usize {
+        arrival_time.get(&src_id).copied().unwrap_or(0)
+            + node_latencies.get(&src_id).copied().unwrap_or(0)
+    };
+
     for &id in &topo_order {
         let inputs = net.inputs_in(id);
         if inputs < 2 {
             continue; // No fan-in, no compensation needed
         }
 
-        // Compute max input arrival for this node
-        let mut max_input_arrival: usize = 0;
-        for port in 0..inputs {
-            if let Source::Local(src_id, _) = net.source(id, port) {
-                let src_arrival = arrival_time.get(&src_id).copied().unwrap_or(0);
-                let src_lat = node_latencies.get(&src_id).copied().unwrap_or(0);
-                max_input_arrival = max_input_arrival.max(src_arrival + src_lat);
-            }
-        }
+        let max_input_arrival = (0..inputs)
+            .filter_map(|port| match net.source(id, port) {
+                Source::Local(src_id, _) => Some(source_arrival(src_id)),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
 
         // Compute per-input compensation
-        for port in 0..inputs {
+        compensations.extend((0..inputs).filter_map(|port| {
             if let Source::Local(src_id, _) = net.source(id, port) {
-                let src_arrival = arrival_time.get(&src_id).copied().unwrap_or(0);
-                let src_lat = node_latencies.get(&src_id).copied().unwrap_or(0);
-                let input_arrival = src_arrival + src_lat;
-                let delay = max_input_arrival.saturating_sub(input_arrival);
-
+                let delay = max_input_arrival.saturating_sub(source_arrival(src_id));
                 if delay > 0 {
-                    compensations.push(PdcCompensation {
+                    return Some(PdcCompensation {
                         node_id: id,
                         input_port: port,
                         delay_samples: delay,
                     });
                 }
             }
-        }
+            None
+        }));
     }
 
     // Step 5: Compute output compensation
@@ -136,42 +136,36 @@ pub fn analyze(net: &mut Net) -> PdcAnalysis {
     let num_outputs = net.outputs();
 
     if num_outputs > 1 {
-        let mut max_output_arrival: usize = 0;
+        let max_output_arrival = (0..num_outputs)
+            .filter_map(|ch| match net.output_source(ch) {
+                Source::Local(src_id, _) => Some(source_arrival(src_id)),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
 
-        for ch in 0..num_outputs {
+        output_compensations.extend((0..num_outputs).filter_map(|ch| {
             if let Source::Local(src_id, _) = net.output_source(ch) {
-                let src_arrival = arrival_time.get(&src_id).copied().unwrap_or(0);
-                let src_lat = node_latencies.get(&src_id).copied().unwrap_or(0);
-                max_output_arrival = max_output_arrival.max(src_arrival + src_lat);
-            }
-        }
-
-        for ch in 0..num_outputs {
-            if let Source::Local(src_id, _) = net.output_source(ch) {
-                let src_arrival = arrival_time.get(&src_id).copied().unwrap_or(0);
-                let src_lat = node_latencies.get(&src_id).copied().unwrap_or(0);
-                let input_arrival = src_arrival + src_lat;
-                let delay = max_output_arrival.saturating_sub(input_arrival);
-
+                let delay = max_output_arrival.saturating_sub(source_arrival(src_id));
                 if delay > 0 {
-                    output_compensations.push(PdcOutputCompensation {
+                    return Some(PdcOutputCompensation {
                         output_channel: ch,
                         delay_samples: delay,
                     });
                 }
             }
-        }
+            None
+        }));
     }
 
     // Compute total graph latency (max arrival at any output)
-    let mut total_latency: usize = 0;
-    for ch in 0..num_outputs {
-        if let Source::Local(src_id, _) = net.output_source(ch) {
-            let src_arrival = arrival_time.get(&src_id).copied().unwrap_or(0);
-            let src_lat = node_latencies.get(&src_id).copied().unwrap_or(0);
-            total_latency = total_latency.max(src_arrival + src_lat);
-        }
-    }
+    let total_latency = (0..num_outputs)
+        .filter_map(|ch| match net.output_source(ch) {
+            Source::Local(src_id, _) => Some(source_arrival(src_id)),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
 
     PdcAnalysis {
         compensations,

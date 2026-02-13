@@ -5,7 +5,7 @@ use crate::compat::Vec;
 use core::time::Duration;
 
 /// Pre-allocated buffers for RT-safe metering (deinterleave scratch space).
-pub struct MeteringContext {
+pub(crate) struct MeteringContext {
     left_buf: Vec<f32>,
     right_buf: Vec<f32>,
 }
@@ -34,10 +34,14 @@ impl MeteringContext {
     /// Deinterleave stereo output into left/right buffers.
     #[inline]
     fn deinterleave(&mut self, output: &[f32], frames: usize) {
-        for i in 0..frames {
-            self.left_buf[i] = output[i * 2];
-            self.right_buf[i] = output[i * 2 + 1];
-        }
+        output
+            .chunks_exact(2)
+            .take(frames)
+            .zip(self.left_buf.iter_mut().zip(self.right_buf.iter_mut()))
+            .for_each(|(ch, (l, r))| {
+                *l = ch[0];
+                *r = ch[1];
+            });
     }
 }
 
@@ -53,7 +57,7 @@ impl MeteringManager {
     /// Called from audio callback after DSP processing.
     /// `output` is interleaved stereo f32, `frames` is the number of stereo frames.
     #[inline]
-    pub fn update_rt(
+    pub(crate) fn update_rt(
         &self,
         output: &[f32],
         frames: usize,
@@ -89,19 +93,13 @@ impl MeteringManager {
             return;
         }
 
-        let mut peak_l: f32 = 0.0;
-        let mut peak_r: f32 = 0.0;
-        let mut sum_sq_l: f32 = 0.0;
-        let mut sum_sq_r: f32 = 0.0;
-
-        for i in 0..frames {
-            let l = output[i * 2];
-            let r = output[i * 2 + 1];
-            peak_l = peak_l.max(l.abs());
-            peak_r = peak_r.max(r.abs());
-            sum_sq_l += l * l;
-            sum_sq_r += r * r;
-        }
+        let (peak_l, peak_r, sum_sq_l, sum_sq_r) = output.chunks_exact(2).take(frames).fold(
+            (0.0f32, 0.0f32, 0.0f32, 0.0f32),
+            |(pl, pr, sl, sr), ch| {
+                let (l, r) = (ch[0], ch[1]);
+                (pl.max(l.abs()), pr.max(r.abs()), sl + l * l, sr + r * r)
+            },
+        );
 
         let rms_l = (sum_sq_l / frames as f32).sqrt();
         let rms_r = (sum_sq_r / frames as f32).sqrt();

@@ -18,7 +18,7 @@ let system = TuttiSystem::builder()
     .build()?;
 
 // Build audio graph
-system.graph(|net| {
+system.graph_mut(|net| {
     use fundsp::prelude::*;
     let osc = net.add(Box::new(sine_hz(440.0)));
     net.pipe_output(osc);
